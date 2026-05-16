@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { wsUrl } from "../lib/api";
+import { apiUrl, wsUrl } from "../lib/api";
+import { ansiToHtml, processCapture } from "../lib/ansi";
 import type { AgentState } from "../lib/types";
 import { QuickCommandBar } from "./QuickCommandBar";
 
@@ -43,6 +44,8 @@ const THEME = {
 export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [mobileCapture, setMobileCapture] = useState("");
+  const mobileMirror = typeof window !== "undefined" && window.innerWidth < 640;
 
   // Keep callbacks in refs so terminal effect doesn't re-run on every render
   const onCloseRef = useRef(onClose);
@@ -61,7 +64,7 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
 
     const term = new Terminal({
       theme: THEME,
-      fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', monospace",
+      fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace",
       fontSize: mobileTerminal ? 14 : 13,
       lineHeight: mobileTerminal ? 1.45 : 1.35,
       cursorBlink: !readOnly,
@@ -78,6 +81,7 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
     let binSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
+    const decoder = new TextDecoder();
 
     // Defer open until container has dimensions (avoids "dimensions" crash on first render)
     const openTimer = setTimeout(() => {
@@ -114,8 +118,9 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
             }
           } catch {}
         } else {
-          // Binary PTY data → render in xterm.js
-          term.write(new Uint8Array(e.data));
+          // Binary PTY data is UTF-8; decode as a stream so Thai and other
+          // multibyte glyphs survive chunk boundaries.
+          term.write(decoder.decode(new Uint8Array(e.data), { stream: true }));
         }
       };
 
@@ -182,14 +187,48 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
     };
   }, [target]);
 
+  useEffect(() => {
+    if (!mobileMirror) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function pollCapture() {
+      try {
+        const res = await fetch(apiUrl(`/api/capture?target=${encodeURIComponent(target)}`));
+        const data = await res.json();
+        if (active) setMobileCapture(data.content || "");
+      } catch {}
+      if (active) timer = setTimeout(pollCapture, 1500);
+    }
+    pollCapture();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [mobileMirror, target]);
+
   return (
     <>
       <div
-        ref={containerRef}
         data-testid="xterminal-content"
-        className="h-full w-full overflow-auto pb-[132px] sm:pb-0"
+        className="relative h-full w-full overflow-hidden pb-[132px] sm:pb-0"
         style={{ touchAction: "pan-x pan-y" }}
-      />
+      >
+        <div
+          ref={containerRef}
+          className={`h-full w-full ${mobileMirror ? "pointer-events-none opacity-0" : "overflow-auto"}`}
+        />
+        {mobileMirror && (
+          <pre
+            className="absolute inset-0 overflow-y-auto overflow-x-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-[1.55] text-[#cdd6f4]"
+            style={{
+              fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace",
+              wordBreak: "normal",
+              overflowWrap: "break-word",
+            }}
+            dangerouslySetInnerHTML={{ __html: ansiToHtml(processCapture(mobileCapture)) }}
+          />
+        )}
+      </div>
       <QuickCommandBar
         targetLabel={target}
         disabled={readOnly}

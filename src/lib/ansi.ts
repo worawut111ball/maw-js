@@ -59,7 +59,7 @@ export function ansiToHtml(text: string): string {
 }
 
 export function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+  return s.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 /** Shorten long separator lines and trim trailing blanks (shared across all previews) */

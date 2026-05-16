@@ -39,6 +39,8 @@ const ROOT_MORE = [
   { id: "federation", label: "Federation", href: "#federation", icon: "⛓" },
   { id: "vs", label: "VS", href: "#vs", icon: "⚔" },
   { id: "worktrees", label: "Worktrees", href: "#worktrees", icon: "▤" },
+  { id: "skills", label: "Skills", href: "#skills", icon: "📘" },
+  { id: "yailai", label: "Yailai", href: "#yailai", icon: "🔍" },
   { id: "config", label: "Config", href: "#config", icon: "⚙" },
   { id: "orbital", label: "Orbital", href: "#orbital", icon: "◌" },
   { id: "overview", label: "Overview", href: "#overview", icon: "◎" },

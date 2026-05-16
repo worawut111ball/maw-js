@@ -19,7 +19,7 @@ export function ThreadCard({ pair, entries, viewAs, defaultExpanded, highlighted
       style={{ background: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.06)" }}
     >
       <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        className="w-full flex items-center gap-3 px-3 sm:px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center -space-x-2">
@@ -27,10 +27,10 @@ export function ThreadCard({ pair, entries, viewAs, defaultExpanded, highlighted
           <ChibiAvatar name={b} size={28} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[12px] font-bold capitalize" style={{ color: agentColor(a) }}>{displayName(a)}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[12px] font-bold capitalize truncate" style={{ color: agentColor(a) }}>{displayName(a)}</span>
             <span className="text-[10px] text-white/15">&</span>
-            <span className="text-[12px] font-bold capitalize" style={{ color: agentColor(b) }}>{displayName(b)}</span>
+            <span className="text-[12px] font-bold capitalize truncate" style={{ color: agentColor(b) }}>{displayName(b)}</span>
             <span className="text-[10px] text-white/20 font-mono ml-1">{entries.length}</span>
           </div>
           <p className="text-[11px] text-white/25 truncate mt-0.5">

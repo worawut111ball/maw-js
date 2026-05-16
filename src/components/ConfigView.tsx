@@ -74,7 +74,7 @@ function ConnectionSettings() {
         <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: activeHost ? "#c084fc" : "#4caf50" }} />
         <span className="text-[10px] font-mono text-white/40 truncate">{currentDisplay}</span>
       </div>
-      <div className="flex gap-1 mb-1">
+      <div className="flex flex-wrap gap-1 mb-1">
         <input
           type="text"
           value={host}
@@ -87,14 +87,14 @@ function ConnectionSettings() {
         />
       </div>
       <div className="flex gap-1 mb-1">
-        <button onClick={() => testConnection(host)} disabled={testing || !host.trim()} className="text-[10px] font-mono px-2 py-1 rounded bg-cyan-400/10 text-cyan-400/70 hover:text-cyan-400 transition-colors disabled:opacity-30">
+        <button onClick={() => testConnection(host)} disabled={testing || !host.trim()} className="min-h-8 text-[10px] font-mono px-2 py-1 rounded bg-cyan-400/10 text-cyan-400/70 hover:text-cyan-400 transition-colors disabled:opacity-30">
           {testing ? "..." : "Test"}
         </button>
-        <button onClick={handleSave} className="text-[10px] font-mono px-2 py-1 rounded bg-purple-400/10 text-purple-400/70 hover:text-purple-400 transition-colors">
+        <button onClick={handleSave} className="min-h-8 text-[10px] font-mono px-2 py-1 rounded bg-purple-400/10 text-purple-400/70 hover:text-purple-400 transition-colors">
           Save
         </button>
         {getStoredHost() && (
-          <button onClick={handleClear} className="text-[10px] font-mono px-2 py-1 rounded bg-red-400/10 text-red-400/70 hover:text-red-400 transition-colors">
+          <button onClick={handleClear} className="min-h-8 text-[10px] font-mono px-2 py-1 rounded bg-red-400/10 text-red-400/70 hover:text-red-400 transition-colors">
             Clear
           </button>
         )}
@@ -162,7 +162,7 @@ function PinSettings() {
           className="flex-1 min-w-0 bg-transparent text-white/80 outline-none font-mono text-[11px] px-1.5 py-1 rounded border border-white/10 [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
           style={{ WebkitAppearance: "none" as const }}
         />
-        <button onClick={handleSave} className="text-[10px] font-mono px-2 py-1 rounded bg-cyan-400/10 text-cyan-400/70 hover:text-cyan-400 transition-colors">
+        <button onClick={handleSave} className="min-h-8 text-[10px] font-mono px-2 py-1 rounded bg-cyan-400/10 text-cyan-400/70 hover:text-cyan-400 transition-colors">
           {pin ? "Set" : "Clear"}
         </button>
       </div>
@@ -303,14 +303,14 @@ export const ConfigView = memo(function ConfigView() {
   }, [dirty, handleSave]);
 
   return (
-    <div className="flex-1 flex min-h-0 mx-4 sm:mx-6 mb-3 rounded-2xl overflow-hidden border border-white/[0.06]">
+    <div className="flex-1 flex flex-col md:flex-row min-h-0 mx-2 sm:mx-6 mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06]">
       {/* Sidebar */}
-      <div className="w-[220px] flex-shrink-0 flex flex-col border-r border-white/[0.06]" style={{ background: "#08080e" }}>
+      <div className="w-full md:w-[240px] max-h-[42dvh] md:max-h-none flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-white/[0.06]" style={{ background: "#08080e" }}>
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06]">
           <span className="text-[10px] font-mono text-white/30 tracking-[2px] uppercase">Files</span>
           <button
             onClick={() => setShowNew(true)}
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded text-cyan-400/70 hover:text-cyan-400 transition-colors"
+            className="min-h-8 min-w-8 text-[10px] font-mono px-1.5 py-0.5 rounded text-cyan-400/70 hover:text-cyan-400 transition-colors"
             title="New fleet file"
           >
             +
@@ -352,7 +352,7 @@ export const ConfigView = memo(function ConfigView() {
               return (
                 <div
                   key={f.path}
-                  className="group flex items-center gap-2 py-1.5 cursor-pointer transition-colors"
+                  className="group flex items-center gap-2 py-2 cursor-pointer transition-colors"
                   style={{
                     background: isSelected ? "rgba(34,211,238,0.08)" : "transparent",
                     borderLeft: isSelected ? "2px solid #22d3ee" : "2px solid transparent",
@@ -373,10 +373,10 @@ export const ConfigView = memo(function ConfigView() {
                     {f.name.replace(/\.json(\.disabled)?$/, "")}
                   </span>
                   {isFleet && (
-                    <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
+                    <div className="flex md:hidden lg:group-hover:flex items-center gap-0.5 flex-shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); handleToggle(f.path); }}
-                        className="text-[9px] px-1 py-0.5 rounded hover:bg-white/5 transition-colors"
+                        className="min-h-7 text-[9px] px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors"
                         style={{ color: f.enabled ? "#ffa726" : "#4caf50" }}
                         title={f.enabled ? "Disable" : "Enable"}
                       >
@@ -384,7 +384,7 @@ export const ConfigView = memo(function ConfigView() {
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDelete(f.path); }}
-                        className="text-[9px] text-red-400/50 hover:text-red-400 px-1 py-0.5 rounded hover:bg-white/5 transition-colors"
+                        className="min-h-7 text-[9px] text-red-400/50 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors"
                         title="Delete"
                       >
                         x
@@ -430,9 +430,9 @@ export const ConfigView = memo(function ConfigView() {
       </div>
 
       {/* Editor area */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
+      <div className="flex-1 flex flex-col min-h-[48dvh] md:min-h-0 min-w-0">
         {/* Toolbar */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
+        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
           <span className="text-xs font-mono text-white/40 truncate">{selected || "no file selected"}</span>
           {dirty && <span className="text-[10px] font-mono text-amber-400/70 px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.15)" }}>modified</span>}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
@@ -444,7 +444,7 @@ export const ConfigView = memo(function ConfigView() {
             <button
               onClick={handleSave}
               disabled={saving || !dirty}
-              className="px-4 py-1.5 rounded-lg text-xs font-mono font-bold active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              className="min-h-9 px-3 sm:px-4 py-1.5 rounded-lg text-xs font-mono font-bold active:scale-95 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
               style={{
                 background: dirty ? "rgba(34,211,238,0.15)" : "rgba(255,255,255,0.04)",
                 color: dirty ? "#22d3ee" : "#555",
@@ -453,7 +453,7 @@ export const ConfigView = memo(function ConfigView() {
             >
               {saving ? "..." : "Save"}
             </button>
-            <span className="text-[9px] font-mono text-white/20">^S</span>
+            <span className="hidden sm:inline text-[9px] font-mono text-white/20">^S</span>
           </div>
         </div>
 

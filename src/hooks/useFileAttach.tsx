@@ -10,9 +10,15 @@ export interface Attachment {
   mimeType: string;
 }
 
+export type FileAttachMode = "camera" | "gallery" | "file";
+
+const FILE_ACCEPT = "image/*,application/pdf,.txt,.md,.json,.csv,.log,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.go,.rs,.sh,.sql,.zip,.tar.gz";
+const GALLERY_ACCEPT = "image/*,video/*";
+
 export function useFileAttach() {
   const [uploading, setUploading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [mode, setMode] = useState<FileAttachMode>("file");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const upload = useCallback(async (file: File): Promise<Attachment | null> => {
@@ -34,9 +40,13 @@ export function useFileAttach() {
     }
   }, []);
 
-  const pickFile = useCallback(() => {
-    inputRef.current?.click();
+  const pickFile = useCallback((nextMode: FileAttachMode = "file") => {
+    setMode(nextMode);
+    requestAnimationFrame(() => inputRef.current?.click());
   }, []);
+
+  const pickCamera = useCallback(() => pickFile("camera"), [pickFile]);
+  const pickGallery = useCallback(() => pickFile("gallery"), [pickFile]);
 
   const onFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -128,7 +138,10 @@ export function useFileAttach() {
     uploading,
     attachments,
     inputRef,
+    mode,
     pickFile,
+    pickCamera,
+    pickGallery,
     onFileChange,
     removeAttachment,
     clearAttachments,
@@ -141,17 +154,42 @@ export function useFileAttach() {
 }
 
 /** Tiny component for the hidden file input */
-export function FileInput({ inputRef, onChange }: { inputRef: React.RefObject<HTMLInputElement | null>; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
+export function FileInput({ inputRef, onChange, mode = "file" }: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  mode?: FileAttachMode;
+}) {
+  const accept = mode === "file" ? FILE_ACCEPT : mode === "camera" ? "image/*" : GALLERY_ACCEPT;
+  const capture = mode === "camera" ? "environment" : undefined;
+
   return (
     <input
+      data-testid="file-input"
       ref={inputRef}
       type="file"
-      multiple
-      accept="image/*,application/pdf,.txt,.md,.json,.csv,.log,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.go,.rs,.sh,.sql,.zip,.tar.gz"
-      capture={undefined}
+      multiple={mode !== "camera"}
+      accept={accept}
+      capture={capture}
       onChange={onChange}
       className="hidden"
     />
+  );
+}
+
+export function FileAttachMenu({ onCamera, onGallery, onFile }: {
+  onCamera: () => void;
+  onGallery: () => void;
+  onFile: () => void;
+}) {
+  const buttonClass = "shrink-0 rounded-xl px-3 font-mono text-[12px] text-white/75 active:scale-95";
+  const buttonStyle = { minHeight: 44, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.045)" };
+
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+      <button data-testid="attach-camera" type="button" onClick={onCamera} className={buttonClass} style={buttonStyle}>📷 กล้อง</button>
+      <button data-testid="attach-gallery" type="button" onClick={onGallery} className={buttonClass} style={buttonStyle}>🖼 รูป</button>
+      <button data-testid="attach-file" type="button" onClick={onFile} className={buttonClass} style={buttonStyle}>📁 ไฟล์</button>
+    </div>
   );
 }
 

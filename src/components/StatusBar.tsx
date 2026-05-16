@@ -15,11 +15,11 @@ function SoundButton({ muted, onToggleMute }: { muted: boolean; onToggleMute: ()
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex-shrink-0">
       <button
         onClick={() => setOpen(!open)}
         onContextMenu={(e) => { e.preventDefault(); onToggleMute(); }}
-        className="px-2.5 py-1.5 rounded-lg text-xs font-mono active:scale-95 transition-all whitespace-nowrap"
+        className="min-h-9 px-2.5 py-1.5 rounded-lg text-xs font-mono active:scale-95 transition-all whitespace-nowrap"
         style={{
           background: muted ? "rgba(239,83,80,0.15)" : "rgba(76,175,80,0.15)",
           color: muted ? "#ef5350" : "#4caf50",
@@ -30,7 +30,7 @@ function SoundButton({ muted, onToggleMute }: { muted: boolean; onToggleMute: ()
         {muted ? "🔇" : SOUND_PROFILES.find(p => p.id === current)?.emoji || "🔊"}
       </button>
       {open && (
-        <div className="absolute top-full right-0 mt-2 rounded-xl overflow-hidden z-50" style={{ background: "rgba(13,13,24,0.95)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(12px)", minWidth: 180 }}>
+        <div className="absolute top-full right-0 mt-2 rounded-xl overflow-hidden z-50 max-w-[calc(100vw-24px)]" style={{ background: "rgba(13,13,24,0.95)", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(12px)", minWidth: 180 }}>
           {/* Mute toggle */}
           <button onClick={() => { onToggleMute(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.06]"
             style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -81,6 +81,8 @@ const NAV_ITEMS = [
   { href: "/federation_2d.html", label: "2D", id: "federation-2d" },
   // Board, Loops, Jarvis, Fame, BoB removed — no upstream backends
   // (from BankCurfew's fork, PR #19). Files kept per Nothing is Deleted.
+  { href: "#skills", label: "Skills", id: "skills" },
+  { href: "#yailai", label: "ป้าไล", id: "yailai" },
   { href: "#config", label: "Config", id: "config" },
 ];
 
@@ -117,40 +119,40 @@ function useFleetTotal() {
 export const StatusBar = memo(function StatusBar({ connected, agentCount, sessionCount, tabCount = 0, activeView = "office", askCount = 0, onInbox, onJump, muted, onToggleMute, children }: StatusBarProps) {
   const { total } = useFleetTotal();
   return (
-    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-2 mx-4 sm:mx-6 mt-3 px-4 sm:px-6 py-2.5 rounded-2xl bg-black/50 backdrop-blur-xl border border-white/[0.06] shadow-[0_4px_30px_rgba(0,0,0,0.4)]">
-      <a href="#office" className="text-base sm:text-lg font-bold tracking-[4px] sm:tracking-[6px] text-cyan-400 uppercase whitespace-nowrap hover:text-cyan-300 transition-colors">
+    <header data-testid="status-bar" className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-2 mx-2 sm:mx-6 mt-2 sm:mt-3 px-3 sm:px-6 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl bg-black/50 backdrop-blur-xl border border-white/[0.06] shadow-[0_4px_30px_rgba(0,0,0,0.4)] overflow-visible">
+      <a href="#office" className="text-[13px] sm:text-lg font-bold tracking-[3px] sm:tracking-[6px] text-cyan-400 uppercase whitespace-nowrap hover:text-cyan-300 transition-colors flex-shrink-0">
         ARRA Office
       </a>
 
-      <span className="flex items-center gap-1.5 text-sm text-white/70">
+      <span className="flex items-center gap-1.5 text-xs sm:text-sm text-white/70 whitespace-nowrap flex-shrink-0">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${connected ? "bg-emerald-400 shadow-[0_0_6px_#4caf50]" : "bg-red-400 animate-pulse"}`} />
         {connected ? "LIVE" : "..."}
       </span>
 
       {isRemote && activeHost && (
-        <a href="#config" className="text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap no-underline hover:brightness-125 transition-all" style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc", border: "1px solid rgba(168,85,247,0.2)" }}>
+        <a href="#config" className="hidden sm:inline-block text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap no-underline hover:brightness-125 transition-all" style={{ background: "rgba(168,85,247,0.12)", color: "#c084fc", border: "1px solid rgba(168,85,247,0.2)" }}>
           {activeHost}
         </a>
       )}
 
-      <span className="text-sm text-white/70 whitespace-nowrap">
+      <span className="text-xs sm:text-sm text-white/70 whitespace-nowrap flex-shrink-0">
         <strong className="text-cyan-400">{agentCount}</strong> agents
       </span>
-      <span className="text-sm text-white/70 whitespace-nowrap">
+      <span className="hidden sm:inline text-xs sm:text-sm text-white/70 whitespace-nowrap flex-shrink-0">
         <strong className="text-purple-400">{sessionCount}</strong> rooms
       </span>
       {tabCount > 0 && (
-        <span className="text-sm text-white/70 whitespace-nowrap">
+        <span className="hidden sm:inline text-sm text-white/70 whitespace-nowrap flex-shrink-0">
           <strong className="text-green-400">{tabCount}</strong> tabs
         </span>
       )}
-      <span className="text-[10px] text-white/20 font-mono whitespace-nowrap">
+      <span className="hidden md:inline text-[10px] text-white/20 font-mono whitespace-nowrap flex-shrink-0">
         v{__MAW_VERSION__} · {__MAW_BUILD__}
       </span>
 
       {total && total.tokens > 0 && (
         <span
-          className="text-[10px] font-mono whitespace-nowrap flex items-center gap-1"
+          className="hidden sm:flex text-[10px] font-mono whitespace-nowrap items-center gap-1 flex-shrink-0"
           title={`Fleet total — ${formatTokens(total.tokens)} tokens · $${total.cost.toFixed(2)} est · ${total.sessions} sessions · ${total.agents} agents (source: /api/costs)`}
           aria-label={`Fleet total ${formatTokens(total.tokens)} tokens, estimated cost ${total.cost.toFixed(2)} dollars`}
         >
@@ -168,7 +170,7 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
       {isTouch && onJump && (
         <button
           onClick={onJump}
-          className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold active:scale-95 transition-all whitespace-nowrap"
+          className="min-h-9 px-3 py-1.5 rounded-lg text-xs font-mono font-bold active:scale-95 transition-all whitespace-nowrap flex-shrink-0"
           style={{ background: "rgba(34,211,238,0.15)", color: "#22d3ee", border: "1px solid rgba(34,211,238,0.25)" }}
           title="Jump to agent (⌘J)"
         >
@@ -176,9 +178,9 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
         </button>
       )}
 
-      <nav className={`${isTouch && onJump ? "" : "ml-auto "}flex items-center gap-3 sm:gap-4 text-sm`}>
+      <nav className={`${isTouch && onJump ? "" : "sm:ml-auto "}order-last sm:order-none w-full sm:w-auto flex items-center gap-2 sm:gap-4 text-sm overflow-x-auto scrollbar-none -mx-1 px-1 py-1 sm:m-0 sm:p-0`}>
         {onInbox && (
-          <button onClick={onInbox} className="relative transition-colors whitespace-nowrap text-white/50 hover:text-white/80 cursor-pointer" title="Inbox (i)">
+          <button onClick={onInbox} className="relative transition-colors whitespace-nowrap text-white/50 hover:text-white/80 cursor-pointer px-1.5 py-1 flex-shrink-0" title="Inbox (i)">
             Inbox
             {askCount > 0 && (
               <span className="absolute -top-1.5 -right-3 min-w-[18px] h-[18px] flex items-center justify-center rounded-full text-[10px] font-bold text-white bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]">
@@ -191,7 +193,7 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
           <a
             key={item.id}
             href={item.href}
-            className={`transition-colors whitespace-nowrap ${
+            className={`transition-colors whitespace-nowrap px-1.5 py-1 flex-shrink-0 ${
               activeView === item.id
                 ? "text-cyan-400 font-bold"
                 : "text-white/50 hover:text-white/80"

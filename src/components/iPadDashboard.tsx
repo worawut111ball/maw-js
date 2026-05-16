@@ -4,8 +4,9 @@ import { useSessions } from "../hooks/useSessions";
 import { useFleetStore } from "../lib/store";
 import { agentColor } from "../lib/constants";
 import { ChibiPortrait } from "./ChibiPortrait";
-import { useFileAttach, FileInput, AttachmentChips } from "../hooks/useFileAttach";
+import { useFileAttach, FileInput, AttachmentChips, FileAttachMenu } from "../hooks/useFileAttach";
 import { useDevice } from "../hooks/useDevice";
+import { useViewportInset } from "../hooks/useViewportInset";
 import { FULL_COMMANDS } from "../quickCommands";
 import type { AgentState, PaneStatus } from "../lib/types";
 
@@ -106,7 +107,22 @@ function TerminalPanel({ agent, send }: { agent: AgentState; send: (msg: object)
   const contentRef = useRef("");
   const color = agentColor(agent.name);
   const name = agent.name.replace(/-oracle$/i, "");
-  const { uploading, attachments, inputRef: fileRef, pickFile, onFileChange, removeAttachment, clearAttachments, buildMessage, drag, onPaste } = useFileAttach();
+  const viewportInset = useViewportInset();
+  const {
+    uploading,
+    attachments,
+    inputRef: fileRef,
+    mode: fileMode,
+    pickFile,
+    pickCamera,
+    pickGallery,
+    onFileChange,
+    removeAttachment,
+    clearAttachments,
+    buildMessage,
+    drag,
+    onPaste,
+  } = useFileAttach();
 
   // Poll capture
   useEffect(() => {
@@ -182,19 +198,26 @@ function TerminalPanel({ agent, send }: { agent: AgentState; send: (msg: object)
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0" style={{ background: "#0e0e18", borderTop: "1px solid rgba(255,255,255,0.06)" }} onPaste={onPaste} {...drag}>
-        <FileInput inputRef={fileRef} onChange={onFileChange} />
+      <div
+        className="flex-shrink-0"
+        style={{
+          background: "#0e0e18",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${viewportInset}px)`,
+        }}
+        onPaste={onPaste}
+        {...drag}
+      >
+        <FileInput inputRef={fileRef} onChange={onFileChange} mode={fileMode} />
         {(attachments.length > 0 || uploading) && (
           <div className="px-4 pt-2">
             <AttachmentChips attachments={attachments} onRemove={removeAttachment} uploading={uploading} />
           </div>
         )}
+        <div className="px-4 pt-3">
+          <FileAttachMenu onCamera={pickCamera} onGallery={pickGallery} onFile={() => pickFile("file")} />
+        </div>
         <div className="flex items-center gap-3 px-4 py-3">
-          <button onClick={pickFile} className="text-white/30 hover:text-cyan-400 transition-colors shrink-0" title="Attach file">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
           <span className="text-cyan-400 font-bold font-mono text-lg shrink-0">❯</span>
           <textarea ref={inputRef as any} defaultValue=""
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}

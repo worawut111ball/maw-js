@@ -199,7 +199,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       style={{
         background: "#0a0a0f",
         width: compact ? "100%" : PREVIEW_CARD.width,
-        height: compact ? "100%" : "calc(100vh - 120px)",
+        height: compact ? "100%" : "min(calc(100dvh - 104px), calc(100vh - 104px))",
         maxHeight: compact ? "100%" : PREVIEW_CARD.maxHeight,
       }}
       onMouseDown={(e) => {
@@ -244,14 +244,14 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
         </div>
       ) : (
       <div
-        className="relative flex flex-col items-center pt-6 pb-4 px-4"
+        className="relative flex flex-col items-center px-4 py-3 sm:pt-6 sm:pb-4"
         style={{
           background: `linear-gradient(180deg, ${accent}15 0%, transparent 100%)`,
           borderBottom: `1px solid ${accent}20`,
         }}
       >
         {/* Big chibi SVG avatar */}
-        <svg width={100} height={90} viewBox="-40 -45 80 80">
+        <svg width={82} height={72} viewBox="-40 -45 80 80" className="sm:h-[90px] sm:w-[100px]">
           {/* Aura */}
           {agent.status === "busy" && (
             <>
@@ -370,7 +370,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
 
         {/* Name + status */}
         <h2
-          className="mt-2 text-base font-bold tracking-[3px] uppercase"
+          className="mt-1 text-sm font-bold tracking-[3px] uppercase sm:mt-2 sm:text-base"
           style={{ color: accent }}
         >
           {displayName}
@@ -457,10 +457,11 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
         )}
       </div>
 
-      <div className="relative flex-1" style={{ background: "#08080c" }}>
+      <div className="relative flex-1 min-h-0" style={{ background: "#08080c" }}>
         <div
           ref={termRef}
-          className="absolute inset-0 px-3 py-2 overflow-y-auto overflow-x-auto font-mono text-[10px] leading-[1.4] text-[#cdd6f4] whitespace-pre break-normal"
+          className="absolute inset-0 overflow-y-auto overflow-x-auto whitespace-pre px-3 py-2 font-mono text-[10px] leading-[1.45] text-[#cdd6f4] sm:text-[11px]"
+          style={{ fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace", wordBreak: "normal", overflowWrap: "normal" }}
           dangerouslySetInnerHTML={{ __html: ansiToHtml(processCapture(content)) }}
         />
         {pinned && send && (
@@ -498,7 +499,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
             value={inputBuf}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent text-white/90 outline-none caret-cyan-400 font-mono text-xs [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
+            className="min-w-0 flex-1 bg-transparent text-white/90 outline-none caret-cyan-400 font-mono text-xs [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
             style={{ caretColor: "#22d3ee", WebkitAppearance: "none" }}
             inputMode="text"
             enterKeyHint="send"
@@ -546,7 +547,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
               prevInputRef.current = "";
               inputRef.current?.focus();
             }}
-            className="shrink-0 px-4 py-2 rounded-lg bg-cyan-500 text-black text-xs font-bold cursor-pointer hover:bg-cyan-400 active:bg-cyan-600 transition-colors shadow-lg shadow-cyan-500/20"
+            className="shrink-0 px-3 py-2 sm:px-4 rounded-lg bg-cyan-500 text-black text-xs font-bold cursor-pointer hover:bg-cyan-400 active:bg-cyan-600 transition-colors shadow-lg shadow-cyan-500/20"
           >
             SEND
           </button>
@@ -559,7 +560,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
 
       {/* Quick command shortcuts */}
       {pinned && send && (
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0a14] border-t border-white/[0.04] overflow-x-auto">
+        <div className="flex items-center gap-1.5 overflow-x-auto bg-[#0a0a14] px-3 py-2 border-t border-white/[0.04] scrollbar-none" style={{ touchAction: "pan-x" }}>
           {[
             { label: "y", text: "y\r", color: "#22C55E" },
             { label: "n", text: "n\r", color: "#ef5350" },
@@ -580,7 +581,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
                 addEvent?.(agent.target, "command", cmd.label);
                 inputRef.current?.focus();
               }}
-              className="shrink-0 px-2.5 py-1 rounded-md text-[10px] font-mono cursor-pointer active:scale-90 transition-all"
+              className="min-h-10 shrink-0 rounded-lg px-3 py-1 text-[10px] font-mono cursor-pointer active:scale-90 transition-all"
               style={{ background: `${cmd.color}15`, color: cmd.color, border: `1px solid ${cmd.color}25` }}
             >
               {cmd.label}

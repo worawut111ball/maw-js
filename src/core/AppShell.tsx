@@ -8,6 +8,7 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { useSessions } from "../hooks/useSessions";
 import { useFleetStore } from "../lib/store";
 import { StatusBar } from "../components/StatusBar";
+import { BottomNav } from "../components/BottomNav";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { PinLock } from "../components/PinLock";
 import { setSoundMuted } from "../lib/sounds";
@@ -54,8 +55,8 @@ export function AppShell({ view, fullHeight, children }: AppShellProps) {
   }, [send]);
 
   const wrapperClass = fullHeight
-    ? "relative flex flex-col h-screen overflow-hidden"
-    : "relative min-h-screen";
+    ? "mobile-app-shell relative flex flex-col h-[100dvh] overflow-hidden pb-[72px] sm:pb-0"
+    : "mobile-app-shell relative min-h-screen overflow-x-hidden pb-[72px] sm:pb-0";
 
   const ctx: AppContext = {
     sessions, agents, eventLog, addEvent, feedEvents, feedActive, agentFeedLog, teams,
@@ -66,7 +67,7 @@ export function AppShell({ view, fullHeight, children }: AppShellProps) {
     <ErrorBoundary>
       <PinLock>
         <div className={wrapperClass} style={{ background: "#020208" }}>
-          <div className={`relative z-10${fullHeight ? " flex-shrink-0" : ""}`}>
+          <div className={`mobile-top-status relative z-10 hidden sm:block${fullHeight ? " flex-shrink-0" : ""}`}>
             <StatusBar
               connected={connected}
               agentCount={agents.length}
@@ -81,6 +82,7 @@ export function AppShell({ view, fullHeight, children }: AppShellProps) {
             />
           </div>
           {children(ctx)}
+          <BottomNav activeView={view} askCount={askCount} />
           {reconnecting && (
             <div className="fixed inset-0 z-[9998] flex items-center justify-center pointer-events-none">
               <div className="pointer-events-auto text-center px-8 py-6 rounded-2xl backdrop-blur-xl" style={{ background: "rgba(0,0,0,0.85)", border: "1px solid rgba(239,68,68,0.3)" }}>

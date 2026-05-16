@@ -3,6 +3,8 @@ import { ansiToHtml } from "../lib/ansi";
 import { roomStyle } from "../lib/constants";
 import { wsUrl } from "../lib/api";
 import type { Session, AgentState } from "../lib/types";
+import { QuickCommandBar } from "./QuickCommandBar";
+import { useViewportInset } from "../hooks/useViewportInset";
 
 interface TerminalViewProps {
   sessions: Session[];
@@ -20,6 +22,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   const outputRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  const viewportInset = useViewportInset();
 
   // Own WebSocket for capture stream (separate from main fleet WS)
   useEffect(() => {
@@ -157,14 +160,14 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     : "";
 
   return (
-    <div className="flex mx-4 sm:mx-6 mb-3 rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100vh - 72px)" }}>
+    <div className="flex flex-col md:flex-row mx-2 sm:mx-6 mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06] pb-[128px] sm:pb-0" style={{ height: "calc(100dvh - 8px)" }}>
       {/* Sidebar */}
-      <div className="w-[220px] flex-shrink-0 flex flex-col border-r border-white/[0.06] overflow-y-auto" style={{ background: "#08080e" }}>
+      <div className="mobile-landscape-compact w-full md:w-[220px] max-h-[32dvh] md:max-h-none flex-shrink-0 flex md:flex-col gap-1 md:gap-0 border-b md:border-b-0 md:border-r border-white/[0.06] overflow-x-auto md:overflow-x-hidden overflow-y-hidden md:overflow-y-auto scrollbar-none p-1 md:p-0" style={{ background: "#08080e" }}>
         {sessions.map(session => {
           const style = roomStyle(session.name);
           return (
-            <div key={session.name} className="py-1">
-              <div className="px-4 py-1 text-[10px] uppercase tracking-[1px]" style={{ color: style.accent + "80" }}>
+            <div key={session.name} className="py-1 flex-shrink-0 min-w-[150px] md:min-w-0">
+              <div className="px-3 md:px-4 py-1 text-[10px] uppercase tracking-[1px] truncate" style={{ color: style.accent + "80" }}>
                 {session.name}
               </div>
               {session.windows.map(w => {
@@ -175,7 +178,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
                 return (
                   <div
                     key={target}
-                    className="flex items-center gap-2 py-1.5 cursor-pointer transition-colors"
+                    className="flex items-center gap-2 py-2 md:py-1.5 cursor-pointer transition-colors rounded-md md:rounded-none"
                     style={{
                       paddingLeft: 12, paddingRight: 12,
                       background: isSelected ? `${style.accent}12` : "transparent",
@@ -202,16 +205,16 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       {/* Terminal pane */}
       <div
         ref={termRef}
-        className="flex-1 flex flex-col min-w-0 outline-none"
+        className="flex-1 flex flex-col min-w-0 min-h-0 outline-none"
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         onClick={() => termRef.current?.focus()}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
-          <span className="text-xs font-mono text-white/40">{selectedName || "select a window"}</span>
-          {selectedTarget && <span className="text-[10px] font-mono text-white/20">{selectedTarget}</span>}
+        <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
+          <span className="text-xs font-mono text-white/40 truncate">{selectedName || "select a window"}</span>
+          {selectedTarget && <span className="hidden sm:inline text-[10px] font-mono text-white/20 truncate">{selectedTarget}</span>}
           <span className="ml-auto text-[10px] font-mono" style={{ color: connected ? "#4caf50" : "#ef5350" }}>
             {connected ? "live" : "reconnecting"}
           </span>
@@ -220,7 +223,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         {/* Output */}
         <div
           ref={outputRef}
-          className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-[1.35]"
+          className="flex-1 min-h-0 overflow-y-auto px-3 py-2 font-mono text-[12px] sm:text-[13px] leading-[1.35]"
           style={{ background: "#0a0a0f", whiteSpace: "pre", wordBreak: "normal", overflowX: "auto", color: "#aaa" }}
         >
           {captureHtml ? (
@@ -234,11 +237,14 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
 
         {/* Input line */}
         <div
-          className="flex items-start px-3 py-1.5 border-t border-white/[0.06] font-mono text-[13px] min-h-[32px]"
-          style={{ background: "#0d0d14" }}
+          className="flex items-start px-3 py-2 border-t border-white/[0.06] font-mono text-[12px] sm:text-[13px] min-h-[40px]"
+          style={{
+            background: "#0d0d14",
+            paddingBottom: `calc(0.5rem + env(safe-area-inset-bottom, 0px) + ${viewportInset}px)`,
+          }}
         >
           <span className="text-white/30 mr-2 mt-[1px] flex-shrink-0">&gt;</span>
-          <span className="text-white/90 whitespace-pre flex-1">{inputBuf}</span>
+          <span className="text-white/90 whitespace-pre-wrap break-words flex-1 min-w-0">{inputBuf}</span>
           <span
             className="inline-block w-[7px] h-[15px] ml-[1px] flex-shrink-0"
             style={{ background: selectedTarget ? "#89b4fa" : "#333", animation: "blink 1s step-end infinite", marginTop: "2px" }}
@@ -256,6 +262,11 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           )}
         </div>
       </div>
+      <QuickCommandBar
+        targetLabel={selectedName || selectedTarget}
+        disabled={!selectedTarget}
+        onCommand={(text) => queueSend(text)}
+      />
     </div>
   );
 });

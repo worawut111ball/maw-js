@@ -40,11 +40,11 @@ function AgentControls({ agent, displayName, accent, inputOpen, send, onMic }: {
   const isIdle = agent.status === "idle";
   const isCrashed = agent.status === "crashed";
   return (
-    <div className="flex items-center gap-1.5 flex-shrink-0">
+    <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
       {/* Busy → pause, Idle/Crashed → play (wake/restart), Ready → nothing */}
       {isBusy && (
         <button
-          className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-90"
+          className="w-9 h-9 sm:w-8 sm:h-8 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-90"
           style={{ background: "rgba(251,191,36,0.12)" }}
           onClick={(e) => { e.stopPropagation(); send({ type: "sleep", target: agent.target }); }}
           title="Sleep (Ctrl+C)" aria-label={`Sleep ${displayName}`}
@@ -56,7 +56,7 @@ function AgentControls({ agent, displayName, accent, inputOpen, send, onMic }: {
       )}
       {(isIdle || isCrashed) && (
         <button
-          className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-90"
+          className="w-9 h-9 sm:w-8 sm:h-8 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-90"
           style={{ background: isCrashed ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.12)" }}
           onClick={(e) => { e.stopPropagation(); send({ type: "wake", target: agent.target, command: guessCommand(agent.name) }); }}
           title={isCrashed ? "Restart (crashed)" : "Wake (restart)"} aria-label={`Wake ${displayName}`}
@@ -95,8 +95,8 @@ function AgentInfo({ agent, isBusy, displayName, accent, agoLabel, feedLog, team
     agentTeam?.members[0]?.color ? COLOR_MAP[agentTeam.members[0].color] || "#888" : "#888";
   return (
     <div className="flex flex-col gap-1 flex-1 min-w-0">
-      <div className="flex items-center gap-3">
-        <span className="text-[15px] font-semibold truncate" style={{ color: isBusy ? accent : "#E2E8F0" }}>
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <span className="text-[14px] sm:text-[15px] font-semibold truncate min-w-[80px] max-w-full" style={{ color: isBusy ? accent : "#E2E8F0" }}>
           {displayName}
         </span>
         <span className="text-[11px] font-mono px-2.5 py-1 rounded-md flex-shrink-0" style={{
@@ -149,7 +149,7 @@ function AgentInfo({ agent, isBusy, displayName, accent, agoLabel, feedLog, team
         {agoLabel && <span className="text-[10px] font-mono text-white/25 flex-shrink-0">{agoLabel}</span>}
         {/* Last activity reason — shows what triggered busy status */}
         {!isBusy && feedLog && feedLog.length > 0 && (
-          <span className="text-[10px] font-mono truncate max-w-[200px] flex-shrink" style={{ color: "#64748B" }}>
+          <span className="hidden sm:inline text-[10px] font-mono truncate max-w-[200px] flex-shrink" style={{ color: "#64748B" }}>
             {feedLog[0].text}
           </span>
         )}
@@ -189,10 +189,10 @@ function AgentInput({ accent, displayName, isLast, inputOpen, text, setText, sen
 }) {
   return (
     <div
-      className="flex items-center gap-2 px-6 overflow-hidden transition-all duration-200"
+      className="flex items-center gap-2 px-3 sm:px-6 overflow-hidden transition-all duration-200"
       style={{
         height: inputOpen ? 56 : 0, opacity: inputOpen ? 1 : 0,
-        padding: inputOpen ? undefined : "0 24px",
+        padding: inputOpen ? undefined : "0 12px",
         background: `${accent}08`,
         borderBottom: inputOpen && !isLast ? "1px solid rgba(255,255,255,0.04)" : "none",
       }}
@@ -204,7 +204,7 @@ function AgentInput({ accent, displayName, isLast, inputOpen, text, setText, sen
         onKeyDown={e => { if (e.key === "Enter") onSend(); if (e.key === "Escape") setText("__close__"); }}
         onBlur={() => { if (!text.trim()) setTimeout(() => setText("__close__"), 200); }}
         placeholder={`Talk to ${displayName}...`}
-        className="flex-1 px-4 py-3 rounded-xl text-[15px] text-white outline-none placeholder:text-white/20 [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
+        className="flex-1 min-w-0 px-3 sm:px-4 py-3 rounded-xl text-[15px] text-white outline-none placeholder:text-white/20 [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
         style={{ background: "rgba(255,255,255,0.06)", border: `1px solid ${accent}20`, WebkitAppearance: "none" as const }}
         enterKeyHint="send" autoComplete="off" autoCorrect="off" tabIndex={inputOpen ? 0 : -1}
       />
@@ -314,7 +314,7 @@ export const AgentRow = memo(function AgentRow({
     return (
       <div ref={(el) => observe(el, agent.target)}>
         <div
-          className="flex items-center gap-4 px-6 py-2 transition-all duration-300 cursor-pointer hover:bg-white/[0.03]"
+          className="flex items-center gap-3 sm:gap-4 px-3 sm:px-6 py-2 transition-all duration-300 cursor-pointer hover:bg-white/[0.03]"
           style={{ borderBottom: !isLast ? "1px solid rgba(255,255,255,0.03)" : "none", opacity: 0.35 }}
           onClick={(e) => onAgentClick(agent, accent, roomLabel, e)}
           role="button" tabIndex={0} aria-label={`${agent.name} - sleeping`}
@@ -344,7 +344,7 @@ export const AgentRow = memo(function AgentRow({
   return (
     <div ref={(el) => observe(el, agent.target)}>
       <div
-        className="flex items-center gap-5 px-6 py-3.5 transition-all duration-150 cursor-pointer hover:bg-white/[0.03]"
+        className="flex items-center gap-3 sm:gap-5 px-3 sm:px-6 py-3 sm:py-3.5 transition-all duration-150 cursor-pointer hover:bg-white/[0.03]"
         style={{
           borderBottom: !isLast && !inputOpen ? "1px solid rgba(255,255,255,0.04)" : "none",
           background: isBusy ? `${accent}06` : "transparent",
