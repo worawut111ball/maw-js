@@ -137,12 +137,19 @@ async function main(): Promise<void> {
             const ORACLE_NAME_SHAPE = /^[a-z0-9][a-z0-9:_-]*$/i;
             if (ORACLE_NAME_SHAPE.test(args[0])) {
               const { listSessions } = await import("./sdk");
+              const { loadConfig } = await import("./config");
               const sessions = await listSessions().catch(() => [] as Awaited<ReturnType<typeof listSessions>>);
               const target = args[0].toLowerCase();
               isOracle = sessions.some(s => {
                 const name = s.name.toLowerCase();
                 return name === target || name.replace(/^\d+-/, "") === target;
               });
+              // Also treat config.sessions keys as valid oracle names
+              if (!isOracle) {
+                const cfg = loadConfig();
+                const sessionKeys = Object.keys(cfg.sessions || {});
+                isOracle = sessionKeys.some(k => k.toLowerCase() === target);
+              }
             }
           }
           if (!isOracle) {

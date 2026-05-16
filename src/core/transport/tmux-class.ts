@@ -35,8 +35,11 @@ export class Tmux {
   async listSessions(): Promise<TmuxSession[]> {
     try {
       const raw = await this.run("list-sessions", "-F", "#{session_name}");
+      const names = raw.split("\n").filter(Boolean);
+      const nameSet = new Set(names);
       const sessions: TmuxSession[] = [];
-      for (const s of raw.split("\n").filter(Boolean)) {
+      for (const s of names) {
+        if (Tmux.isGroupedClone(s, nameSet)) continue;
         const windows = await this.listWindows(s);
         sessions.push({ name: s, windows });
       }
@@ -54,8 +57,18 @@ export class Tmux {
         if (!map.has(session)) map.set(session, []);
         map.get(session)!.push({ index: +idx, name, active: active === "1", cwd: cwd || undefined });
       }
-      return [...map.entries()].map(([name, windows]) => ({ name, windows }));
+      const nameSet = new Set(map.keys());
+      return [...map.entries()]
+        .filter(([name]) => !Tmux.isGroupedClone(name, nameSet))
+        .map(([name, windows]) => ({ name, windows }));
     } catch { return []; } // no tmux server running
+  }
+
+  /** Returns true if `name` is a tmux grouped-session clone (e.g. "team1-oracle-10"
+   *  when "team1-oracle" also exists). */
+  private static isGroupedClone(name: string, allNames: Set<string>): boolean {
+    const m = name.match(/^(.+)-\d+$/);
+    return m !== null && allNames.has(m[1]);
   }
 
   async hasSession(name: string): Promise<boolean> {
