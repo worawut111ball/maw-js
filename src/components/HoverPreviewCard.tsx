@@ -3,6 +3,7 @@ import { ansiToHtml, processCapture } from "../lib/ansi";
 import { agentColor, PREVIEW_CARD } from "../lib/constants";
 import { apiUrl } from "../lib/api";
 import { useAgentPreview } from "../lib/previewStore";
+import { useDevice } from "../hooks/useDevice";
 import type { AgentState, AgentEvent } from "../lib/types";
 
 interface HoverPreviewCardProps {
@@ -63,6 +64,8 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
   const displayName = agent.name.replace(/-oracle$/, "").replace(/-/g, " ");
   const statusColor = STATUS_COLORS[agent.status] || "#666";
   const agentPreview = useAgentPreview(agent.target);
+  const { isMobile } = useDevice();
+  const effectiveCompact = compact || isMobile;
 
   // Sync prevInputRef when external buffer initializes
   useEffect(() => {
@@ -198,19 +201,19 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       className="flex flex-col overflow-hidden rounded-xl border border-white/[0.08] shadow-2xl"
       style={{
         background: "#0a0a0f",
-        width: compact ? "100%" : PREVIEW_CARD.width,
-        height: compact ? "100%" : "min(calc(100dvh - 104px), calc(100vh - 104px))",
-        maxHeight: compact ? "100%" : PREVIEW_CARD.maxHeight,
+        width: effectiveCompact ? "100%" : `min(100%, ${PREVIEW_CARD.width}px)`,
+        height: effectiveCompact ? "100%" : "min(calc(100dvh - 104px), calc(100vh - 104px))",
+        maxHeight: effectiveCompact ? "100%" : PREVIEW_CARD.maxHeight,
       }}
       onMouseDown={(e) => {
-        if (pinned && e.target !== inputRef.current) {
+        if (pinned && !effectiveCompact && e.target !== inputRef.current) {
           e.preventDefault();
           inputRef.current?.focus();
         }
       }}
     >
       {/* Header — compact (inline) or full (big avatar) */}
-      {compact ? (
+      {effectiveCompact ? (
         <div
           className="flex items-center gap-2.5 px-3 py-2"
           style={{
@@ -397,7 +400,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       )}
 
       {/* Event timeline badges — pinned only, hidden in compact */}
-      {pinned && !compact && eventLog && (() => {
+      {pinned && !effectiveCompact && eventLog && (() => {
         const events = eventLog.filter(e => e.target === agent.target).slice(-20);
         if (events.length === 0) return null;
         const STATUS_BADGE: Record<string, { bg: string; text: string }> = {
@@ -591,7 +594,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       )}
 
       {/* Shortcut hints — pinned only, hidden in compact */}
-      {pinned && !compact && (
+      {pinned && !effectiveCompact && (
         <div className="flex items-center justify-center gap-3 px-3 py-1.5 bg-[#08080c] border-t border-white/[0.04] font-mono text-[8px] text-white/20">
           <span><kbd className="text-white/30">Enter</kbd> send</span>
           <span><kbd className="text-white/30">⌃Enter</kbd> fullscreen</span>
