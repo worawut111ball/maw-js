@@ -4,3 +4,6 @@ dist/
 *.local
 target/
 wrangler.god.json
+playwright-report/
+test-results/
+e2e/__screenshots__/*-actual.png
