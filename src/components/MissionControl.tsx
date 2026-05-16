@@ -115,7 +115,7 @@ export const MissionControl = memo(function MissionControl({
       </svg>
 
       {/* Controls — bottom right: pan + zoom + group toggle */}
-      <div className="absolute bottom-4 right-6 flex flex-col items-center gap-1">
+      <div className="absolute bottom-4 right-6 hidden flex-col items-center gap-1 sm:flex">
         <button
           onClick={() => mc.setGroupSolo(g => !g)}
           className="w-8 h-8 rounded-lg bg-black/50 backdrop-blur border border-white/10 text-[9px] text-white/50 hover:text-white hover:bg-white/10 cursor-pointer font-mono"
