@@ -1,7 +1,8 @@
 import { discoverPackages } from "../plugin/registry";
+import { color } from "./output";
 
 export function usage() {
-  const title = `\x1b[36mmaw\x1b[0m — Multi-Agent Workflow`;
+  const title = `${color.cyan("maw")} ${color.dim("Multi-Agent Workflow")}`;
 
   try {
     const all = discoverPackages();
@@ -16,29 +17,43 @@ export function usage() {
     ].filter(t => t.plugins.length > 0);
 
     const multiTier = tiers.length > 1;
-    const lines: string[] = [title, ""];
+    const commands = tiers.flatMap(t => t.plugins.map(p => `maw ${p.manifest.cli!.command}`));
+    const commandWidth = Math.min(34, Math.max(18, ...commands.map(c => c.length)) + 2);
+    const lines: string[] = [
+      title,
+      "",
+      `${color.yellow("Usage")}`,
+      `  maw <command> [args]`,
+      "",
+      `${color.yellow("Commands")}`,
+    ];
 
     for (const tier of tiers) {
       const label = multiTier
-        ? `\x1b[33m${tier.name} (${tier.plugins.length}):\x1b[0m`
-        : `\x1b[33m${tier.name}:\x1b[0m`;
+        ? `${color.dim(tier.name)} ${color.dim(`(${tier.plugins.length})`)}`
+        : color.dim(tier.name);
       lines.push(label);
       for (const p of tier.plugins) {
-        const cmd = `maw ${p.manifest.cli!.command}`.padEnd(28);
+        const cmd = color.cyan(`maw ${p.manifest.cli!.command}`.padEnd(commandWidth));
         const desc = p.manifest.description ?? "";
         lines.push(`  ${cmd} ${desc}`);
       }
       lines.push("");
     }
 
+    lines.push(`${color.yellow("Options")}`);
+    lines.push(`  ${color.cyan("--help, -h".padEnd(commandWidth))} Show help`);
+    lines.push(`  ${color.cyan("--version, -v".padEnd(commandWidth))} Show version`);
+    lines.push("");
+
     const countLine = hasDisabled
-      ? `\x1b[90m${active.length} commands active. Run 'maw plugin enable <name>' for more.\x1b[0m`
-      : `\x1b[90m${active.length} commands active.\x1b[0m`;
+      ? color.dim(`${active.length} commands active. Run 'maw plugin enable <name>' for more.`)
+      : color.dim(`${active.length} commands active.`);
     lines.push(countLine);
 
     console.log(lines.join("\n"));
   } catch {
     // Registry not loaded yet — minimal fallback
-    console.log(`${title}\n\nRun \x1b[33mmaw plugin ls\x1b[0m to see available commands.`);
+    console.log(`${title}\n\nRun ${color.cyan("maw plugin ls")} to see available commands.`);
   }
 }

@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { CONFIG_FILE } from "../core/paths";
 import { refreshContext } from "../lib/context";
-import { verbose, info } from "../cli/verbosity";
+import { verbose, info, warn } from "../cli/verbosity";
 import type { MawConfig } from "./types";
 import { D } from "./types";
 import { validateConfig } from "./validate-ext";
@@ -136,9 +136,9 @@ export function loadConfig(): MawConfig {
   // #680 — warn once if the (deprecated) ghqRoot override is set in config.
   if (!warnedGhqRoot && typeof cached.ghqRoot === "string" && cached.ghqRoot.length > 0) {
     warnedGhqRoot = true;
-    process.stderr.write(
-      `[maw] config.ghqRoot is deprecated — ghq root is resolved on demand via \`ghq root\`. ` +
-      `Remove "ghqRoot" from your maw.config.json (still honored as a legacy override).\n`,
+    warn(
+      "config.ghqRoot is deprecated; ghq root is resolved on demand via `ghq root`. " +
+      "Remove \"ghqRoot\" from your maw.config.json (still honored as a legacy override).",
     );
   }
   // One-shot startup summary — fires unless --quiet/--silent (verbose-by-default).

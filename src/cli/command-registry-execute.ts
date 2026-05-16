@@ -16,12 +16,13 @@ import {
   wasmInstances,
   type CommandDescriptor,
 } from "./command-registry-types";
+import { error } from "./output";
 
 /** Execute a matched command — lazy import + parseFlags + call handler */
 export async function executeCommand(desc: CommandDescriptor, remaining: string[]): Promise<void> {
   if (desc.path?.endsWith(".wasm")) {
     const wasm = wasmInstances.get(desc.path!);
-    if (!wasm) { console.error(`[commands] WASM instance not found: ${desc.path}`); return; }
+    if (!wasm) { console.error(error(`commands: WASM instance not found: ${desc.path}`)); return; }
 
     // Wrap WASM execution in a 5-second hard timeout via Promise.race
     const wasmExec = (async () => {
@@ -30,7 +31,7 @@ export async function executeCommand(desc: CommandDescriptor, remaining: string[
 
       // Validate memory hasn't grown beyond limit between calls
       if (wasm.memory.buffer.byteLength > WASM_MEMORY_MAX_PAGES * 65_536) {
-        console.error(`[commands] WASM memory exceeded ${WASM_MEMORY_MAX_PAGES}-page limit — refusing to execute`);
+        console.error(error(`commands: WASM memory exceeded ${WASM_MEMORY_MAX_PAGES}-page limit; refusing to execute`));
         wasmInstances.delete(desc.path!);
         return;
       }
@@ -76,15 +77,15 @@ export async function executeCommand(desc: CommandDescriptor, remaining: string[
     } catch (err: any) {
       const msg = err.message || String(err);
       if (msg.includes("wasm-safety") && msg.includes("timed out")) {
-        console.error(`[commands] WASM timeout in "${desc.name}": command exceeded ${WASM_COMMAND_TIMEOUT_MS / 1000}s limit`);
+        console.error(error(`commands: WASM timeout in "${desc.name}"; command exceeded ${WASM_COMMAND_TIMEOUT_MS / 1000}s limit`));
       } else if (msg.includes("unreachable") || msg.includes("RuntimeError")) {
-        console.error(`[commands] WASM trap in "${desc.name}": ${msg}`);
+        console.error(error(`commands: WASM trap in "${desc.name}": ${msg}`));
       } else if (msg.includes("out of bounds") || msg.includes("memory")) {
-        console.error(`[commands] WASM memory error in "${desc.name}": ${msg}`);
+        console.error(error(`commands: WASM memory error in "${desc.name}": ${msg}`));
       } else if (msg.includes("wasm-safety")) {
-        console.error(`[commands] WASM safety limit in "${desc.name}": ${msg}`);
+        console.error(error(`commands: WASM safety limit in "${desc.name}": ${msg}`));
       } else {
-        console.error(`[commands] WASM error in "${desc.name}": ${msg}`);
+        console.error(error(`commands: WASM error in "${desc.name}": ${msg}`));
       }
       // Invalidate instance — state may be corrupted after a trap or timeout
       wasmInstances.delete(desc.path!);
@@ -93,7 +94,7 @@ export async function executeCommand(desc: CommandDescriptor, remaining: string[
   }
   const mod = await import(desc.path!);
   const handler = mod.default || mod.handler;
-  if (!handler) { console.error(`[commands] ${desc.name}: no default export or handler`); return; }
+  if (!handler) { console.error(error(`commands: ${desc.name}: no default export or handler`)); return; }
   const flags = desc.flags ? parseFlags(["_", ...remaining], desc.flags, 1) : { _: remaining };
   await handler(flags._, flags);
 }

@@ -14,6 +14,7 @@ import {
   WASM_MEMORY_MAX_PAGES,
   wasmInstances,
 } from "./command-registry-types";
+import { info, warn } from "./output";
 
 /**
  * Load a WASM command plugin. Expects exports: handle(ptr, len) + memory.
@@ -28,7 +29,7 @@ export async function loadWasmCommand(path: string, filename: string, scope: "bu
 
   // Must have handle + memory
   if (!exportNames.includes("handle") || !exportNames.includes("memory")) {
-    console.log(`[commands] skipped wasm: ${filename} (no handle+memory exports)`);
+    console.log(info(`commands: skipped wasm ${filename} (no handle+memory exports)`));
     return;
   }
 
@@ -46,7 +47,7 @@ export async function loadWasmCommand(path: string, filename: string, scope: "bu
   try {
     instance = new WebAssembly.Instance(mod, bridge);
   } catch (err: any) {
-    console.error(`[commands] wasm instantiation failed: ${filename}: ${err.message?.slice(0, 120)}`);
+    console.error(warn(`commands: wasm instantiation failed for ${filename}: ${err.message?.slice(0, 120)}`));
     return;
   }
 
@@ -58,7 +59,7 @@ export async function loadWasmCommand(path: string, filename: string, scope: "bu
   const memoryPages = wasmMemory.buffer.byteLength / 65_536;
   if (memoryPages > WASM_MEMORY_MAX_PAGES) {
     console.error(
-      `[commands] wasm rejected: ${filename} — initial memory (${memoryPages} pages) exceeds ${WASM_MEMORY_MAX_PAGES}-page limit`,
+      warn(`commands: wasm rejected ${filename}; initial memory (${memoryPages} pages) exceeds ${WASM_MEMORY_MAX_PAGES}-page limit`),
     );
     return;
   }
@@ -96,5 +97,5 @@ export async function loadWasmCommand(path: string, filename: string, scope: "bu
 
   // Store the instance for execution
   wasmInstances.set(path, { handle, memory: wasmMemory, instance, bridge });
-  console.log(`[commands] loaded wasm: ${filename} (memory: ${memoryPages}/${WASM_MEMORY_MAX_PAGES} pages)`);
+  console.log(info(`commands: loaded wasm ${filename} (memory: ${memoryPages}/${WASM_MEMORY_MAX_PAGES} pages)`));
 }

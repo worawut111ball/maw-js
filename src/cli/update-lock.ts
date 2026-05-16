@@ -1,6 +1,7 @@
 import { openSync, closeSync, unlinkSync, existsSync, mkdirSync, writeSync, readSync, fstatSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { warn } from "./output";
 
 const LOCK_DIR = join(homedir(), ".maw");
 const LOCK_PATH = join(LOCK_DIR, "update.lock");
@@ -61,12 +62,12 @@ export async function withUpdateLock<T>(fn: () => Promise<T>): Promise<T> {
       } catch { /* treat as stale — holderPid stays NaN */ }
       finally { if (readFd !== null) { try { closeSync(readFd); } catch {} } }
       if (!isAlive(holderPid)) {
-        console.warn(`\x1b[33m⚠\x1b[0m stale update lock (pid ${holderPid || "?"} gone) — taking over`);
+        console.warn(warn(`stale update lock (pid ${holderPid || "?"} gone); taking over`));
         try { unlinkSync(LOCK_PATH); } catch {}
         continue;
       }
       if (Date.now() > DEADLINE) {
-        console.warn(`\x1b[33m⚠\x1b[0m update lock held for >60s by live pid ${holderPid} — giving up`);
+        console.warn(warn(`update lock held for >60s by live pid ${holderPid}; giving up`));
         throw new Error(`update lock timeout: pid ${holderPid} still holds ${LOCK_PATH}`);
       }
       if (!announcedWait) {

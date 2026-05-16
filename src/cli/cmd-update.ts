@@ -9,6 +9,7 @@ import { homedir } from "os";
 import { getVersionString } from "./cmd-version";
 import { ghqFindSync } from "../core/ghq";
 import { withUpdateLock } from "./update-lock";
+import { error, hint, warn } from "./output";
 
 export async function runUpdate(args: string[]): Promise<void> {
   const { repository } = require("../../package.json");
@@ -47,7 +48,8 @@ export async function runUpdate(args: string[]): Promise<void> {
   const KNOWN_FLAGS = new Set(["--yes", "-y", "--help", "-h"]);
   const unknownFlag = args.slice(1).find(a => a.startsWith("-") && !KNOWN_FLAGS.has(a));
   if (unknownFlag) {
-    console.error(`\x1b[31merror\x1b[0m: invalid ref "${unknownFlag}" — looks like a flag. Run \`maw update --help\` for usage.`);
+    console.error(error(`invalid ref "${unknownFlag}" looks like a flag`));
+    console.error(hint("run `maw update --help` for usage"));
     process.exit(1);
   }
 
@@ -64,7 +66,7 @@ export async function runUpdate(args: string[]): Promise<void> {
         .map((line: string) => (line.split("\t")[1] || "").replace("refs/tags/", "").trim())
         .filter((t: string) => /^v\d+\.\d+\.\d+-\w+\.\d+$/.test(t) && t.includes(`-${channel}.`));
       if (tags.length === 0) {
-        console.error(`\x1b[31merror\x1b[0m: no ${channel} tags in ${repository}`);
+        console.error(error(`no ${channel} tags in ${repository}`));
         process.exit(1);
       }
       tags.sort((a: string, b: string) => {
@@ -79,7 +81,7 @@ export async function runUpdate(args: string[]): Promise<void> {
       ref = tags[0];
       console.log(`\n  📍 ${channel} channel → ${ref}`);
     } catch (e: any) {
-      console.error(`\x1b[31merror\x1b[0m: failed to resolve ${channel} channel: ${e.message}`);
+      console.error(error(`failed to resolve ${channel} channel: ${e.message}`));
       process.exit(1);
     }
   }
@@ -99,7 +101,8 @@ export async function runUpdate(args: string[]): Promise<void> {
     // instead (alpha.72 fix — reported by user trying `maw update` in a
     // non-TTY sandbox).
     if (!process.stdin.isTTY) {
-      console.error("  \x1b[31m✗\x1b[0m non-interactive environment — re-run with --yes (or -y) to skip confirmation");
+      console.error(error("non-interactive environment"));
+      console.error(hint("re-run with --yes (or -y) to skip confirmation"));
       process.exit(1);
     }
     process.stdout.write("  proceed? [y/N] ");
@@ -122,7 +125,8 @@ export async function runUpdate(args: string[]): Promise<void> {
   // (Regression: #356/#473-class. Fix 2026-04-18 — emergency after user report.)
   const REF_RE = /^[a-zA-Z0-9._\-\/]+$/;
   if (!REF_RE.test(ref)) {
-    console.error(`\x1b[31merror\x1b[0m: invalid ref "${ref}" — only [a-zA-Z0-9._-/] characters permitted`);
+    console.error(error(`invalid ref "${ref}"`));
+    console.error(hint("only [a-zA-Z0-9._-/] characters are permitted"));
     process.exit(1);
   }
 
@@ -145,7 +149,7 @@ export async function runUpdate(args: string[]): Promise<void> {
 
     let installCode = await spawnInstall().exited;
     if (installCode !== 0) {
-      console.warn(`\x1b[33m⚠\x1b[0m first install attempt failed — clearing stale global refs and retrying`);
+      console.warn(warn("first install attempt failed; clearing stale global refs and retrying"));
       // #551 — stash the current binary before destructive 'bun remove -g'.
       // If the retry also fails, we restore from stash so the user never ends up
       // with no maw. Empty-try around rename: stash is best-effort, retry not blocked.
@@ -156,10 +160,10 @@ export async function runUpdate(args: string[]): Promise<void> {
       // last-known-good escape hatch; silently overwriting would destroy it
       // (architect's gotcha on #551). User resolves explicitly.
       if (existsSync(STASH)) {
-        console.error(`\x1b[31merror\x1b[0m: ${STASH} already exists (prior update crashed — last-known-good binary).`);
-        console.error(`  restore manually:  mv ${STASH} ${BIN}`);
-        console.error(`  or discard it:     rm ${STASH}   \x1b[90m# only if you're sure\x1b[0m`);
-        console.error(`  then re-run:       maw update ${ref}`);
+        console.error(error(`${STASH} already exists (prior update crashed; last-known-good binary)`));
+        console.error(hint(`restore manually:  mv ${STASH} ${BIN}`));
+        console.error(hint(`or discard it:     rm ${STASH}   # only if you're sure`));
+        console.error(hint(`then re-run:       maw update ${ref}`));
         process.exit(1);
       }
       try {
@@ -214,7 +218,7 @@ export async function runUpdate(args: string[]): Promise<void> {
         // bug and any future resolver regressions. Only meaningful when `ref`
         // is a release tag — for branches/SHAs the curl 404s and we fall
         // through to the existing error path.
-        console.warn(`\x1b[33m↺\x1b[0m bun add failed — trying release-binary fallback`);
+        console.warn(warn("bun add failed; trying release-binary fallback"));
         const releaseUrl = `https://github.com/${repository}/releases/download/${ref}/maw`;
         const dl = Bun.spawn(["curl", "-fsSL", "-o", BIN, releaseUrl], { stdout: "inherit", stderr: "inherit" });
         const dlCode = await dl.exited;
@@ -233,9 +237,9 @@ export async function runUpdate(args: string[]): Promise<void> {
         // Retry failed — restore the previous binary so the user isn't stranded.
         try {
           renameSync(STASH, BIN);
-          console.warn(`\x1b[33m↺\x1b[0m restored previous maw binary from stash`);
+          console.warn(warn("restored previous maw binary from stash"));
         } catch (e: any) {
-          console.error(`failed to restore stash: ${e.message || e}`);
+          console.error(error(`failed to restore stash: ${e.message || e}`));
         }
       } else if (installCode === 0 && stashed && existsSync(STASH)) {
         // Retry succeeded — clean up the stash.
@@ -243,8 +247,8 @@ export async function runUpdate(args: string[]): Promise<void> {
       }
     }
     if (installCode !== 0) {
-      console.error(`\x1b[31merror\x1b[0m: bun add failed with exit ${installCode} — previous maw restored from stash (if available)`);
-      console.error(`  manual recovery: bun add -g github:${repository}#alpha`);
+      console.error(error(`bun add failed with exit ${installCode}; previous maw restored from stash if available`));
+      console.error(hint(`manual recovery: bun add -g github:${repository}#alpha`));
       process.exit(installCode);
     }
     // Link SDK so plugins can `import { maw } from "@maw/sdk"` (workspace package at packages/sdk/)

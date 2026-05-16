@@ -1,3 +1,5 @@
+import { error, hint } from "./output";
+
 // #388.1 — core-route usage strings for --help intercept. These routes don't
 // pass through invokePlugin, so they need their own --help guard to prevent
 // `maw plugin list --help` / `maw agents --help` from running real work.
@@ -55,7 +57,7 @@ export async function routeTools(cmd: string, args: string[]): Promise<boolean> 
         if (loaded) {
           const result = await invokePlugin(loaded, { source: "cli", args: args.slice(1) });
           if (result.ok && result.output) console.log(result.output);
-          if (!result.ok && result.error) console.error(result.error);
+          if (!result.ok && result.error) console.error(error(result.error));
           if (!result.ok) process.exit(1);
           return true;
         }
@@ -82,7 +84,8 @@ export async function routeTools(cmd: string, args: string[]): Promise<boolean> 
       }, 2);
       await cmdPluginCreate(flags._[0], flags);
     } else {
-      console.error("usage: maw plugin create [--rust | --as] <name> [--here]");
+      console.error(error("missing plugin subcommand"));
+      console.error(hint("usage: maw plugin create [--rust | --as] <name> [--here]"));
       process.exit(1);
     }
     return true;
@@ -122,8 +125,8 @@ export async function routeTools(cmd: string, args: string[]): Promise<boolean> 
     const unknownFlag = filteredArgs.find(a => a.startsWith("-"));
     if (unknownFlag) {
       const { UserError } = await import("../core/util/user-error");
-      console.error(`\x1b[31m✗\x1b[0m unknown flag '${unknownFlag}' for 'maw serve'`);
-      console.error(`  usage: maw serve [port] [--as <name>]  (run 'maw serve --help' for more)`);
+      console.error(error(`unknown flag '${unknownFlag}' for 'maw serve'`));
+      console.error(hint("usage: maw serve [port] [--as <name>]  (run 'maw serve --help' for more)"));
       throw new UserError(`unknown flag '${unknownFlag}'`);
     }
     const portArg = filteredArgs.find(a => /^\d+$/.test(a));

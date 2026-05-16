@@ -17,6 +17,8 @@
  * over env. If a flag key is absent from the object, env is consulted.
  */
 
+import { warn as formatWarn } from "./output";
+
 interface VerbosityFlags {
   quiet?: boolean;
   silent?: boolean;
@@ -55,7 +57,7 @@ export function verbose(fn: () => void): void {
 }
 
 export function warn(msg: string): void {
-  if (!isQuiet()) process.stderr.write(`⚠ ${msg}\n`);
+  if (!isQuiet()) process.stderr.write(`${formatWarn(msg)}\n`);
 }
 
 export function info(msg: string): void {

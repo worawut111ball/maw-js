@@ -19,6 +19,7 @@ import { runBootstrap } from "./cli/plugin-bootstrap";
 import { UserError, isUserError } from "./core/util/user-error";
 import { AmbiguousMatchError } from "./core/runtime/find-window";
 import { renderAmbiguousMatch } from "./core/util/render-ambiguous";
+import { error, hint } from "./cli/output";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -79,8 +80,8 @@ async function main(): Promise<void> {
         const cmdName = args.join(" ").toLowerCase();
         const dispatch = resolvePluginMatch(plugins, cmdName);
         if (dispatch.kind === "ambiguous") {
-          console.error(`\x1b[31m✗\x1b[0m ambiguous command: ${args[0]}`);
-          console.error(`  candidates: ${dispatch.candidates.map(c => `${c.plugin} (${c.name})`).join(", ")}`);
+          console.error(error(`ambiguous command: ${args[0]}`));
+          console.error(hint(`candidates: ${dispatch.candidates.map(c => `${c.plugin} (${c.name})`).join(", ")}`));
           throw new UserError(`ambiguous command: ${args[0]}`);
         }
         if (dispatch.kind === "match") {
@@ -88,7 +89,7 @@ async function main(): Promise<void> {
           const remaining = args.slice(matchedWords);
           const result = await invokePlugin(dispatch.plugin, { source: "cli", args: remaining });
           if (result.ok && result.output) console.log(result.output);
-          else if (!result.ok) { console.error(result.error); process.exit(result.exitCode ?? 1); }
+          else if (!result.ok) { console.error(error(result.error ?? "plugin command failed")); process.exit(result.exitCode ?? 1); }
           process.exit(0);
         }
         // #388.2 — unknown command: fuzzy-suggest against the plugin registry.
@@ -145,11 +146,11 @@ async function main(): Promise<void> {
             }
           }
           if (!isOracle) {
-            console.error(`\x1b[31m✗\x1b[0m unknown command: ${args[0]}`);
+            console.error(error(`unknown command: ${args[0]}`));
             if (closeCandidates.length > 0) {
-              console.error(`  did you mean: ${closeCandidates.join(", ")}?`);
+              console.error(hint(`did you mean: ${closeCandidates.join(", ")}?`));
             } else {
-              console.error(`  run 'maw --help' to see available commands`);
+              console.error(hint("run 'maw --help' to see available commands"));
             }
             // UserError: output already printed above; top-level catch just
             // exits 1 without bun's default stack trace (alpha.66 polish).
@@ -184,6 +185,6 @@ main().catch((e: unknown) => {
     console.error(renderAmbiguousMatch(e, args));
     process.exit(1);
   }
-  console.error(e);
+  console.error(error(e instanceof Error ? (e.stack || e.message) : String(e)));
   process.exit(1);
 });

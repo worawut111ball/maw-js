@@ -11,6 +11,7 @@
 import { openSync, readSync, writeSync, closeSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { error } from "./output";
 
 function resolveHome(): string {
   return process.env.MAW_HOME || join(homedir(), ".maw");
@@ -66,7 +67,7 @@ export function acquirePidLock(instanceName: string | null): void {
       finally { if (readFd !== null) { try { closeSync(readFd); } catch {} } }
       if (Number.isFinite(prior) && isAlive(prior)) {
         const label = instanceName ? ` as ${instanceName}` : "";
-        console.error(`\x1b[31m✗\x1b[0m another maw serve is already running${label} (PID ${prior}). Stop it first.`);
+        console.error(error(`another maw serve is already running${label} (PID ${prior}). Stop it first.`));
         process.exit(1);
       }
       // Stale PID — remove and retry the atomic create once.

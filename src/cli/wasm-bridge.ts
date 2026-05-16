@@ -20,6 +20,7 @@
 
 import { maw } from "../core/runtime/sdk";
 import { trySilentAsync } from "../core/util/try-silent";
+import { error, info, warn } from "./output";
 
 // ---------------------------------------------------------------------------
 // Text codec singletons
@@ -99,13 +100,12 @@ export function buildImportObject(
 
       maw_log(level: number, ptr: number, len: number): void {
         const msg = readString(getMemory(), ptr, len);
-        const tag = "[wasm]";
         switch (level) {
-          case 0: console.debug(tag, msg); break;
-          case 1: console.log(tag, msg); break;
-          case 2: console.warn(tag, msg); break;
-          case 3: console.error(tag, msg); break;
-          default: console.log(tag, msg);
+          case 0: console.debug(info(`wasm: ${msg}`)); break;
+          case 1: console.log(info(`wasm: ${msg}`)); break;
+          case 2: console.warn(warn(`wasm: ${msg}`)); break;
+          case 3: console.error(error(`wasm: ${msg}`)); break;
+          default: console.log(info(`wasm: ${msg}`));
         }
       },
 
@@ -131,7 +131,7 @@ export function buildImportObject(
         const target = readString(getMemory(), tPtr, tLen);
         const text = readString(getMemory(), mPtr, mLen);
         maw.send(target, text).catch((e: Error) =>
-          console.error(`[wasm] maw_send to ${target} failed:`, e.message),
+          console.error(error(`wasm: maw_send to ${target} failed: ${e.message}`)),
         );
         return 1;
       },

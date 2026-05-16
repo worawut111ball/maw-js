@@ -15,6 +15,7 @@
 import { join } from "path";
 import { homedir } from "os";
 import { mkdirSync } from "fs";
+import { error, hint } from "./output";
 
 /** Same shape as node/oracle names — lowercase, digits, dashes, underscores. */
 export const INSTANCE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -40,14 +41,14 @@ export function applyInstancePreset(argv: string[] = process.argv.slice(2)): voi
 
   const name = argv[asIdx + 1];
   if (!name || name.startsWith("-")) {
-    console.error(`\x1b[31m✗\x1b[0m --as requires an instance name`);
-    console.error(`  usage: maw serve [port] --as <name>`);
+    console.error(error("--as requires an instance name"));
+    console.error(hint("usage: maw serve [port] --as <name>"));
     process.exit(1);
   }
 
   if (!INSTANCE_NAME_RE.test(name)) {
-    console.error(`\x1b[31m✗\x1b[0m invalid instance name '${name}'`);
-    console.error(`  must match ${INSTANCE_NAME_RE} (lowercase alnum + _ -, start alnum, ≤32 chars)`);
+    console.error(error(`invalid instance name '${name}'`));
+    console.error(hint(`must match ${INSTANCE_NAME_RE} (lowercase alnum + _ -, start alnum, <=32 chars)`));
     process.exit(1);
   }
 

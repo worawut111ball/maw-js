@@ -17,6 +17,7 @@ import { join } from "path";
 import { loadConfig } from "../config";
 import { loadWasmCommand } from "./command-registry-wasm";
 import { registerCommand } from "./command-registry-match";
+import { warn } from "./output";
 
 export type { CommandDescriptor } from "./command-registry-types";
 export { registerCommand, matchCommand, listCommands } from "./command-registry-match";
@@ -44,7 +45,7 @@ export async function scanCommands(dir: string, scope: "builtin" | "user"): Prom
         }
       }
     } catch (err: any) {
-      console.error(`[commands] failed to load ${file}: ${err.message?.slice(0, 80)}`);
+      console.error(warn(`commands: failed to load ${file}: ${err.message?.slice(0, 80)}`));
     }
   }
   return count;
