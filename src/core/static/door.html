@@ -7,14 +7,14 @@
   <style>
     :root { color-scheme: dark; --bg: #0b0d10; --panel: #14171d; --line: #2a3038; --text: #edf1f5; --muted: #99a3b2; --cyan: #38d5c8; --amber: #f0b65a; }
     * { box-sizing: border-box; }
-    body { min-height: 100vh; margin: 0; background: var(--bg); color: var(--text); display: grid; place-items: center; padding: 24px; font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    .box { width: min(100%, 520px); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 28px; }
+    body { min-height: 100vh; min-height: 100dvh; margin: 0; background: var(--bg); color: var(--text); display: grid; place-items: center; padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left)); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .box { width: min(100%, 520px); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: clamp(20px, 5vw, 28px); }
     .eyebrow { color: var(--cyan); font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; margin: 0 0 10px; }
     h1 { font-size: 28px; line-height: 1.1; margin: 0 0 14px; }
     p { margin: 0 0 12px; color: var(--muted); }
-    .actions { display: grid; gap: 10px; margin-top: 20px; }
+    .actions { display: grid; gap: 10px; margin-top: 20px; min-width: 0; }
     code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; background: #101318; border: 1px solid var(--line); padding: 0.45em 0.65em; border-radius: 4px; color: var(--amber); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    @media (max-width: 420px) { body { padding: 14px; } .box { padding: 20px; } h1 { font-size: 24px; } }
+    @media (max-width: 420px) { body { align-items: start; padding: max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); } h1 { font-size: 24px; } }
   </style>
 </head>
 <body>

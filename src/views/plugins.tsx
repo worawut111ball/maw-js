@@ -97,20 +97,20 @@ export function pluginsView(plugins: PluginSystem) {
 const css = `
 :root{color-scheme:dark;--bg:#0b0d10;--panel:#14171d;--panel-2:#101318;--line:#2a3038;--text:#edf1f5;--muted:#8d99a8;--cyan:#38d5c8;--amber:#f0b65a;--rose:#ff6b8a;--green:#63d48a;--blue:#7aa7ff}
 *{margin:0;padding:0;box-sizing:border-box}
-body{min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.shell{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:28px 0 40px}
+body{min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.shell{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:28px 0 max(40px,env(safe-area-inset-bottom))}
 .topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:20px}
 .eyebrow{color:var(--cyan);font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase}
 h1{font-size:28px;line-height:1.1;margin-top:6px}
 .refresh{color:var(--muted);font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
-.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px;margin-bottom:18px}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;min-width:0}
 .stat .n{font:700 26px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat .l{font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-transform:uppercase;margin-bottom:10px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:18px;overflow:hidden}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line)}
 h2{font-size:15px}.panel-head span,.muted{color:var(--muted)}
-.table-wrap{overflow-x:auto}
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 table{width:100%;border-collapse:collapse;min-width:760px}
 th{text-align:left;font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-transform:uppercase;padding:10px 16px;background:var(--panel-2)}
 td{padding:11px 16px;border-top:1px solid var(--line);vertical-align:middle}
@@ -122,12 +122,12 @@ tbody tr:hover{background:#1b2028}
 .hook-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
 .hook h3{font-size:14px}.hook-title span{color:var(--muted);font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
 .hook-list{display:flex;flex-wrap:wrap;gap:8px}
-.hook-item{display:inline-flex;align-items:center;gap:8px;max-width:100%;background:var(--panel-2);border:1px solid var(--line);padding:5px 9px;border-radius:4px;font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
-.hook-item span:first-child{overflow:hidden;text-overflow:ellipsis}
+.hook-item{display:inline-flex;align-items:center;gap:8px;max-width:100%;min-width:0;background:var(--panel-2);border:1px solid var(--line);padding:5px 9px;border-radius:4px;font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
+.hook-item span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .count{color:var(--amber);font-weight:700}
 .err{color:var(--rose)}.ok{color:var(--green)}.warn{color:var(--amber)}
 .pulse{animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.65}}
-@media (max-width:760px){.shell{width:min(100% - 24px,1180px);padding-top:18px}.topbar{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.hooks{grid-template-columns:1fr}h1{font-size:24px}}
-@media (max-width:420px){.stats{grid-template-columns:1fr}.stat .n{font-size:23px}}
+@media (max-width:760px){.shell{width:min(100% - 24px,1180px);padding-top:18px}.topbar{align-items:flex-start;flex-direction:column}.hooks{grid-template-columns:1fr}h1{font-size:24px}.panel-head{align-items:flex-start;flex-direction:column}}
+@media (max-width:420px){.shell{width:min(100% - 20px,1180px)}.stats{grid-template-columns:1fr}.stat{padding:12px 14px}.stat .n{font-size:23px}th,td{padding:10px 12px}.hook-title{align-items:flex-start;flex-direction:column;gap:6px}}
 `;

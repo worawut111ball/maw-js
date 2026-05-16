@@ -10,23 +10,24 @@
     font-family: -apple-system, system-ui, sans-serif;
     background: #0a0a0a; color: #e0e0e0;
     display: flex; align-items: center; justify-content: center;
-    min-height: 100vh;
+    min-height: 100vh; min-height: 100dvh;
+    padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
   }
   .door {
-    width: 100%; max-width: 400px; padding: 2rem;
+    width: min(100%, 400px); padding: clamp(1rem, 5vw, 2rem);
     display: flex; flex-direction: column; gap: 1rem;
   }
   h1 { font-size: 1.4rem; font-weight: 400; color: #888; text-align: center; }
-  .row { display: flex; gap: 0.5rem; }
+  .row { display: flex; gap: 0.5rem; min-width: 0; }
   input {
-    flex: 1; padding: 0.6rem 0.8rem;
+    flex: 1; min-width: 0; min-height: 44px; padding: 0.6rem 0.8rem;
     background: #161616; border: 1px solid #333; border-radius: 6px;
     color: #e0e0e0; font-size: 0.95rem; outline: none;
   }
   input:focus { border-color: #555; }
   input::placeholder { color: #555; }
   button {
-    padding: 0.6rem 1rem;
+    min-height: 44px; padding: 0.6rem 1rem;
     background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
     color: #ccc; font-size: 0.9rem; cursor: pointer;
     white-space: nowrap; transition: border-color 0.15s;
@@ -34,17 +35,18 @@
   button:hover { border-color: #666; color: #fff; }
   .recent { display: flex; flex-direction: column; gap: 0.25rem; }
   .recent-item {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
+    display: flex; align-items: center; gap: 0.5rem; min-width: 0;
+    min-height: 44px; padding: 0.45rem 0.6rem;
     background: #111; border: 1px solid #222; border-radius: 4px;
     cursor: pointer; transition: border-color 0.15s;
   }
   .recent-item:hover { border-color: #555; }
-  .recent-label { flex: 1; font-size: 0.85rem; color: #aaa; overflow: hidden; text-overflow: ellipsis; }
-  .recent-name { font-size: 0.8rem; color: #666; margin-left: auto; }
+  .recent-label { flex: 1; min-width: 0; font-size: 0.85rem; color: #aaa; overflow: hidden; text-overflow: ellipsis; }
+  .recent-name { min-width: 0; max-width: 35%; overflow: hidden; text-overflow: ellipsis; font-size: 0.8rem; color: #666; margin-left: auto; }
   .recent-remove {
+    flex: 0 0 32px; min-width: 32px; min-height: 32px;
     font-size: 0.75rem; color: #555; cursor: pointer;
-    padding: 0 0.25rem; border: none; background: none;
+    padding: 0; border: none; background: none;
   }
   .recent-remove:hover { color: #e44; }
   .status {
@@ -61,6 +63,13 @@
     vertical-align: middle; margin-right: 0.4rem;
   }
   .status.loading::before { content: ""; }
+  @media (max-width: 420px) {
+    .row { flex-direction: column; }
+    .door { gap: 0.85rem; }
+    button { width: 100%; }
+    .recent-item { align-items: flex-start; flex-wrap: wrap; }
+    .recent-name { max-width: calc(100% - 40px); margin-left: 0; }
+  }
 </style>
 </head>
 <body>
