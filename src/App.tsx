@@ -20,7 +20,11 @@ import { ChatView } from "./components/ChatView";
 import { DashboardView } from "./components/DashboardView";
 import FederationView from "./components/FederationView";
 import DashboardPro from "./components/DashboardPro";
+import { SkillsView } from "./components/SkillsView";
+import { YailaiView } from "./components/YailaiView";
 import { ConnectPage } from "./components/ConnectPage";
+import { BottomNav } from "./components/BottomNav";
+import { useDevice } from "./hooks/useDevice";
 import { isRemote } from "./lib/api";
 // BoBFaceView, BoardView, LoopsView, JarvisView, HallOfFameView, IPadDashboard
 // removed from nav — no upstream backends. Files kept per Nothing is Deleted.
@@ -31,6 +35,7 @@ import { OracleSearch } from "./components/OracleSearch";
 import { unlockAudio, isAudioUnlocked, setSoundMuted, SOUND_PROFILES, getSoundProfile, setSoundProfile, previewSound } from "./lib/sounds";
 
 function FloatingButtons() {
+  const { isMobile } = useDevice();
   const [showSounds, setShowSounds] = useState(false);
   const [current, setCurrent] = useState(getSoundProfile());
   const [multiView, setMultiView] = useState(() => localStorage.getItem("office-multiview") !== "0");
@@ -43,6 +48,8 @@ function FloatingButtons() {
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);
   }, [showSounds]);
+
+  if (isMobile) return null;
 
   return (
     <div ref={ref} className="fixed top-20 right-6 flex flex-col gap-3 z-30">
@@ -192,13 +199,14 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
   fullHeight?: boolean;
   children: ReactNode;
 }) {
+  const { isMobile } = useDevice();
   const wrapperClass = fullHeight
-    ? "relative flex flex-col h-screen overflow-hidden"
-    : "relative min-h-screen";
+    ? "relative flex flex-col h-[100dvh] overflow-hidden pb-[calc(70px+env(safe-area-inset-bottom,0px))] sm:h-screen sm:pb-0"
+    : "relative min-h-screen pb-[calc(78px+env(safe-area-inset-bottom,0px))] sm:pb-0";
 
   return (
     <div className={wrapperClass} style={{ background: "#020208" }}>
-      <div className={`relative z-10${fullHeight ? " flex-shrink-0" : ""}`}>
+      <div className={`relative z-10 hidden sm:block${fullHeight ? " flex-shrink-0" : ""}`}>
         <StatusBar connected={connected} agentCount={agentCount} sessionCount={sessionCount} tabCount={tabCount} activeView={activeView} onJump={onJump} askCount={askCount} onInbox={onInbox} muted={muted} onToggleMute={onToggleMute}>
           {statusBarChildren}
         </StatusBar>
@@ -212,6 +220,7 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
 
       {/* Floating action buttons — top right */}
       <FloatingButtons />
+      {isMobile && <BottomNav activeView={activeView} askCount={askCount} hrefMode="hash" />}
 
       {/* Connection lost overlay */}
       {reconnecting && (
@@ -442,6 +451,21 @@ export function App() {
     );
   }
 
+  if (route === "inbox") {
+    return (
+      <Layout
+        activeView="inbox"
+        {...layoutProps}
+        inboxOverlay={<InboxOverlay send={send} onClose={() => { window.location.hash = "mission"; }} />}
+      >
+        <UniverseBg />
+        <div className="relative z-10">
+          <RoomGrid sessions={filteredSessions} agents={filteredAgents} onSelectAgent={onSelectAgent} />
+        </div>
+      </Layout>
+    );
+  }
+
   if (route === "fleet") {
     return (
       <Layout activeView="fleet" {...layoutProps} statusBarChildren={<FleetControls agents={filteredAgents} send={send} />}>
@@ -536,6 +560,22 @@ export function App() {
     return (
       <Layout activeView="federation" {...layoutProps}>
         <FederationView />
+      </Layout>
+    );
+  }
+
+  if (route === "skills") {
+    return (
+      <Layout activeView="skills" {...layoutProps}>
+        <SkillsView />
+      </Layout>
+    );
+  }
+
+  if (route === "yailai") {
+    return (
+      <Layout activeView="yailai" {...layoutProps}>
+        <YailaiView />
       </Layout>
     );
   }

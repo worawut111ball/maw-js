@@ -12,7 +12,7 @@ export const BottomStats = memo(function BottomStats({ agents }: BottomStatsProp
   const idleCount = agents.filter((a) => a.status === "idle").length;
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-6 px-6 py-2 rounded-xl bg-black/40 backdrop-blur border border-white/[0.04]">
+    <div className="mx-3 mb-3 mt-1 flex flex-wrap items-center justify-center gap-3 rounded-xl border border-white/[0.04] bg-black/40 px-4 py-2 backdrop-blur sm:absolute sm:bottom-4 sm:left-1/2 sm:m-0 sm:-translate-x-1/2 sm:flex-nowrap sm:gap-6 sm:px-6">
       <span className="flex items-center gap-1.5">
         <span className="w-2 h-2 rounded-full bg-yellow-400" />
         <strong className="text-yellow-400 text-xs">{busyCount}</strong>

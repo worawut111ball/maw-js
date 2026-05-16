@@ -24,25 +24,36 @@ const STATUS_DOT: Record<string, string> = {
 
 export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSibling, siblings }: TerminalModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0f]">
-      <div className="flex flex-col h-full">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0f]">
+      <div className="flex h-full min-h-0 flex-col">
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-[#0e0e18] border-b border-white/[0.06]">
-          <div className="flex gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 border-b border-white/[0.06] bg-[#0e0e18] px-2 py-2 sm:gap-3 sm:px-4">
+          <button
+            data-testid="terminal-modal-close"
+            onClick={onClose}
+            className="flex h-11 min-w-11 items-center justify-center rounded-xl px-3 text-[13px] font-mono font-bold text-white/60 active:scale-95 sm:hidden"
+            style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.2)" }}
+            title="Close"
+          >
+            ✕
+          </button>
+
+          <div className="hidden gap-1.5 shrink-0 sm:flex">
             <button onClick={onClose} className="w-3 h-3 rounded-full bg-[#ff5f57] hover:brightness-110 cursor-pointer" />
             <span className="w-3 h-3 rounded-full bg-[#febc2e]" />
             <span className="w-3 h-3 rounded-full bg-[#28c840]" />
           </div>
 
           {/* Agent tab bar */}
-          <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none mx-2">
+          <div className="mx-1 flex min-w-0 flex-1 snap-x items-center gap-1 overflow-x-auto scrollbar-none sm:mx-2 sm:flex-none sm:gap-0.5">
             {siblings.map((s, i) => {
               const active = s.target === agent.target;
               return (
                 <button
                   key={s.target}
+                  data-testid={`terminal-agent-tab-${s.target.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
                   onClick={() => onSelectSibling(s)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono whitespace-nowrap cursor-pointer transition-all ${
+                  className={`flex min-h-10 snap-start items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-mono whitespace-nowrap cursor-pointer transition-all sm:min-h-0 sm:rounded-md sm:px-2.5 sm:py-1 sm:text-[11px] ${
                     active
                       ? "bg-white/10 text-white/90"
                       : "text-white/35 hover:text-white/60 hover:bg-white/[0.04]"
@@ -61,7 +72,7 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
             })}
           </div>
 
-          <div className="ml-auto flex items-center gap-2 shrink-0">
+          <div className="ml-auto hidden items-center gap-2 shrink-0 sm:flex">
             <button
               onClick={() => { if (confirm(`Restart ${agent.name}?`)) send({ type: "restart", target: agent.target }); }}
               className="px-2 py-0.5 rounded text-[10px] font-mono text-white/30 hover:text-orange-400 hover:bg-orange-400/10 border border-transparent hover:border-orange-400/20 transition-all cursor-pointer"

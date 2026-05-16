@@ -71,17 +71,17 @@ export function BroadcastModal({ agents, send, onClose }: { agents: AgentState[]
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <div className="w-[90%] max-w-[560px] flex flex-col gap-4 rounded-3xl p-7" style={{ background: "rgba(13,13,24,0.9)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3">
+    <div className="fixed inset-0 flex items-end sm:items-center justify-center z-50 p-2 sm:p-4" style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} onClick={onClose}>
+      <div className="w-full sm:w-[90%] max-w-[560px] max-h-[calc(100dvh-24px)] overflow-y-auto flex flex-col gap-4 rounded-2xl sm:rounded-3xl p-4 sm:p-7" style={{ background: "rgba(13,13,24,0.95)", border: "1px solid rgba(255,255,255,0.12)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <span className="text-3xl">📢</span>
           <span className="text-lg font-bold text-amber-400">Broadcast</span>
           <span className="text-xs text-white/30 font-mono">{activeAgents.length} agents</span>
-          <button onClick={toggleMic} className="w-10 h-10 rounded-full flex items-center justify-center ml-2 cursor-pointer" style={{ background: listening ? "rgba(239,68,68,0.25)" : "rgba(74,222,128,0.15)" }}>
+          <button onClick={toggleMic} className="w-10 h-10 rounded-full flex items-center justify-center sm:ml-2 cursor-pointer" style={{ background: listening ? "rgba(239,68,68,0.25)" : "rgba(74,222,128,0.15)" }}>
             {listening ? "🔴" : "🎤"}
           </button>
           {listening && <span className="text-xs text-red-400/70">listening...</span>}
-          <span className="ml-auto text-white/30 cursor-pointer text-xl" onClick={onClose}>×</span>
+          <span className="ml-auto text-white/30 cursor-pointer text-xl px-2" onClick={onClose}>×</span>
         </div>
         <textarea ref={inputRef} value={text + (interim ? " " + interim : "")} onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } if (e.key === "Escape") onClose(); }}
@@ -89,10 +89,10 @@ export function BroadcastModal({ agents, send, onClose }: { agents: AgentState[]
           autoFocus inputMode="text" enterKeyHint="send"
           rows={4} className="w-full px-5 py-4 rounded-2xl text-lg text-white/90 outline-none resize-none"
           style={{ background: listening ? "rgba(239,68,68,0.05)" : "rgba(255,255,255,0.04)", border: listening ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.08)" }} />
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-[10px] text-white/20">Enter = send · Shift+Enter = newline · Esc = close</span>
           <button onClick={handleSend} disabled={!text.trim() || sent}
-            className="ml-auto px-6 py-3 rounded-xl font-semibold cursor-pointer"
+            className="ml-auto min-h-11 px-5 sm:px-6 py-3 rounded-xl font-semibold cursor-pointer"
             style={{ background: sent ? "rgba(74,222,128,0.15)" : text.trim() ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.03)", color: sent ? "#4ade80" : text.trim() ? "#fbbf24" : "rgba(255,255,255,0.15)", border: sent ? "1px solid rgba(74,222,128,0.3)" : "1px solid rgba(251,191,36,0.2)" }}>
             {sent ? "✓ Sent!" : "📢 Broadcast"}
           </button>
@@ -140,23 +140,23 @@ export function FleetControls({ agents, send }: { agents: AgentState[]; send: (m
         </span>
       )}
       {idleCount > 0 && (
-        <button className="px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
+        <button className="min-h-8 px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
           style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}
           onClick={wakeAll} title="Wake all idle agents">Wake</button>
       )}
       {busyCount > 0 && (
-        <button className="px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
+        <button className="min-h-8 px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
           style={{ background: "rgba(251,191,36,0.1)", color: "#fbbf24" }}
           onClick={sleepAll} title="Sleep all busy agents">Sleep</button>
       )}
-      <button className="px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
+      <button className="min-h-8 px-2 py-1 text-[10px] font-mono font-bold rounded-md active:scale-95 transition-all whitespace-nowrap"
         style={{ background: "rgba(251,191,36,0.08)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.15)" }}
         onClick={() => setShowBroadcast(true)} title="Broadcast to all agents">📢</button>
       <div className="flex items-center rounded-md overflow-hidden border border-white/[0.08]">
-        <button className="px-2 py-0.5 text-[10px] font-mono transition-colors whitespace-nowrap"
+        <button className="min-h-8 px-2 py-0.5 text-[10px] font-mono transition-colors whitespace-nowrap"
           style={{ background: sortMode === "active" ? "rgba(251,191,36,0.15)" : "transparent", color: sortMode === "active" ? "#fbbf24" : "#64748B" }}
           onClick={() => setSortMode("active")}>Active</button>
-        <button className="px-2 py-0.5 text-[10px] font-mono transition-colors whitespace-nowrap"
+        <button className="min-h-8 px-2 py-0.5 text-[10px] font-mono transition-colors whitespace-nowrap"
           style={{ background: sortMode === "name" ? "rgba(255,255,255,0.08)" : "transparent", color: sortMode === "name" ? "#E2E8F0" : "#64748B" }}
           onClick={() => setSortMode("name")}>Room</button>
       </div>
@@ -390,7 +390,7 @@ export const FleetGrid = memo(function FleetGrid({
   }, [agents, busyAgents, recentMap]);
 
   return (
-    <div ref={containerRef} className="relative w-full min-h-screen" style={{ background: "#0a0a12" }}>
+    <div ref={containerRef} className="relative w-full min-h-screen overflow-x-hidden" style={{ background: "#0a0a12" }}>
       {/* Toggle: Stage vs Pitch */}
       {stageMode === "pitch" ? (
         <FootballPitch
@@ -403,10 +403,10 @@ export const FleetGrid = memo(function FleetGrid({
         />
       ) : (
         <>
-          <div className="max-w-5xl mx-auto px-6 lg:px-8 flex justify-end pt-4">
+          <div className="mx-auto flex max-w-5xl justify-start px-3 pt-3 sm:justify-end sm:px-6 sm:pt-4 lg:px-8">
             <button
               onClick={toggleStageMode}
-              className="px-3 py-1 rounded-lg text-[11px] font-mono cursor-pointer hover:opacity-80 transition-opacity"
+              className="min-h-11 rounded-lg px-4 py-2 text-[12px] font-mono cursor-pointer transition-opacity hover:opacity-80 sm:min-h-0 sm:px-3 sm:py-1 sm:text-[11px]"
               style={{ background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}
             >
               Switch to Pitch
@@ -425,14 +425,14 @@ export const FleetGrid = memo(function FleetGrid({
       )}
 
       {/* Rooms */}
-      <div className="max-w-5xl mx-auto flex flex-col px-6 lg:px-8 py-6 gap-4">
+      <div className="max-w-5xl mx-auto flex flex-col px-3 sm:px-6 lg:px-8 py-4 sm:py-6 gap-3 sm:gap-4">
         {/* Recently Active group — always visible */}
         <section className="rounded-2xl overflow-hidden" style={{ background: "#12121c", border: "1px solid rgba(251,191,36,0.15)", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
-          <div className="flex items-center gap-5 px-6 py-4 cursor-pointer select-none" style={{ background: "rgba(251,191,36,0.03)" }}
+          <div className="flex items-center gap-3 sm:gap-5 px-3 sm:px-6 py-3 sm:py-4 cursor-pointer select-none" style={{ background: "rgba(251,191,36,0.03)" }}
             onClick={() => toggleCollapsed("_recent")} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCollapsed("_recent"); } }}>
             <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: "#fbbf24", boxShadow: "0 0 6px #fbbf24" }} />
-            <h3 className="text-base font-bold tracking-[4px] uppercase" style={{ color: "#fbbf24" }}>Recently Active</h3>
+            <h3 className="text-sm sm:text-base font-bold tracking-[2px] sm:tracking-[4px] uppercase truncate" style={{ color: "#fbbf24" }}>Recently Active</h3>
             <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md" style={{ background: "rgba(251,191,36,0.15)", color: "#fbbf24" }}>{recentlyActive.length}</span>
             <svg width={16} height={16} viewBox="0 0 16 16" fill="none" className="ml-auto flex-shrink-0 transition-transform duration-200"
               style={{ transform: isCollapsed("_recent") ? "rotate(-90deg)" : "rotate(0deg)" }}>
@@ -443,7 +443,7 @@ export const FleetGrid = memo(function FleetGrid({
           {!isCollapsed("_recent") && (
             <div className="flex flex-col">
               {recentlyActive.length === 0 && (
-                <div className="px-6 py-4 text-[13px] font-mono text-white/20">No recent activity yet</div>
+              <div className="px-3 sm:px-6 py-4 text-[13px] font-mono text-white/20">No recent activity yet</div>
               )}
               {recentlyActive.map((entry, i) => {
                 const rs = roomStyle(entry.session);
@@ -475,27 +475,27 @@ export const FleetGrid = memo(function FleetGrid({
             <section key={vr.key} className="rounded-2xl overflow-hidden"
               style={{ background: "#12121c", border: `1px solid ${vr.hasBusy ? style.accent + "40" : style.accent + "18"}`, boxShadow: vr.hasBusy ? `0 0 24px ${style.accent}12` : "0 2px 8px rgba(0,0,0,0.3)" }}
               aria-label={`${vr.label} room with ${vr.agents.length} agents`}>
-              <div className="flex items-center gap-5 px-6 py-4 cursor-pointer transition-colors duration-150 select-none" style={{ background: `${style.accent}08` }}
+              <div className="flex items-center gap-3 sm:gap-5 px-3 sm:px-6 py-3 sm:py-4 cursor-pointer transition-colors duration-150 select-none" style={{ background: `${style.accent}08` }}
                 onClick={() => toggleCollapsed(vr.key)} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCollapsed(vr.key); } }}>
                 <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: vr.hasBusy ? "#ffa726" : "#22C55E", boxShadow: vr.hasBusy ? "0 0 10px #ffa726" : "0 0 6px #22C55E" }} />
-                <h3 className="text-base font-bold tracking-[4px] uppercase" style={{ color: style.accent }}>{vr.label}</h3>
+                <h3 className="text-sm sm:text-base font-bold tracking-[2px] sm:tracking-[4px] uppercase truncate" style={{ color: style.accent }}>{vr.label}</h3>
                 <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md" style={{ background: `${style.accent}20`, color: style.accent }}>{vr.agents.length}</span>
                 {vr.hasBusy && <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-md bg-amber-400/15 text-amber-400">{vr.busyCount} busy</span>}
                 {/* Room controls */}
-                <div className="flex items-center gap-1.5 ml-2">
+                <div className="flex items-center gap-1.5 ml-auto sm:ml-2 flex-shrink-0">
                   <button title="Sleep all (Ctrl+C)" onClick={(e) => { e.stopPropagation(); sleepRoom(vr.key); }}
-                    className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer transition-all active:scale-90"
+                    className="w-9 h-9 sm:w-7 sm:h-7 rounded-md flex items-center justify-center cursor-pointer transition-all active:scale-90"
                     style={{ background: "rgba(251,191,36,0.12)" }}>
                     <svg width={12} height={12} viewBox="0 0 24 24" fill="#fbbf24"><rect x={6} y={5} width={4} height={14} rx={1} /><rect x={14} y={5} width={4} height={14} rx={1} /></svg>
                   </button>
                   <button title="Stop room" onClick={(e) => { e.stopPropagation(); stopRoom(vr.key); }}
-                    className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer transition-all active:scale-90"
+                    className="w-9 h-9 sm:w-7 sm:h-7 rounded-md flex items-center justify-center cursor-pointer transition-all active:scale-90"
                     style={{ background: "rgba(239,68,68,0.12)" }}>
                     <svg width={12} height={12} viewBox="0 0 24 24" fill="#ef4444"><rect x={5} y={5} width={14} height={14} rx={2} /></svg>
                   </button>
                 </div>
-                <svg width={16} height={16} viewBox="0 0 16 16" fill="none" className="ml-auto flex-shrink-0 transition-transform duration-200"
+                <svg width={16} height={16} viewBox="0 0 16 16" fill="none" className="hidden sm:block ml-auto flex-shrink-0 transition-transform duration-200"
                   style={{ transform: isCollapsed(vr.key) ? "rotate(-90deg)" : "rotate(0deg)" }}>
                   <path d="M4 6l4 4 4-4" stroke={style.accent} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" opacity={0.5} />
                 </svg>
@@ -522,7 +522,7 @@ export const FleetGrid = memo(function FleetGrid({
 
       {/* Hover Preview — compact mini card */}
       {hoverPreview && !pinnedPreview && (
-        <div className="fixed pointer-events-auto" style={{ zIndex: 30, left: hoverPreview.pos.x, top: hoverPreview.pos.y, animation: "fadeSlideIn 0.15s ease-out" }}
+        <div className="fixed pointer-events-auto max-w-[calc(100vw-16px)]" style={{ zIndex: 30, left: hoverPreview.pos.x, top: hoverPreview.pos.y, animation: "fadeSlideIn 0.15s ease-out" }}
           onMouseEnter={keepPreview} onMouseLeave={hidePreview}
           onClick={(e) => onAgentClick(hoverPreview.agent, hoverPreview.accent, hoverPreview.label, e)}>
           <MiniPreview agent={hoverPreview.agent} accent={hoverPreview.accent} roomLabel={hoverPreview.label} />
@@ -536,7 +536,7 @@ export const FleetGrid = memo(function FleetGrid({
 
       {/* Pinned Preview */}
       {pinnedPreview && pinnedAnimPos && (
-        <div ref={pinnedRef} className="fixed pointer-events-auto" style={{ zIndex: 40, left: pinnedAnimPos.left, top: pinnedAnimPos.top, maxWidth: PREVIEW_CARD.width }}>
+        <div ref={pinnedRef} className="fixed pointer-events-auto max-w-[calc(100vw-16px)]" style={{ zIndex: 40, left: Math.max(8, pinnedAnimPos.left), top: pinnedAnimPos.top, width: "calc(100vw - 16px)", maxWidth: PREVIEW_CARD.width }}>
           <HoverPreviewCard key={pinnedPreview.agent.target} agent={pinnedPreview.agent} roomLabel={pinnedPreview.label} accent={pinnedPreview.accent}
             pinned send={send} onFullscreen={onPinnedFullscreen} onClose={onPinnedClose}
             eventLog={eventLog} addEvent={addEvent}

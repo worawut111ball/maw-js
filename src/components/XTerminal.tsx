@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { wsUrl } from "../lib/api";
 import type { AgentState } from "../lib/types";
+import { QuickCommandBar } from "./QuickCommandBar";
 
 interface XTerminalProps {
   target: string;
@@ -41,6 +42,7 @@ const THEME = {
 
 export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Keep callbacks in refs so terminal effect doesn't re-run on every render
   const onCloseRef = useRef(onClose);
@@ -55,15 +57,17 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const mobileTerminal = window.innerWidth < 640;
 
     const term = new Terminal({
       theme: THEME,
       fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', monospace",
-      fontSize: 13,
-      lineHeight: 1.35,
+      fontSize: mobileTerminal ? 14 : 13,
+      lineHeight: mobileTerminal ? 1.45 : 1.35,
       cursorBlink: !readOnly,
       cursorStyle: readOnly ? "underline" : "bar",
       disableStdin: readOnly,
+      scrollback: 5000,
     });
 
     const fit = new FitAddon();
@@ -85,6 +89,7 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
 
       // Connect to PTY WebSocket
       ws = new WebSocket(wsUrl("/ws/pty"));
+      wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
@@ -172,9 +177,28 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
       dataSub?.dispose();
       binSub?.dispose();
       ws?.close();
+      if (wsRef.current === ws) wsRef.current = null;
       term.dispose();
     };
   }, [target]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return (
+    <>
+      <div
+        ref={containerRef}
+        data-testid="xterminal-content"
+        className="h-full w-full overflow-auto pb-[132px] sm:pb-0"
+        style={{ touchAction: "pan-x pan-y" }}
+      />
+      <QuickCommandBar
+        targetLabel={target}
+        disabled={readOnly}
+        onCommand={(text) => {
+          if (readOnly || !text) return;
+          const ws = wsRef.current;
+          if (ws?.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(text));
+        }}
+      />
+    </>
+  );
 }

@@ -23,9 +23,9 @@ export const RoomGrid = memo(function RoomGrid({ sessions, agents, onSelectAgent
   const busyCount = agents.filter(a => a.status === "busy").length;
 
   return (
-    <div className="max-w-[1200px] mx-auto px-6 pt-8 pb-12">
+    <div className="mx-auto max-w-[1200px] px-4 pb-4 pt-4 sm:px-6 sm:pt-8 sm:pb-12">
       {/* Power bar */}
-      <div className="flex items-center gap-3 mb-5 px-1">
+      <div className="mb-4 flex flex-wrap items-center gap-3 px-1 sm:mb-5">
         <span className="text-[10px] text-white/50 tracking-widest uppercase">Power Level</span>
         <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
           <div
@@ -49,7 +49,7 @@ export const RoomGrid = memo(function RoomGrid({ sessions, agents, onSelectAgent
           return (
             <div
               key={s.name}
-              className="rounded-3xl border backdrop-blur-xl transition-all duration-300 hover:scale-[1.01]"
+              className="rounded-2xl border backdrop-blur-xl transition-all duration-300 hover:scale-[1.01] sm:rounded-3xl"
               style={{
                 background: `${style.floor}88`,
                 borderColor: hasBusy ? `${style.accent}40` : `${style.accent}12`,
@@ -60,10 +60,10 @@ export const RoomGrid = memo(function RoomGrid({ sessions, agents, onSelectAgent
             >
               {/* Room header */}
               <div
-                className="flex items-center justify-between px-5 py-3 rounded-t-3xl border-b"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-t-2xl border-b px-4 py-3 sm:rounded-t-3xl sm:px-5"
                 style={{ background: `${style.wall}dd`, borderColor: `${style.accent}15` }}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <span
                     className="text-xs font-bold tracking-[2px] uppercase"
                     style={{ color: style.accent }}
@@ -96,7 +96,7 @@ export const RoomGrid = memo(function RoomGrid({ sessions, agents, onSelectAgent
               <div className="h-[2px] opacity-50" style={{ background: style.accent }} />
 
               {/* Agent grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-5 min-h-[140px]">
+              <div className="grid min-h-[140px] grid-cols-2 gap-4 p-4 sm:grid-cols-3 sm:p-5 lg:grid-cols-4">
                 {roomAgents.map((agent) => (
                   <AgentCard
                     key={agent.target}

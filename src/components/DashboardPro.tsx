@@ -110,18 +110,18 @@ function PeerHealthPanel({ fed }: { fed: FedStatus | null }) {
   if (!fed) return <PanelShell title="Peers" subtitle="loading..." />;
   return (
     <PanelShell title="Peers" subtitle={`${fed.reachablePeers}/${fed.totalPeers} reachable`}>
-      <div className="space-y-1.5">
+      <div className="space-y-2 sm:space-y-1.5">
         {fed.peers.map((p) => (
-          <div key={p.url} className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
+          <div key={p.url} className="flex items-center justify-between gap-3 text-[12px] leading-relaxed sm:text-xs">
+            <div className="flex min-w-0 items-center gap-2">
               <span
                 className="w-2 h-2 rounded-full"
                 style={{ backgroundColor: p.reachable ? "#22c55e" : "#ef4444" }}
               />
-              <span className="text-white/70">{p.node || p.url.replace(/^https?:\/\//, "")}</span>
+              <span className="truncate text-white/70">{p.node || p.url.replace(/^https?:\/\//, "")}</span>
               {p.agents && <span className="text-white/30">({p.agents.length})</span>}
             </div>
-            <span className="text-white/40 font-mono">
+            <span className="shrink-0 font-mono text-white/40">
               {p.reachable ? `${p.latency}ms` : "offline"}
             </span>
           </div>
@@ -139,7 +139,7 @@ function ClockDriftPanel({ fed }: { fed: FedStatus | null }) {
       title="Clock Health"
       subtitle={ch ? `up ${formatUptime(ch.uptimeSeconds)}` : "no data"}
     >
-      <div className="space-y-1.5">
+      <div className="space-y-2 sm:space-y-1.5">
         {ch && (
           <div className="text-xs text-white/40 mb-2">
             {ch.timezone} &middot; {new Date(ch.clockUtc).toLocaleTimeString()}
@@ -149,8 +149,8 @@ function ClockDriftPanel({ fed }: { fed: FedStatus | null }) {
           const drift = p.clockDeltaMs;
           const warn = p.clockWarning;
           return (
-            <div key={p.url} className="flex items-center justify-between text-xs">
-              <span className="text-white/70">{p.node || "?"}</span>
+            <div key={p.url} className="flex items-center justify-between gap-3 text-[12px] leading-relaxed sm:text-xs">
+              <span className="truncate text-white/70">{p.node || "?"}</span>
               <span
                 className="font-mono"
                 style={{ color: warn ? "#f59e0b" : drift != null ? "#22c55e" : "#666" }}
@@ -198,13 +198,13 @@ function AgentGridPanel({ sessions, onRefresh }: { sessions: Session[]; onRefres
 
   return (
     <PanelShell title="Agents" subtitle={`${total} across ${sessions.length} sessions`}>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1.5 sm:gap-1">
         {sessions.flatMap((s) =>
           s.windows.map((w) =>
             READONLY ? (
               <span
                 key={`${s.name}-${w.name}-${w.repo ?? ""}`}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+                className="min-h-8 rounded px-2 py-1 text-[11px] font-mono sm:min-h-0 sm:px-1.5 sm:py-0.5 sm:text-[10px]"
                 style={{
                   backgroundColor: w.active ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.05)",
                   color: w.active ? "#22c55e" : "rgba(255,255,255,0.3)",
@@ -215,7 +215,7 @@ function AgentGridPanel({ sessions, onRefresh }: { sessions: Session[]; onRefres
             ) : (
               <button
                 key={`${s.name}-${w.name}-${w.repo ?? ""}`}
-                className="px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer hover:ring-1 hover:ring-white/20 transition-all"
+                className="min-h-8 rounded px-2 py-1 text-[11px] font-mono cursor-pointer transition-all hover:ring-1 hover:ring-white/20 sm:min-h-0 sm:px-1.5 sm:py-0.5 sm:text-[10px]"
                 style={{
                   backgroundColor: w.active ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.05)",
                   color: acting === w.name ? "#f59e0b" : w.active ? "#22c55e" : "rgba(255,255,255,0.3)",
@@ -249,19 +249,19 @@ function PluginPanel({ plugins }: { plugins: PluginStatus | Plugin[] | null }) {
         ? `${list.length} loaded · ${totalEvents} events${totalErrors > 0 ? ` · ${totalErrors} errors` : ""}`
         : `${list.length} loaded`}
     >
-      <div className="space-y-1">
+      <div className="space-y-1.5 sm:space-y-1">
         {list.map((p: any) => (
-          <div key={p.name} className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
+          <div key={p.name} className="flex items-center justify-between gap-3 text-[12px] leading-relaxed sm:text-xs">
+            <div className="flex min-w-0 items-center gap-2">
               <span
                 className="w-1.5 h-1.5 rounded-full"
                 style={{ backgroundColor: (p.errors ?? 0) > 0 ? "#ef4444" : "#22c55e" }}
               />
-              <span className="text-white/60">{p.name.replace(/\.ts$/, "")}</span>
-              <span className="text-white/20 text-[10px]">{p.source ?? p.version ?? ""}</span>
+              <span className="truncate text-white/60">{p.name.replace(/\.ts$/, "")}</span>
+              <span className="shrink-0 text-[10px] text-white/20">{p.source ?? p.version ?? ""}</span>
             </div>
             {hasRuntimeStats && (
-              <span className="text-white/40 font-mono text-[10px]">
+              <span className="shrink-0 font-mono text-[10px] text-white/40">
                 {p.events}ev{p.errors > 0 && <span className="text-red-400 ml-1">{p.errors}err</span>}
               </span>
             )}
@@ -275,10 +275,10 @@ function PluginPanel({ plugins }: { plugins: PluginStatus | Plugin[] | null }) {
 function LiveFeedPanel({ feed }: { feed: FeedEvent[] }) {
   return (
     <PanelShell title="Live Feed" subtitle={`${feed.length} recent events`}>
-      <div className="space-y-1 max-h-48 overflow-y-auto">
-        {feed.length === 0 && <div className="text-xs text-white/20">no events yet</div>}
+      <div className="max-h-[42dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-48 sm:space-y-1">
+        {feed.length === 0 && <div className="text-[12px] leading-relaxed text-white/20 sm:text-xs">no events yet</div>}
         {feed.map((e, i) => (
-          <div key={i} className="text-[10px] leading-tight">
+          <div key={i} className="text-[12px] leading-relaxed sm:text-[10px] sm:leading-tight">
             <span className="text-white/30">{e.event}</span>{" "}
             <span className="text-cyan-400/70">{e.oracle?.replace(/-oracle$/, "")}</span>
             {e.message && (
@@ -305,10 +305,10 @@ function PanelShell({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-white/60">{title}</span>
-        {subtitle && <span className="text-[10px] text-white/30">{subtitle}</span>}
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 sm:p-3">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <span className="text-[13px] font-medium text-white/60 sm:text-xs">{title}</span>
+        {subtitle && <span className="shrink-0 text-right text-[10px] text-white/30">{subtitle}</span>}
       </div>
       {children}
     </div>
@@ -327,10 +327,10 @@ export default function DashboardPro() {
   const { fed, plugins, feed, sessions, loading, refresh, wsConnected } = useDashboardData();
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-white/90">Dashboard Pro</h2>
+    <div className="mx-auto max-w-5xl space-y-4 px-4 py-4 sm:px-0 sm:py-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <h2 className="truncate text-lg font-semibold text-white/90">Dashboard Pro</h2>
           <span
             className="text-[10px] px-2 py-0.5 rounded border"
             style={{
@@ -343,13 +343,13 @@ export default function DashboardPro() {
         </div>
         <button
           onClick={refresh}
-          className="px-2 py-1 text-xs rounded border border-white/10 text-white/40 hover:text-white/60 hover:border-white/20 transition-colors"
+          className="min-h-10 shrink-0 rounded border border-white/10 px-3 py-1 text-xs text-white/40 transition-colors hover:border-white/20 hover:text-white/60 sm:min-h-0 sm:px-2"
         >
           Refresh
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <PeerHealthPanel fed={fed} />
         <ClockDriftPanel fed={fed} />
         <AgentGridPanel sessions={sessions} onRefresh={refresh} />
