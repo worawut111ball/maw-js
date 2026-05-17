@@ -4,6 +4,7 @@ import { agentColor, PREVIEW_CARD } from "../lib/constants";
 import { apiUrl } from "../lib/api";
 import { useAgentPreview } from "../lib/previewStore";
 import { useDevice } from "../hooks/useDevice";
+import { useFileAttach, FileInput, AttachmentChips } from "../hooks/useFileAttach";
 import type { AgentState, AgentEvent } from "../lib/types";
 
 interface HoverPreviewCardProps {
@@ -66,6 +67,21 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
   const agentPreview = useAgentPreview(agent.target);
   const { isMobile } = useDevice();
   const effectiveCompact = compact || isMobile;
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const {
+    uploading,
+    attachments,
+    inputRef: fileInputRef,
+    mode: fileAttachMode,
+    pickFile,
+    pickCamera,
+    pickGallery,
+    onFileChange,
+    removeAttachment,
+    clearAttachments,
+    buildMessage,
+    onPaste,
+  } = useFileAttach();
 
   // Sync prevInputRef when external buffer initializes
   useEffect(() => {
@@ -102,9 +118,11 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
         addEvent?.(agent.target, "command", inputBuf);
         send?.({ type: "send", target: agent.target, text: "\r" });
         streamingRef.current = false;
-      } else if (inputBuf && send) {
-        addEvent?.(agent.target, "command", inputBuf);
-        send({ type: "send", target: agent.target, text: inputBuf });
+      } else if ((inputBuf || attachments.length > 0) && send) {
+        const message = buildMessage(inputBuf);
+        addEvent?.(agent.target, "command", message);
+        send({ type: "send", target: agent.target, text: message });
+        clearAttachments();
       }
       setInputBuf("");
       prevInputRef.current = "";
@@ -115,7 +133,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       send({ type: "send", target: agent.target, text: "\b" });
       return; // let default input handling remove the char
     }
-  }, [inputBuf, agent.target, send, onClose, onFullscreen]);
+  }, [inputBuf, attachments.length, agent.target, send, onClose, onFullscreen, addEvent, buildMessage, clearAttachments, setInputBuf]);
 
   // Track previous input value with ref (avoids stale closure)
   const prevInputRef = useRef("");
@@ -492,32 +510,75 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       {/* Bottom: input when pinned, preview text when hovering */}
       {pinned && send ? (
         <div
-          className="flex items-center gap-2 px-3 py-2 bg-[#0e0e18] border-t border-white/[0.06] font-mono text-xs cursor-text"
+          className="relative flex flex-col gap-2 px-3 py-2 bg-[#0e0e18] border-t border-white/[0.06] font-mono text-xs cursor-text"
           onClick={() => inputRef.current?.focus()}
         >
-          <span className="text-cyan-400 font-semibold shrink-0">&#x276f;</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputBuf}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            className="min-w-0 flex-1 bg-transparent text-white/90 outline-none caret-cyan-400 font-mono text-xs [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
-            style={{ caretColor: "#22d3ee", WebkitAppearance: "none" }}
-            inputMode="text"
-            enterKeyHint="send"
-            spellCheck={false}
-            autoComplete="off"
-            autoFocus
-            placeholder="type command..."
-          />
-          {inputBuf && (
+          <FileInput inputRef={fileInputRef} onChange={onFileChange} mode={fileAttachMode} />
+          <AttachmentChips attachments={attachments} onRemove={removeAttachment} uploading={uploading} />
+          {attachMenuOpen && (
+            <div
+              className="absolute bottom-[calc(100%-4px)] left-3 z-20 flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#11111d]/95 p-2 shadow-2xl backdrop-blur"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {[
+                { label: "📷 กล้อง", action: pickCamera },
+                { label: "🖼 รูป", action: pickGallery },
+                { label: "📁 ไฟล์", action: () => pickFile("file") },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    item.action();
+                    setAttachMenuOpen(false);
+                  }}
+                  className="min-h-11 shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.045] px-3 text-[12px] text-white/75 active:scale-95"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAttachMenuOpen((open) => !open);
+              }}
+              className="flex min-h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.045] text-base text-white/65 transition-colors active:scale-95 hover:bg-white/[0.08] hover:text-white"
+              title="Attach file"
+              aria-label="Attach file"
+            >
+              📎
+            </button>
+            <span className="text-cyan-400 font-semibold shrink-0">&#x276f;</span>
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputBuf}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onPaste={onPaste}
+              className="min-w-0 flex-1 bg-transparent text-white/90 outline-none caret-cyan-400 font-mono text-xs [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
+              style={{ caretColor: "#22d3ee", WebkitAppearance: "none" }}
+              inputMode="text"
+              enterKeyHint="send"
+              spellCheck={false}
+              autoComplete="off"
+              autoFocus
+              placeholder="type command..."
+            />
+            {(inputBuf || attachments.length > 0) && (
             <button
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 setInputBuf("");
                 prevInputRef.current = "";
+                clearAttachments();
                 if (streamingRef.current) {
                   // Clear what was streamed to tmux
                   send?.({ type: "send", target: agent.target, text: "\x15" }); // Ctrl+U clears line
@@ -530,30 +591,33 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
             >
               ✕
             </button>
-          )}
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!send) return;
-              if (streamingRef.current) {
-                addEvent?.(agent.target, "command", inputBuf);
-                send({ type: "send", target: agent.target, text: "\r" });
-                streamingRef.current = false;
-              } else if (inputBuf) {
-                addEvent?.(agent.target, "command", inputBuf);
-                send({ type: "send", target: agent.target, text: inputBuf });
-              } else {
-                send({ type: "send", target: agent.target, text: "\r" });
-              }
-              setInputBuf("");
-              prevInputRef.current = "";
-              inputRef.current?.focus();
-            }}
-            className="shrink-0 px-3 py-2 sm:px-4 rounded-lg bg-cyan-500 text-black text-xs font-bold cursor-pointer hover:bg-cyan-400 active:bg-cyan-600 transition-colors shadow-lg shadow-cyan-500/20"
-          >
-            SEND
-          </button>
+            )}
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!send) return;
+                if (streamingRef.current) {
+                  addEvent?.(agent.target, "command", inputBuf);
+                  send({ type: "send", target: agent.target, text: "\r" });
+                  streamingRef.current = false;
+                } else if (inputBuf || attachments.length > 0) {
+                  const message = buildMessage(inputBuf);
+                  addEvent?.(agent.target, "command", message);
+                  send({ type: "send", target: agent.target, text: message });
+                  clearAttachments();
+                } else {
+                  send({ type: "send", target: agent.target, text: "\r" });
+                }
+                setInputBuf("");
+                prevInputRef.current = "";
+                inputRef.current?.focus();
+              }}
+              className="shrink-0 px-3 py-2 sm:px-4 rounded-lg bg-cyan-500 text-black text-xs font-bold cursor-pointer hover:bg-cyan-400 active:bg-cyan-600 transition-colors shadow-lg shadow-cyan-500/20"
+            >
+              SEND
+            </button>
+          </div>
         </div>
       ) : (
         <div className="px-3 py-2 bg-[#0e0e18] border-t border-white/[0.06] font-mono text-[9px] text-white/30 truncate">
