@@ -8,6 +8,7 @@ import { roomStyle, PREVIEW_CARD, guessCommand } from "../lib/constants";
 import { BottomStats } from "./BottomStats";
 import { useFps } from "./FpsCounter";
 import { useFleetStore, RECENT_TTL_MS, type RecentEntry } from "../lib/store";
+import { useDevice } from "../hooks/useDevice";
 import type { AgentState, Session, AgentEvent } from "../lib/types";
 import { describeActivity, type FeedEvent } from "../lib/feed";
 import type { Team } from "./TeamPanel";
@@ -238,6 +239,7 @@ export const FleetGrid = memo(function FleetGrid({
   sessions, agents, connected, send, onSelectAgent, eventLog, addEvent, feedActive, agentFeedLog, teams,
 }: FleetGridProps) {
   const fps = useFps();
+  const { isMobile } = useDevice();
   const observe = useVisibleTargets(send);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -536,7 +538,13 @@ export const FleetGrid = memo(function FleetGrid({
 
       {/* Pinned Preview */}
       {pinnedPreview && pinnedAnimPos && (
-        <div ref={pinnedRef} className="fixed pointer-events-auto max-w-[calc(100vw-16px)]" style={{ zIndex: 40, left: Math.max(8, pinnedAnimPos.left), top: pinnedAnimPos.top, width: "calc(100vw - 16px)", maxWidth: PREVIEW_CARD.width }}>
+        <div
+          ref={pinnedRef}
+          className={isMobile ? "fixed inset-0 pointer-events-auto" : "fixed pointer-events-auto max-w-[calc(100vw-16px)]"}
+          style={isMobile
+            ? { zIndex: 40 }
+            : { zIndex: 40, left: Math.max(8, pinnedAnimPos.left), top: pinnedAnimPos.top, width: "calc(100vw - 16px)", maxWidth: PREVIEW_CARD.width }}
+        >
           <HoverPreviewCard key={pinnedPreview.agent.target} agent={pinnedPreview.agent} roomLabel={pinnedPreview.label} accent={pinnedPreview.accent}
             pinned send={send} onFullscreen={onPinnedFullscreen} onClose={onPinnedClose}
             eventLog={eventLog} addEvent={addEvent}

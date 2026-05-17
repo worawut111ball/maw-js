@@ -8,6 +8,7 @@ import { roomStyle, PREVIEW_CARD } from "../lib/constants";
 import { MissionControlHub } from "./MissionControlHub";
 import { MissionControlCluster } from "./MissionControlCluster";
 import { useMissionControl } from "./useMissionControl";
+import { useDevice } from "../hooks/useDevice";
 import type { AgentState, Session, AgentEvent } from "../lib/types";
 import type { Team } from "./TeamPanel";
 
@@ -33,6 +34,7 @@ export const MissionControl = memo(function MissionControl({
   teams,
 }: MissionControlProps) {
   const mc = useMissionControl({ sessions, agents, send, onSelectAgent, addEvent });
+  const { isMobile } = useDevice();
 
   return (
     <div
@@ -163,13 +165,15 @@ export const MissionControl = memo(function MissionControl({
         return (
           <div
             ref={mc.pinnedRef}
-            className="absolute z-40 pointer-events-auto"
-            style={{
-              left: mc.pinnedAnimPos.left,
-              top: mc.pinnedAnimPos.top,
-              maxWidth: PREVIEW_CARD.width,
-              transition: "left 0.3s ease-out, top 0.3s ease-out",
-            }}
+            className={isMobile ? "fixed inset-0 z-40 pointer-events-auto" : "absolute z-40 pointer-events-auto"}
+            style={isMobile
+              ? undefined
+              : {
+                  left: mc.pinnedAnimPos.left,
+                  top: mc.pinnedAnimPos.top,
+                  maxWidth: PREVIEW_CARD.width,
+                  transition: "left 0.3s ease-out, top 0.3s ease-out",
+                }}
           >
             <HoverPreviewCard
               agent={pinned.agent}

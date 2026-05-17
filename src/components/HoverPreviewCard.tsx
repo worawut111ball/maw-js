@@ -213,7 +213,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
   const hasEars = Math.abs(h) % 3 === 0;
   const hasAntenna = !hasEars && Math.abs(h) % 3 === 1;
   const eyeStyle = Math.abs(h >> 4) % 3;
-  const compactHeight = "calc(100dvh - 80px)";
+  const compactHeight = isMobile ? "100dvh" : "100%";
 
   return (
     <div
@@ -223,6 +223,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
         width: effectiveCompact ? "100%" : `min(100%, ${PREVIEW_CARD.width}px)`,
         height: effectiveCompact ? compactHeight : "min(calc(100dvh - 104px), calc(100vh - 104px))",
         maxHeight: effectiveCompact ? compactHeight : PREVIEW_CARD.maxHeight,
+        paddingBottom: isMobile ? 80 : undefined,
       }}
       onMouseDown={(e) => {
         if (pinned && !effectiveCompact && e.target !== inputRef.current) {
