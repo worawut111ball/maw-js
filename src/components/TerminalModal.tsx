@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
 import type { AgentState } from "../lib/types";
+import { useDevice } from "../hooks/useDevice";
+import { OracleChatInput } from "./OracleChatInput";
 
 const XTerminal = lazy(() => import("./XTerminal").then(m => ({ default: m.XTerminal })));
 
@@ -23,6 +25,8 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSibling, siblings }: TerminalModalProps) {
+  const { isMobile } = useDevice();
+
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0f]">
       <div className="flex h-full min-h-0 flex-col">
@@ -102,9 +106,18 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
               onNavigate={onNavigate}
               siblings={siblings}
               onSelectSibling={onSelectSibling}
+              hideQuickCommandBar={isMobile}
             />
           </Suspense>
         </div>
+        {isMobile && (
+          <OracleChatInput
+            agent={agent}
+            target={agent.target}
+            send={send}
+            onClose={onClose}
+          />
+        )}
       </div>
     </div>
   );

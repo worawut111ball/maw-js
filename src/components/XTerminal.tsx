@@ -14,6 +14,7 @@ interface XTerminalProps {
   siblings: AgentState[];
   onSelectSibling: (agent: AgentState) => void;
   readOnly?: boolean;
+  hideQuickCommandBar?: boolean;
 }
 
 // Catppuccin Mocha palette (matches AC array in ansi.ts)
@@ -41,7 +42,7 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false }: XTerminalProps) {
+export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false, hideQuickCommandBar = false }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [mobileCapture, setMobileCapture] = useState("");
@@ -210,7 +211,7 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
     <>
       <div
         data-testid="xterminal-content"
-        className="relative h-full w-full overflow-hidden pb-[132px] sm:pb-0"
+        className={`relative h-full w-full overflow-hidden ${mobileMirror && !hideQuickCommandBar ? "pb-[132px]" : "pb-0"} sm:pb-0`}
         style={{ touchAction: "pan-x pan-y" }}
       >
         <div
@@ -229,15 +230,17 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
           />
         )}
       </div>
-      <QuickCommandBar
-        targetLabel={target}
-        disabled={readOnly}
-        onCommand={(text) => {
-          if (readOnly || !text) return;
-          const ws = wsRef.current;
-          if (ws?.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(text));
-        }}
-      />
+      {!hideQuickCommandBar && (
+        <QuickCommandBar
+          targetLabel={target}
+          disabled={readOnly}
+          onCommand={(text) => {
+            if (readOnly || !text) return;
+            const ws = wsRef.current;
+            if (ws?.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(text));
+          }}
+        />
+      )}
     </>
   );
 }
