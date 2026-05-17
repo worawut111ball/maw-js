@@ -15,6 +15,7 @@ import { listSessions } from "./transport/ssh";
 import { Tmux } from "./transport/tmux";
 import { handlePtyMessage, handlePtyClose } from "./transport/pty";
 import { setBunServer } from "../lib/elysia-auth";
+import { attachmentPath } from "../api/attach";
 
 // --- Version info (computed once at startup) ---
 
@@ -177,6 +178,12 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     // Elysia handles all /api/* routes
     if (url.pathname.startsWith("/api")) {
       return api.handle(req);
+    }
+    if (url.pathname.startsWith("/attachments/")) {
+      const filename = decodeURIComponent(url.pathname.slice("/attachments/".length));
+      const path = attachmentPath(filename);
+      if (!path || !existsSync(path)) return new Response("not found", { status: 404 });
+      return new Response(Bun.file(path));
     }
     // Hono handles views + static
     return views.fetch(req, { server });
