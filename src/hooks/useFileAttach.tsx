@@ -21,24 +21,40 @@ export function useFileAttach() {
   const [mode, setMode] = useState<FileAttachMode>("file");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const upload = useCallback(async (file: File): Promise<Attachment | null> => {
+  const uploadFile = useCallback(async (file: File): Promise<Attachment> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(apiUrl("/api/attach"), { method: "POST", body: form });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "Upload failed");
+    return { id: data.id, url: data.url, localUrl: data.localUrl, name: data.name, size: data.size, mimeType: data.mimeType };
+  }, []);
+
+  const uploadFiles = useCallback(async (files: File[]): Promise<Attachment[]> => {
+    if (files.length === 0) return [];
     setUploading(true);
+    const uploaded: Attachment[] = [];
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(apiUrl("/api/attach"), { method: "POST", body: form });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Upload failed");
-      const att: Attachment = { id: data.id, url: data.url, localUrl: data.localUrl, name: data.name, size: data.size, mimeType: data.mimeType };
-      setAttachments((prev) => [...prev, att]);
-      return att;
-    } catch (e) {
-      console.error("Upload failed:", e);
-      return null;
+      for (const file of files) {
+        try {
+          uploaded.push(await uploadFile(file));
+        } catch (e) {
+          console.error("Upload failed:", e);
+        }
+      }
+      if (uploaded.length > 0) {
+        setAttachments((prev) => [...prev, ...uploaded]);
+      }
+      return uploaded;
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [uploadFile]);
+
+  const upload = useCallback(async (file: File): Promise<Attachment | null> => {
+    const [att] = await uploadFiles([file]);
+    return att ?? null;
+  }, [uploadFiles]);
 
   const pickFile = useCallback((nextMode: FileAttachMode = "file") => {
     setMode(nextMode);
@@ -49,13 +65,10 @@ export function useFileAttach() {
   const pickGallery = useCallback(() => pickFile("gallery"), [pickFile]);
 
   const onFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (const file of Array.from(files)) {
-      await upload(file);
-    }
+    const files = Array.from(e.currentTarget.files ?? []);
+    await uploadFiles(files);
     if (inputRef.current) inputRef.current.value = "";
-  }, [upload]);
+  }, [uploadFiles]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -89,11 +102,11 @@ export function useFileAttach() {
             ? `clipboard-${Date.now()}.${file.type.split("/")[1] || "png"}`
             : file.name;
           const renamed = new File([file], name, { type: file.type });
-          await upload(renamed);
+          await uploadFiles([renamed]);
         }
       }
     }
-  }, [upload]);
+  }, [uploadFiles]);
 
   /** Drag & drop handlers — spread on a container */
   const drag = useMemo(() => {
@@ -123,13 +136,10 @@ export function useFileAttach() {
         e.stopPropagation();
         dragCounter = 0;
         delete (e.currentTarget as HTMLElement).dataset.dragOver;
-        const files = e.dataTransfer.files;
-        for (const file of Array.from(files)) {
-          await upload(file);
-        }
+        await uploadFiles(Array.from(e.dataTransfer.files));
       },
     };
-  }, [upload]);
+  }, [uploadFiles]);
 
   // Keep old API for backward compat
   const dragHandlers = useCallback(() => drag, [drag]);

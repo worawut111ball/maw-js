@@ -28,7 +28,10 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
   const { isMobile } = useDevice();
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0f]">
+    <div
+      className="fixed inset-0 z-[70] flex flex-col bg-[#0a0a0f]"
+      style={{ paddingTop: isMobile ? "env(safe-area-inset-top, 0px)" : undefined }}
+    >
       <div className="flex h-full min-h-0 flex-col">
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-white/[0.06] bg-[#0e0e18] px-2 py-2 sm:gap-3 sm:px-4">

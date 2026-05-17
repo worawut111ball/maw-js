@@ -129,6 +129,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
         width: effectiveCompact ? "100%" : `min(100%, ${PREVIEW_CARD.width}px)`,
         height: effectiveCompact ? compactHeight : "min(calc(100dvh - 104px), calc(100vh - 104px))",
         maxHeight: effectiveCompact ? compactHeight : PREVIEW_CARD.maxHeight,
+        paddingTop: isMobile ? "env(safe-area-inset-top, 0px)" : undefined,
         paddingBottom: isMobile ? 80 : undefined,
       }}
       onMouseDown={(e) => {
