@@ -17,6 +17,8 @@ const COMMANDS = [
   { label: "y", text: "y\r", color: "#22C55E" },
   { label: "n", text: "n\r", color: "#ef5350" },
   { label: "↵", text: "\r", color: "#64748B" },
+  { label: "↑", text: "\x1b[A", color: "#64748B" },
+  { label: "↓", text: "\x1b[B", color: "#64748B" },
   { label: "Tab", text: "\t", color: "#a78bfa" },
   { label: "/recap", text: "/recap\r", color: "#fbbf24" },
   { label: "/help", text: "/help\r", color: "#42a5f5" },
@@ -250,4 +252,3 @@ export const OracleChatInput = memo(forwardRef<HTMLInputElement, OracleChatInput
     </>
   );
 }));
-
