@@ -24,6 +24,7 @@ import { SkillsView } from "./components/SkillsView";
 import { YailaiView } from "./components/YailaiView";
 import { ConnectPage } from "./components/ConnectPage";
 import { BottomNav } from "./components/BottomNav";
+import { MobileHeader } from "./components/MobileHeader";
 import { useDevice } from "./hooks/useDevice";
 import { isRemote } from "./lib/api";
 // BoBFaceView, BoardView, LoopsView, JarvisView, HallOfFameView, IPadDashboard
@@ -201,8 +202,8 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
 }) {
   const { isMobile } = useDevice();
   const wrapperClass = fullHeight
-    ? "relative flex flex-col h-[100dvh] overflow-hidden pb-[calc(70px+env(safe-area-inset-bottom,0px))] sm:h-screen sm:pb-0"
-    : "relative min-h-screen pb-[calc(78px+env(safe-area-inset-bottom,0px))] sm:pb-0";
+    ? "relative flex flex-col h-[100dvh] overflow-hidden pt-[calc(44px+env(safe-area-inset-top,0px))] pb-[calc(70px+env(safe-area-inset-bottom,0px))] sm:h-screen sm:pt-0 sm:pb-0"
+    : "relative min-h-screen pt-[calc(44px+env(safe-area-inset-top,0px))] pb-[calc(78px+env(safe-area-inset-bottom,0px))] sm:pt-0 sm:pb-0";
 
   return (
     <div className={wrapperClass} style={{ background: "#020208" }}>
@@ -211,6 +212,7 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
           {statusBarChildren}
         </StatusBar>
       </div>
+      {isMobile && <MobileHeader activeView={activeView} askCount={askCount} muted={muted} onToggleMute={onToggleMute} onInbox={onInbox} />}
       {children}
       {terminalModal}
       {showShortcuts && <ShortcutOverlay onClose={onCloseShortcuts} />}

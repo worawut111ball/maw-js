@@ -126,13 +126,12 @@ export function YailaiView() {
                 let cls = base;
                 if (isSelected) cls += " bg-pink-500/30 text-white border border-pink-400";
                 else if (hasDigest) cls += " bg-pink-500/10 text-white hover:bg-pink-500/20 cursor-pointer border border-pink-400/30";
-                else cls += " text-white/30 cursor-default";
+                else cls += " text-white/30 hover:bg-white/[0.04] cursor-pointer border border-white/[0.04]";
                 if (isToday && !isSelected) cls += " ring-1 ring-cyan-400/60";
                 return (
                   <button
                     key={i}
-                    disabled={!hasDigest}
-                    onClick={() => hasDigest && c.dateStr && setSelected(c.dateStr)}
+                    onClick={() => c.dateStr && setSelected(c.dateStr)}
                     className={cls}
                   >
                     {c.day}
@@ -183,8 +182,8 @@ export function YailaiView() {
           )}
           {selected && !loadingDetail && detail && !detail.exists && (
             <div className="text-center py-16 text-white/40">
-              <div className="text-4xl mb-3">🤷</div>
-              <p>วันนี้ไม่มี digest</p>
+              <div className="text-4xl mb-3">📭</div>
+              <p>ไม่มี digest สำหรับวันนี้</p>
             </div>
           )}
           {selected && !loadingDetail && detail?.exists && detail.markdown && (
