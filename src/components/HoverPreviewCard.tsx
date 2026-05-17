@@ -517,7 +517,7 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
           <AttachmentChips attachments={attachments} onRemove={removeAttachment} uploading={uploading} />
           {attachMenuOpen && (
             <div
-              className="absolute bottom-[calc(100%-4px)] left-3 z-20 flex items-center gap-2 rounded-xl border border-white/[0.08] bg-[#11111d]/95 p-2 shadow-2xl backdrop-blur"
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.08] bg-[#11111d]/95 p-2 shadow-2xl backdrop-blur"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
