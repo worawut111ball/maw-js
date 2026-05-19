@@ -42,6 +42,8 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
+const TERMINAL_FONT_FAMILY = "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace";
+
 export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false, hideQuickCommandBar = false }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -61,130 +63,144 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const mobileTerminal = window.innerWidth < 640;
-
-    const term = new Terminal({
-      theme: THEME,
-      fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace",
-      fontSize: mobileTerminal ? 14 : 13,
-      lineHeight: mobileTerminal ? 1.45 : 1.35,
-      cursorBlink: !readOnly,
-      cursorStyle: readOnly ? "underline" : "bar",
-      disableStdin: readOnly,
-      scrollback: 5000,
-    });
-
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-
+    let cancelled = false;
+    let term: Terminal | null = null;
+    let openTimer: ReturnType<typeof setTimeout> | null = null;
     let ws: WebSocket | null = null;
     let dataSub: { dispose: () => void } | null = null;
     let binSub: { dispose: () => void } | null = null;
-    let resizeTimer: ReturnType<typeof setTimeout>;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeObserver: ResizeObserver | null = null;
-    const decoder = new TextDecoder();
 
-    // Defer open until container has dimensions (avoids "dimensions" crash on first render)
-    const openTimer = setTimeout(() => {
-      try {
-        term.open(container);
-        fit.fit();
-        term.focus();
-      } catch { return; }
-
-      // Connect to PTY WebSocket
-      ws = new WebSocket(wsUrl("/ws/pty"));
-      wsRef.current = ws;
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        ws!.send(JSON.stringify({
-          type: "attach",
-          target,
-          cols: term.cols,
-          rows: term.rows,
-        }));
-      };
-
-      ws.onmessage = (e) => {
-        if (typeof e.data === "string") {
-          try {
-            const msg = JSON.parse(e.data);
-            if (msg.type === "attached") {
-              // Fit terminal to container — server ignores resize for grouped sessions
-              try { fit.fit(); } catch {}
-            }
-            if (msg.type === "detached") {
-              term.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
-            }
-          } catch {}
-        } else {
-          // Binary PTY data is UTF-8; decode as a stream so Thai and other
-          // multibyte glyphs survive chunk boundaries.
-          term.write(decoder.decode(new Uint8Array(e.data), { stream: true }));
-        }
-      };
-
-      ws.onclose = () => {
-        term.write("\r\n\x1b[31m[connection closed]\x1b[0m\r\n");
-      };
-
-      if (!readOnly) {
-        // Keystrokes → binary to PTY stdin
-        const encoder = new TextEncoder();
-        dataSub = term.onData((data) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(encoder.encode(data));
-          }
-        });
-
-        binSub = term.onBinary((data) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            const bytes = new Uint8Array(data.length);
-            for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
-            ws.send(bytes);
-          }
-        });
+    async function initTerminal() {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
       }
+      if (cancelled) return;
 
-      // Navigation shortcuts (work in both read-only and interactive)
-      term.attachCustomKeyEventHandler((e) => {
-        if (e.type !== "keydown") return true;
-        if (readOnly) return false; // Block all keys in read-only
-        if (e.altKey && e.key === "ArrowLeft") { onNavigateRef.current(-1); return false; }
-        if (e.altKey && e.key === "ArrowRight") { onNavigateRef.current(1); return false; }
-        if (e.altKey && e.key >= "1" && e.key <= "9") {
-          const idx = parseInt(e.key) - 1;
-          if (idx < siblingsRef.current.length) onSelectSiblingRef.current(siblingsRef.current[idx]);
-          return false;
-        }
-        return true;
+      const mobileTerminal = window.innerWidth < 640;
+      const activeTerm = new Terminal({
+        theme: THEME,
+        fontFamily: TERMINAL_FONT_FAMILY,
+        fontSize: mobileTerminal ? 14 : 13,
+        lineHeight: mobileTerminal ? 1.45 : 1.35,
+        cursorBlink: !readOnly,
+        cursorStyle: readOnly ? "underline" : "bar",
+        disableStdin: readOnly,
+        scrollback: 5000,
       });
+      term = activeTerm;
 
-      // Auto-resize with debounce
-      resizeObserver = new ResizeObserver(() => {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-          try {
-            fit.fit();
+      const fit = new FitAddon();
+      activeTerm.loadAddon(fit);
+      const decoder = new TextDecoder();
+
+      // Defer open until container has dimensions (avoids "dimensions" crash on first render)
+      openTimer = setTimeout(() => {
+        if (cancelled) return;
+        try {
+          activeTerm.open(container);
+          fit.fit();
+          activeTerm.focus();
+        } catch { return; }
+
+        // Connect to PTY WebSocket
+        ws = new WebSocket(wsUrl("/ws/pty"));
+        wsRef.current = ws;
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          ws!.send(JSON.stringify({
+            type: "attach",
+            target,
+            cols: activeTerm.cols,
+            rows: activeTerm.rows,
+          }));
+        };
+
+        ws.onmessage = (e) => {
+          if (typeof e.data === "string") {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === "attached") {
+                // Fit terminal to container — server ignores resize for grouped sessions
+                try { fit.fit(); } catch {}
+              }
+              if (msg.type === "detached") {
+                activeTerm.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
+              }
+            } catch {}
+          } else {
+            // Binary PTY data is UTF-8; decode as a stream so Thai and other
+            // multibyte glyphs survive chunk boundaries.
+            activeTerm.write(decoder.decode(new Uint8Array(e.data), { stream: true }));
+          }
+        };
+
+        ws.onclose = () => {
+          activeTerm.write("\r\n\x1b[31m[connection closed]\x1b[0m\r\n");
+        };
+
+        if (!readOnly) {
+          // Keystrokes → binary to PTY stdin
+          const encoder = new TextEncoder();
+          dataSub = activeTerm.onData((data) => {
             if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+              ws.send(encoder.encode(data));
             }
-          } catch {}
-        }, 200);
-      });
-      resizeObserver.observe(container);
-    }, 50);
+          });
+
+          binSub = activeTerm.onBinary((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              const bytes = new Uint8Array(data.length);
+              for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
+              ws.send(bytes);
+            }
+          });
+        }
+
+        // Navigation shortcuts (work in both read-only and interactive)
+        activeTerm.attachCustomKeyEventHandler((e) => {
+          if (e.type !== "keydown") return true;
+          if (readOnly) return false; // Block all keys in read-only
+          if (e.altKey && e.key === "ArrowLeft") { onNavigateRef.current(-1); return false; }
+          if (e.altKey && e.key === "ArrowRight") { onNavigateRef.current(1); return false; }
+          if (e.altKey && e.key >= "1" && e.key <= "9") {
+            const idx = parseInt(e.key) - 1;
+            if (idx < siblingsRef.current.length) onSelectSiblingRef.current(siblingsRef.current[idx]);
+            return false;
+          }
+          return true;
+        });
+
+        // Auto-resize with debounce
+        resizeObserver = new ResizeObserver(() => {
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => {
+            try {
+              fit.fit();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "resize", cols: activeTerm.cols, rows: activeTerm.rows }));
+              }
+            } catch {}
+          }, 200);
+        });
+        resizeObserver.observe(container);
+      }, 50);
+    }
+
+    void initTerminal();
 
     return () => {
-      clearTimeout(openTimer);
-      clearTimeout(resizeTimer);
+      cancelled = true;
+      if (openTimer) clearTimeout(openTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
       resizeObserver?.disconnect();
       dataSub?.dispose();
       binSub?.dispose();
       ws?.close();
       if (wsRef.current === ws) wsRef.current = null;
-      term.dispose();
+      term?.dispose();
     };
   }, [target]);
 
@@ -222,7 +238,7 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
           <pre
             className="absolute inset-0 overflow-y-auto overflow-x-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-[1.55] text-[#cdd6f4]"
             style={{
-              fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace",
+              fontFamily: TERMINAL_FONT_FAMILY,
               wordBreak: "normal",
               overflowWrap: "break-word",
             }}
