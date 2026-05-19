@@ -109,18 +109,16 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
               onNavigate={onNavigate}
               siblings={siblings}
               onSelectSibling={onSelectSibling}
-              hideQuickCommandBar={isMobile}
+              hideQuickCommandBar
             />
           </Suspense>
         </div>
-        {isMobile && (
-          <OracleChatInput
-            agent={agent}
-            target={agent.target}
-            send={send}
-            onClose={onClose}
-          />
-        )}
+        <OracleChatInput
+          agent={agent}
+          target={agent.target}
+          send={send}
+          onClose={onClose}
+        />
       </div>
     </div>
   );
