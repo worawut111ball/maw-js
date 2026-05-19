@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import { apiUrl, wsUrl } from "../lib/api";
 import { ansiToHtml, processCapture } from "../lib/ansi";
@@ -88,11 +89,15 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
         cursorStyle: readOnly ? "underline" : "bar",
         disableStdin: readOnly,
         scrollback: 5000,
+        allowProposedApi: true,
       });
       term = activeTerm;
 
       const fit = new FitAddon();
       activeTerm.loadAddon(fit);
+      const unicode11 = new Unicode11Addon();
+      activeTerm.loadAddon(unicode11);
+      activeTerm.unicode.activeVersion = "11";
       const decoder = new TextDecoder();
 
       // Defer open until container has dimensions (avoids "dimensions" crash on first render)
