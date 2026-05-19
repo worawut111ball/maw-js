@@ -42,7 +42,7 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-const TERMINAL_FONT_FAMILY = "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace";
+const TERMINAL_FONT_FAMILY = "'JetBrains Mono', 'Sarabun', 'Noto Sans Thai', monospace";
 
 export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false, hideQuickCommandBar = false }: XTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
