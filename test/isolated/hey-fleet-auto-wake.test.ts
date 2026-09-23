@@ -185,7 +185,11 @@ describe("cmdSend — fleet auto-wake (#736 Phase 1.2)", () => {
     expect(exitCode).toBe(1);
   });
 
-  test("does NOT wake on cross-node target (peer handles its own wake)", async () => {
+  test("does NOT call local cmdWake on cross-node target (#791 wakes remotely via /api/wake)", async () => {
+    // Post-#791: cross-node fleet-known cold targets are pre-woken via
+    // remote /api/wake (not local cmdWake). This test still asserts the
+    // LOCAL cmdWake mock is untouched — the new wake path is HTTP via
+    // curlFetch, exercised separately in test/isolated/cross-node-auto-wake.test.ts.
     fleetKnown.add("hojo"); // even if our local fleet knew about it
     listSessionsReturn = [];
     resolveTargetReturn = { type: "peer", target: "hojo", node: "phaith", peerUrl: "http://phaith:3456" } as any;

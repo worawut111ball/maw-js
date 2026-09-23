@@ -141,6 +141,18 @@ async function fetchPeerSessions(url: string): Promise<Session[]> {
 }
 
 /**
+ * Peek the aggregated peer-sessions cache without triggering a network fetch.
+ * Returns `null` when the cache is empty/stale, or an array of peer-tagged
+ * sessions when fresh. Used by sender-side wake gating (#791) to skip the
+ * pre-call `/api/wake` when the target is already known live on the peer.
+ */
+export function peekCachedPeerSessions(): (Session & { source?: string })[] | null {
+  if (!aggregatedCache) return null;
+  if (Date.now() - aggregatedCache.ts >= CACHE_TTL) return null;
+  return aggregatedCache.peers;
+}
+
+/**
  * Merge local sessions with peer sessions, tagging each with source
  */
 export async function getAggregatedSessions(localSessions: Session[]): Promise<(Session & { source?: string })[]> {

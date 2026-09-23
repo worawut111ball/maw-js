@@ -10,6 +10,28 @@ import { Tmux } from "../../core/transport/tmux";
 import { loadConfig, cfgLimit } from "../../config";
 import { logMessage, emitFeed } from "./comm-log-feed";
 import { writeInboxFile } from "../plugins/inbox/impl";
+import { peekCachedPeerSessions } from "../../core/transport/peers";
+
+/**
+ * Wake a remote peer's agent before sending. Sender-side fix for #791:
+ * `/api/send` does NOT call cmdWake (only `/api/wake` does), so a cold
+ * cross-node target was silently failing. The sender now explicitly
+ * pre-calls `/api/wake` over federation HTTP — `curlFetch` reuses the
+ * existing HMAC signing pipeline, so no new auth surface.
+ *
+ * Returns the curlFetch response. Caller decides how to surface failure.
+ * Single attempt — wake is idempotent on the receiver (cmdWake checks
+ * `detectSession` first), so retries gain nothing and would only delay
+ * the eventual error report.
+ */
+async function wakeRemote(peerUrl: string, target: string): Promise<{ ok: boolean; status: number; data: any }> {
+  return curlFetch(`${peerUrl}/api/wake`, {
+    method: "POST",
+    body: JSON.stringify({ target }),
+    // Wake can be slow on first call (clone + tmux setup) — extend timeout.
+    timeout: 60_000,
+  });
+}
 
 /**
  * Write a message to an oracle's ψ/inbox/ directory.
@@ -220,8 +242,8 @@ export async function cmdSend(query: string, message: string, force = false) {
   // Mirrors view/impl.ts:107 — if the user's hey target is fleet-known but
   // no local session exists, silently wake it before sending. No y/N prompt:
   // fleet membership is sufficient signal that this isn't a typo. Cross-node
-  // targets are skipped here — the remote peer's federation handler wakes its
-  // own fleet (sessions.ts:/api/wake already does cmdWake for inbound peers).
+  // targets are handled in the peer branch below via wakeRemote (#791) —
+  // /api/send does NOT auto-wake on the receiver; only /api/wake does.
   {
     const colonIdx = query.indexOf(":");
     const targetNode = colonIdx >= 0 ? query.slice(0, colonIdx) : null;
@@ -308,6 +330,32 @@ export async function cmdSend(query: string, message: string, force = false) {
 
   // Remote peer → federation HTTP
   if (result?.type === "peer") {
+    // --- #791: sender-side auto-wake for cross-node fleet-known targets ---
+    // /api/send does NOT call cmdWake on the receiver — only /api/wake does.
+    // Without this pre-call, `maw hey peer:fleet-name` to a sleeping remote
+    // agent silently failed. Skip the wake when the cached aggregated peer
+    // sessions show the target as live (warm path = single round-trip).
+    {
+      const cached = peekCachedPeerSessions();
+      const targetLive = cached?.some(s =>
+        s.source === result.peerUrl && (
+          s.name === result.target ||
+          s.windows.some(w => w.name === result.target || w.name === `${result.target}-oracle`)
+        )
+      ) ?? false;
+      if (!targetLive) {
+        const wakeRes = await wakeRemote(result.peerUrl, result.target);
+        if (!wakeRes.ok || wakeRes.data?.error) {
+          // Surface the wake failure — never silently fall through to /api/send,
+          // because send-without-wake is exactly the bug #791 fixed.
+          const detail = wakeRes.data?.error || (wakeRes.status ? `HTTP ${wakeRes.status}` : "connection failed");
+          console.error(`\x1b[31merror\x1b[0m: cross-node wake failed for ${result.node} (${result.peerUrl}): ${detail}`);
+          console.error(`\x1b[33mhint\x1b[0m:  check peer connectivity: maw health`);
+          process.exit(1);
+        }
+      }
+    }
+
     const res = await curlFetch(`${result.peerUrl}/api/send`, {
       method: "POST",
       body: JSON.stringify({ target: result.target, text: message }),
