@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, nestedDeco, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, nestedDeco, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -353,5 +353,35 @@ describe("/ picker: skills and commands", () => {
     const x = slashCommands("codex", null, home);
     expect(x.find(i => i.name === "dig")?.insert).toBe("$dig");
     expect(x.find(i => i.name === "prompts:scan-repo")).toMatchObject({ insert: "/prompts:scan-repo", desc: "Scan the repo" });
+  });
+});
+
+describe("context + limits", () => {
+  test("claude: numbers from the saved status line JSON", () => {
+    const dir = mkdtempSync(join(tmpdir(), "st-"));
+    writeFileSync(join(dir, "a34a3542-aaaa.json"), JSON.stringify({ context_window: { context_window_size: 1000000, used_percentage: 34, current_usage: { input_tokens: 2, cache_creation_input_tokens: 1817, cache_read_input_tokens: 339841 } }, rate_limits: { five_hour: { used_percentage: 1, resets_at: 1792681200 }, seven_day: { used_percentage: 25.4, resets_at: 1793142000 } }, model: { display_name: "Opus 5.5 (1M context)" } }));
+    const u = claudeUsage("a34a3542-aaaa", dir)!;
+    expect(u.context).toEqual({ pct: 34, used: 341660, size: 1000000 });
+    expect(u.limits).toEqual({ h5: { pct: 1, resetsAt: 1792681200 }, d7: { pct: 25, resetsAt: 1793142000 } });
+    expect(claudeLimits(dir)?.d7?.pct).toBe(25);
+    expect(claudeUsage("../etc/passwd", dir)).toBeNull();
+  });
+  test("codex: last token_count event in the rollout", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "cx-")), "rollout.jsonl");
+    writeFileSync(f, [{ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 100 }, model_context_window: 1000 }, rate_limits: null } },
+      { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 212702 }, model_context_window: 258400 }, rate_limits: { primary: { used_percent: 14, window_minutes: 10080, resets_at: 1793082765 }, secondary: { used_percent: 40, window_minutes: 300, resets_at: 1 } } } }].map(x => JSON.stringify(x)).join("\n") + "\n");
+    const u = codexUsage(f)!;
+    expect(u.context).toEqual({ pct: 82, used: 212702, size: 258400 });
+    expect(u.limits).toEqual({ h5: { pct: 40, resetsAt: 1 }, d7: { pct: 14, resetsAt: 1793082765 } });
+  });
+});
+
+describe("queued messages (typed while the agent is busy)", () => {
+  const rule = "─".repeat(20);
+  test("lines above 'send now' hint, wrapped lines joined; placeholder is not a suggestion", () => {
+    const raw = `● Background command done\n\n\x1b[48;5;237m❯ \x1b[38;5;246mทำไมไม่เอาลง บรานกลาง\n  แล้วเอาเข้า deploy ที่เดียว\n❯ อีกข้อความ\n\x1b[49m  ctrl+x ctrl+s to send now\n\n✢ Noodling… (3m 4s · ↓ 358 tokens)\n${rule}\n❯\u00a0\x1b[2mPress up to edit queued messages\x1b[0m\n${rule}`;
+    expect(queuedMessages(raw)).toEqual(["ทำไมไม่เอาลง บรานกลาง แล้วเอาเข้า deploy ที่เดียว", "อีกข้อความ"]);
+    expect(promptSuggestion(raw)).toBeNull();
+    expect(queuedMessages("● done\n❯ old\n")).toEqual([]);
   });
 });

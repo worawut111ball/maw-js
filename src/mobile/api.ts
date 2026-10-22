@@ -241,13 +241,33 @@ export function promptSuggestion(raw: string): { text: string; sure: boolean } |
     const plain = plainOf(lines[i]);
     if (!/^❯\u00a0/.test(plain)) continue;
     const text = plain.slice(2).trim();
-    if (!text || /^Try "/.test(text)) return null; // empty box, or the static placeholder hint
+    if (!text || /^(Try "|Press up to edit queued messages)/.test(text)) return null; // empty box, or a static placeholder hint
     if (!/\x1b\[/.test(lines[i])) return { text, sure: false };
     const after = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^\u00a0/, "");
     const sgr = (after.match(/^(?:\x1b\[[0-9;]*m)+/) ?? [""])[0];
     return /\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m/.test(sgr) ? { text, sure: true } : null;
   }
   return null;
+}
+
+/**
+ * Messages typed while the agent is busy sit in Claude's queue (not in the transcript yet) and are
+ * drawn as "❯ text" lines just above "ctrl+x ctrl+s to send now". Wrapped lines are indented.
+ */
+export function queuedMessages(raw: string): string[] {
+  const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n");
+  const hint = lines.findLastIndex(l => /ctrl\+x ctrl\+s to send now/.test(l));
+  if (hint < 0) return [];
+  const out: string[] = []; let cur: string[] = [];
+  for (let i = hint - 1; i >= 0 && i >= hint - 40; i--) {
+    const l = lines[i];
+    if (!l.trim()) break;
+    const m = /^❯[\s ](.*)$/.exec(l);
+    if (m) { out.unshift([m[1].trim(), ...cur].join(" ").trim()); cur = []; }
+    else if (/^\s+\S/.test(l)) cur.unshift(l.trim());
+    else break;
+  }
+  return out.filter(Boolean);
 }
 
 /**
@@ -653,6 +673,102 @@ export function saveUpload(name: string, data: Uint8Array, dir = UPLOAD_DIR): st
 // ── Workspace explorer (read-only): folders, files, git — like Superset's sidebar ──
 
 let wsPaths: { at: number; map: Map<string, string> } = { at: 0, map: new Map() };
+// ── Context, plan limits and Mac health for the phone header ───────
+
+const STATUS_DIR = join(homedir(), ".maw", "status"); // written by ~/.claude/statusline.sh on every redraw
+type Limit = { pct: number; resetsAt: number | null } | null;
+export interface Usage { context: { pct: number | null; used: number; size: number | null } | null; limits: { h5: Limit; d7: Limit } | null; model?: string | null; at?: number }
+
+const limitOf = (x: any): Limit => x && typeof x.used_percentage === "number" ? { pct: Math.round(x.used_percentage), resetsAt: x.resets_at ?? null } : null;
+
+/** Claude's own numbers (same as its status line) for one session. */
+export function claudeUsage(sid: string, dir = STATUS_DIR): Usage | null {
+  if (!/^[\w-]{8,80}$/.test(sid)) return null;
+  const f = join(dir, sid + ".json");
+  try {
+    const d = JSON.parse(readFileSync(f, "utf-8")), cw = d.context_window ?? {}, u = cw.current_usage ?? {};
+    const used = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+    const size = cw.context_window_size ?? null;
+    return {
+      context: { pct: typeof cw.used_percentage === "number" ? Math.round(cw.used_percentage) : size ? Math.round(used * 100 / size) : null, used, size },
+      limits: d.rate_limits ? { h5: limitOf(d.rate_limits.five_hour), d7: limitOf(d.rate_limits.seven_day) } : null,
+      model: d.model?.display_name ?? null, at: statSync(f).mtimeMs,
+    };
+  } catch { return null; }
+}
+/** Account-wide Claude limits = the most recently written status file that has them. */
+export function claudeLimits(dir = STATUS_DIR): (Usage["limits"] & { at: number }) | null {
+  let best: any = null;
+  try {
+    for (const n of readdirSync(dir)) {
+      if (!n.endsWith(".json")) continue;
+      const u = claudeUsage(n.slice(0, -5), dir);
+      if (u?.limits && (!best || (u.at ?? 0) > best.at)) best = { ...u.limits, at: u.at ?? 0 };
+    }
+  } catch { /* no dir yet */ }
+  return best;
+}
+
+/** Codex writes token_count events (context + rate limits) into its rollout file. */
+export function codexUsage(file: string): Usage | null {
+  try {
+    const size = statSync(file).size, fd = openSync(file, "r");
+    const len = Math.min(size, 512 * 1024), buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len); closeSync(fd);
+    const lines = buf.toString("utf-8").split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"token_count"')) continue;
+      let p: any; try { p = JSON.parse(lines[i]).payload; } catch { continue; }
+      if (p?.type !== "token_count") continue;
+      const win = p.info?.model_context_window ?? null, used = p.info?.last_token_usage?.input_tokens ?? 0;
+      const lim: { h5: Limit; d7: Limit } = { h5: null, d7: null };
+      for (const w of [p.rate_limits?.primary, p.rate_limits?.secondary]) {
+        if (!w) continue;
+        const v = { pct: Math.round(w.used_percent), resetsAt: w.resets_at ?? null };
+        if (w.window_minutes <= 600) lim.h5 = v; else lim.d7 = v;
+      }
+      return { context: p.info ? { pct: win ? Math.round(used * 100 / win) : null, used, size: win } : null, limits: p.rate_limits ? lim : null, at: statSync(file).mtimeMs };
+    }
+  } catch { /* unreadable */ }
+  return null;
+}
+/** Account-wide Codex limits from the newest rollout file. */
+export function codexLimits(root = join(homedir(), ".codex", "sessions")) {
+  const newest = (dir: string) => { try { return readdirSync(dir).filter(n => /^\d+$/.test(n)).sort().reverse(); } catch { return []; } };
+  for (const y of newest(root)) for (const m of newest(join(root, y))) for (const d of newest(join(root, y, m))) {
+    const day = join(root, y, m, d);
+    const files = readdirSync(day).filter(n => n.endsWith(".jsonl")).map(n => ({ f: join(day, n), t: statSync(join(day, n)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const { f } of files.slice(0, 5)) { const u = codexUsage(f); if (u?.limits) return { ...u.limits, at: u.at ?? 0 }; }
+    return null;
+  }
+  return null;
+}
+
+const sh = async (cmd: string[]) => { const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" }); const out = await new Response(p.stdout).text(); await p.exited; return out; };
+let macCache: { at: number; v: any } | null = null;
+/** Battery, CPU, RAM, disk of this Mac (cached 10 s; CPU needs a 1 s sample). */
+export async function macHealth() {
+  if (macCache && Date.now() - macCache.at < 10_000) return macCache.v;
+  const [batt, top, mem, total, df] = await Promise.all([
+    // absolute paths: maw runs under launchd, whose PATH has no /usr/sbin
+    sh(["/usr/bin/pmset", "-g", "batt"]), sh(["/usr/bin/top", "-l", "2", "-n", "0", "-s", "1"]), sh(["/usr/bin/memory_pressure", "-Q"]),
+    sh(["/usr/sbin/sysctl", "-n", "hw.memsize"]), sh(["/bin/df", "-k", "/System/Volumes/Data"]),
+  ].map(p => p.catch(() => "")));
+  const b = /(\d+)%;\s*([\w ]+?);\s*(?:(\d+:\d+) remaining)?/.exec(batt);
+  const cpuL = [...top.matchAll(/CPU usage:.*?([\d.]+)% idle/g)].pop();
+  const freePct = Number(/free percentage:\s*(\d+)%/.exec(mem)?.[1] ?? NaN);
+  const memTotal = Number(total.trim()) || Number(/system has (\d+)/.exec(mem)?.[1] ?? 0);
+  const dfl = df.trim().split("\n")[1]?.split(/\s+/) ?? [];
+  const v = {
+    battery: b ? { pct: +b[1], state: b[2].trim(), remaining: b[3] ?? null, ac: /AC Power/.test(batt) } : null,
+    cpu: cpuL ? Math.round(100 - Number(cpuL[1])) : null,
+    ram: memTotal && !isNaN(freePct) ? { pct: 100 - freePct, totalGB: +(memTotal / 2 ** 30).toFixed(0), usedGB: +((memTotal / 2 ** 30) * (100 - freePct) / 100).toFixed(1) } : null,
+    disk: dfl.length > 3 ? { totalGB: Math.round(+dfl[1] / 2 ** 20), freeGB: Math.round(+dfl[3] / 2 ** 20), pct: Math.round(100 - (+dfl[3] / +dfl[1]) * 100) } : null,
+  };
+  macCache = { at: Date.now(), v };
+  return v;
+}
+
 // ── Slash commands & skills for the "/" picker ───────────────────
 
 export interface SlashCmd { name: string; insert: string; desc: string; source: "builtin" | "user" | "project" | "plugin" | "prompt" | "skill" }
@@ -1132,12 +1248,14 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       try { return { ok: true, content: await readScreen(ch, Math.min(+(query.lines || 150), 400)) }; }
       catch { set.status = 502; return { ok: false, error: "cannot read this room" }; }
     }, { query: t.Object({ lines: t.Optional(t.String()) }) })
-    .get("/rooms/:ws/:room/suggestion", async ({ params, set }) => {
+    .get("/rooms/:ws/:room/suggestion", async ({ params, query, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
-      try { const scr = await readScreen(ch, 40); return { ok: true, suggestion: promptSuggestion(scr), spinner: agentSpinner(scr) }; }
-      catch { return { ok: true, suggestion: null, spinner: null }; }
-    })
+      const usage = query.agent === "codex" ? (f => f ? codexUsage(f) : null)(codexFileFor(params.room)) : query.sid ? claudeUsage(String(query.sid)) : null;
+      try { const scr = await readScreen(ch, 60); return { ok: true, suggestion: promptSuggestion(scr), spinner: agentSpinner(scr), queued: queuedMessages(scr), usage }; }
+      catch { return { ok: true, suggestion: null, spinner: null, queued: [], usage }; }
+    }, { query: t.Object({ agent: t.Optional(t.String()), sid: t.Optional(t.String()) }) })
+    .get("/system", async () => ({ ok: true, mac: await macHealth(), limits: { claude: claudeLimits(), codex: codexLimits() } }))
     .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
