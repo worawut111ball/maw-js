@@ -393,8 +393,8 @@ function CommandCenter({ agents, send }: { agents: AgentState[]; send: (msg: obj
       </div>
 
       {/* Command input */}
-      <div className="rounded-xl border border-white/[0.08] p-4 space-y-3" style={{ background: "rgba(255,255,255,0.02)" }}>
-        <div className="flex items-center gap-3">
+      <div className="rounded-xl border border-white/[0.08] p-3 sm:p-4 space-y-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
           {/* Target selector */}
           <select
             value={broadcastMode ? "__broadcast__" : selectedTarget}
@@ -406,7 +406,7 @@ function CommandCenter({ agents, send }: { agents: AgentState[]; send: (msg: obj
                 setSelectedTarget(e.target.value);
               }
             }}
-            className="bg-black/50 border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono text-white/70 outline-none focus:border-cyan-400/30 min-w-[180px]"
+            className="bg-black/50 border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono text-white/70 outline-none focus:border-cyan-400/30 w-full sm:w-auto min-h-[44px] sm:min-h-0 sm:min-w-[180px]"
           >
             <option value="">Select agent...</option>
             <option value="__broadcast__">Broadcast (all active)</option>
@@ -426,7 +426,7 @@ function CommandCenter({ agents, send }: { agents: AgentState[]; send: (msg: obj
               value={commandText}
               onChange={(e) => setCommandText(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") sendCommand(); }}
-              className="flex-1 bg-black/50 border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono text-white/80 outline-none focus:border-cyan-400/30 placeholder:text-white/15"
+              className="flex-1 bg-black/50 border border-white/[0.08] rounded-lg px-3 py-2 min-h-[44px] sm:min-h-0 text-xs font-mono text-white/80 outline-none focus:border-cyan-400/30 placeholder:text-white/15"
             />
             <button
               onClick={sendCommand}

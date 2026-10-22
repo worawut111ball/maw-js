@@ -214,9 +214,9 @@ function App() {
   }, [sendTarget, sendText]);
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: "#020208" }}>
+    <div className="h-[100dvh] md:h-screen flex flex-col" style={{ background: "#020208" }}>
       {/* Header */}
-      <header className="flex items-center gap-4 px-6 py-4 border-b" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 md:px-6 py-3 md:py-4 border-b" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
         <div className="flex items-center gap-3">
           <span className="text-2xl">🌐</span>
           <h1 className="text-xl font-black tracking-tight" style={{ color: "#a78bfa" }}>Workspace</h1>
@@ -236,7 +236,7 @@ function App() {
         </div>
 
         {/* Node filter pills */}
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex flex-wrap items-center gap-1.5 md:ml-auto">
           <button
             onClick={() => setFilterNode(null)}
             className="text-[10px] font-mono px-2 py-1 rounded-full transition-all"
@@ -259,10 +259,10 @@ function App() {
       </header>
 
       {/* Main */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden">
 
         {/* LEFT: Nodes + Agents */}
-        <div className="w-[340px] flex-shrink-0 border-r overflow-y-auto p-4 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+        <div className="w-full md:w-[340px] flex-shrink-0 border-b md:border-b-0 md:border-r md:overflow-y-auto p-4 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
 
           {nodeList.length === 0 && (
             <div className="text-center py-12">
@@ -328,7 +328,7 @@ function App() {
         </div>
 
         {/* CENTER: Feed */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-[60dvh] md:min-h-0">
           {/* Feed header */}
           <div className="flex items-center gap-2 px-3 py-1.5 border-b" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
             <span className="text-[9px] font-mono text-white/20">{filteredFeed.length} events</span>
@@ -390,7 +390,7 @@ function App() {
         </div>
 
         {/* RIGHT: Stats */}
-        <div className="w-[200px] flex-shrink-0 border-l overflow-y-auto p-3 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+        <div className="w-full md:w-[200px] flex-shrink-0 border-t md:border-t-0 md:border-l md:overflow-y-auto p-3 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
 
           <StatSection title="By Node" color="#a78bfa">
             {nodeList.map(n => {

@@ -31,7 +31,7 @@ export const ChatView = memo(function ChatView({ sessions = [], send }: ChatView
   const toggleHighlight = (id: string) => setHighlighted(highlighted === id ? null : id);
 
   return (
-    <div className="flex flex-col h-[100dvh] sm:h-[calc(100vh-48px)] min-w-0 pb-[128px] sm:pb-0" style={{ background: "#0a0a0f" }}>
+    <div className="flex flex-col h-[calc(100dvh-124px)] sm:h-[calc(100vh-48px)] min-w-0 pb-[56px] sm:pb-0" style={{ background: "#0a0a0f" }}>
       {/* Header */}
       <div
         className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b flex-shrink-0 flex-wrap"

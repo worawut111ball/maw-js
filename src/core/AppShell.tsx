@@ -9,6 +9,7 @@ import { useSessions } from "../hooks/useSessions";
 import { useFleetStore } from "../lib/store";
 import { StatusBar } from "../components/StatusBar";
 import { BottomNav } from "../components/BottomNav";
+import { MobileHeader } from "../components/MobileHeader";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { PinLock } from "../components/PinLock";
 import { setSoundMuted } from "../lib/sounds";
@@ -55,8 +56,8 @@ export function AppShell({ view, fullHeight, children }: AppShellProps) {
   }, [send]);
 
   const wrapperClass = fullHeight
-    ? "mobile-app-shell relative flex flex-col h-[100dvh] overflow-hidden pb-[72px] sm:pb-0"
-    : "mobile-app-shell relative min-h-screen overflow-x-hidden pb-[72px] sm:pb-0";
+    ? "mobile-app-shell relative flex flex-col h-[100dvh] overflow-hidden pt-[52px] pb-[72px] sm:pt-0 sm:pb-0"
+    : "mobile-app-shell relative min-h-screen overflow-x-hidden pt-[52px] pb-[72px] sm:pt-0 sm:pb-0";
 
   const ctx: AppContext = {
     sessions, agents, eventLog, addEvent, feedEvents, feedActive, agentFeedLog, teams,
@@ -81,6 +82,14 @@ export function AppShell({ view, fullHeight, children }: AppShellProps) {
               onToggleMute={toggleMuted}
             />
           </div>
+          {/* Phone: compact top bar (same look as the root app); hidden ≥640px */}
+          <MobileHeader
+            activeView={view}
+            askCount={askCount}
+            muted={muted}
+            onToggleMute={toggleMuted}
+            onInbox={() => { window.location.href = "/inbox.html"; }}
+          />
           {children(ctx)}
           <BottomNav activeView={view} askCount={askCount} />
           {reconnecting && (

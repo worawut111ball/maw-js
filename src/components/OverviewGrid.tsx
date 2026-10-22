@@ -177,16 +177,16 @@ export const OverviewGrid = memo(function OverviewGrid({
   return (
     <div className="relative w-full min-h-screen" style={{ background: "#0a0a12" }}>
       {/* Summary bar */}
-      <div className="max-w-[1600px] mx-auto flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
-        <div className="flex items-center gap-4 text-sm font-mono">
-          <span className="text-white/30 text-[10px] tracking-[4px] uppercase">Oracle Overview</span>
+      <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-6 py-3 sm:py-4 border-b border-white/[0.06] whitespace-nowrap">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-4 text-sm font-mono">
+          <span className="text-white/30 text-[10px] tracking-[4px] uppercase basis-full sm:basis-auto">Oracle Overview</span>
           <span className="text-white/60">{sessions.length} rooms</span>
           <span className="text-white/20">/</span>
           <span className="text-white/60">{agents.length} agents</span>
           <span className="text-white/20">/</span>
           <span style={{ color: fps >= 50 ? "#4caf50" : fps >= 30 ? "#ffa726" : "#ef5350" }}>{fps} fps</span>
         </div>
-        <div className="flex items-center gap-5 text-sm font-mono">
+        <div className="flex items-center gap-3 sm:gap-5 text-sm font-mono">
           {busyCount > 0 && (
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#ffa726] animate-pulse" />
@@ -203,12 +203,12 @@ export const OverviewGrid = memo(function OverviewGrid({
               <span className="text-white/30">{idleCount} idle</span>
             </span>
           )}
-          <span className="text-[9px] text-white/15 font-mono">J to jump</span>
+          <span className="hidden sm:inline text-[9px] text-white/15 font-mono">J to jump</span>
         </div>
       </div>
 
       {/* Session groups */}
-      <div className="max-w-[1600px] mx-auto px-6 py-6 flex flex-col gap-6">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 sm:py-6 flex flex-col gap-4 sm:gap-6">
         {sessionGroups.map(([sessionName, sessionAgents]) => {
           const isOracles = sessionName === "_oracles";
           const style = isOracles ? { accent: "#7e57c2", floor: "#1a1428", wall: "#120e1e", label: "Oracles" } : roomStyle(sessionName);

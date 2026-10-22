@@ -29,7 +29,7 @@ export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbo
 
   return (
     <div
-      className="fixed left-0 right-0 top-0 z-40 flex h-[calc(44px+env(safe-area-inset-top,0px))] items-end justify-between border-b border-white/[0.08] bg-[#05050b]/82 px-3 pb-2 backdrop-blur-xl sm:hidden"
+      className="mobile-header fixed left-0 right-0 top-0 z-40 flex h-[calc(52px+env(safe-area-inset-top,0px))] items-center justify-between gap-2 border-b border-white/[0.08] bg-[#05050b]/82 px-4 backdrop-blur-xl sm:hidden"
       style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
     >
       <div className="flex min-w-0 items-center gap-2 font-mono">
@@ -43,7 +43,7 @@ export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbo
         <button
           type="button"
           onClick={onInbox}
-          className="relative flex h-9 min-w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.045] px-2 text-[15px] active:scale-95"
+          className="relative flex h-10 min-w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.045] px-2 text-[15px] active:scale-95"
           aria-label="Inbox"
           title="Inbox"
         >
@@ -57,7 +57,7 @@ export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbo
         <button
           type="button"
           onClick={onToggleMute}
-          className="flex h-9 min-w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.045] px-2 text-[15px] active:scale-95"
+          className="flex h-10 min-w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.045] px-2 text-[15px] active:scale-95"
           aria-label={muted ? "Unmute" : "Mute"}
           title={muted ? "Unmute" : "Mute"}
         >

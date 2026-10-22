@@ -160,7 +160,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     : "";
 
   return (
-    <div className="flex flex-col md:flex-row mx-2 sm:mx-6 mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06] pb-[128px] sm:pb-0" style={{ height: "calc(100dvh - 8px)" }}>
+    <div className="flex flex-col md:flex-row mx-2 sm:mx-6 mb-2 sm:mb-3 rounded-xl sm:rounded-2xl overflow-hidden border border-white/[0.06] pb-[52px] sm:pb-0 h-[calc(100dvh-132px)] sm:h-[calc(100dvh-8px)]">
       {/* Sidebar */}
       <div className="mobile-landscape-compact w-full md:w-[220px] max-h-[32dvh] md:max-h-none flex-shrink-0 flex md:flex-col gap-1 md:gap-0 border-b md:border-b-0 md:border-r border-white/[0.06] overflow-x-auto md:overflow-x-hidden overflow-y-hidden md:overflow-y-auto scrollbar-none p-1 md:p-0" style={{ background: "#08080e" }}>
         {sessions.map(session => {

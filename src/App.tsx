@@ -202,8 +202,8 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
 }) {
   const { isMobile } = useDevice();
   const wrapperClass = fullHeight
-    ? "relative flex flex-col h-[100dvh] overflow-hidden pt-[calc(44px+env(safe-area-inset-top,0px))] pb-[calc(70px+env(safe-area-inset-bottom,0px))] sm:h-screen sm:pt-0 sm:pb-0"
-    : "relative min-h-screen pt-[calc(44px+env(safe-area-inset-top,0px))] pb-[calc(78px+env(safe-area-inset-bottom,0px))] sm:pt-0 sm:pb-0";
+    ? "relative flex flex-col h-[100dvh] overflow-hidden pt-[52px] pb-[70px] sm:h-screen sm:pt-0 sm:pb-0"
+    : "relative min-h-screen pt-[52px] pb-[78px] sm:pt-0 sm:pb-0";
 
   return (
     <div className={wrapperClass} style={{ background: "#020208" }}>
