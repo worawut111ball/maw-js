@@ -46,6 +46,9 @@ describe("status", () => {
     expect(statusFromHook("PermissionRequest")).toBe("waiting");
     expect(statusFromHook("Stop")).toBe("done");
     expect(statusFromHook("SessionEnd")).toBe("ended");
+    expect(statusFromHook("StopFailure")).toBe("waiting");
+    expect(pushFor("StopFailure", "team2", "rate_limit")?.title).toBe("🔴 error · team2");
+    expect(pushFor("StopFailure", "team2", "rate_limit")?.body).toContain("rate_limit");
     expect(statusFromHook("SomethingElse")).toBeNull();
   });
 
@@ -59,6 +62,12 @@ describe("status", () => {
   test("stale hook state is ignored", () => {
     const hook = { status: "done" as const, event: "Stop", at: 1 };
     expect(toMobileAgent(session(), hook, room({ status: "busy" })).status).toBe("working");
+  });
+
+  test("a resumed session (same id, live process) ignores the SessionEnd of its previous run", () => {
+    const hook = { status: "ended" as const, event: "SessionEnd", at: 1_000_000 };
+    expect(toMobileAgent(session(), hook, room({ status: "idle" })).status).toBe("idle");
+    expect(toMobileAgent(session(), hook, undefined).status).toBe("ended");
   });
 
   test("a session without a live process is ended (other rooms in the same folder no longer leak in)", () => {

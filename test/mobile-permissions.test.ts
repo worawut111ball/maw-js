@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePrompt, parseMenu, optionKind, stripAnsi, promptSig, mount } from "../src/mobile/features/permissions";
+import { parsePrompt, parseMenu, dialogPass, optionKind, stripAnsi, promptSig, mount } from "../src/mobile/features/permissions";
 
 const E = "\x1b[";
 const dim = (s: string) => `${E}2m${s}${E}22m`;
@@ -339,5 +339,32 @@ describe("parseMenu — other dialogs", () => {
     screen = "⏺ ok\n❯ \n  ? for shortcuts";
     expect(await call({ key: "enter" })).toBe(409);
     expect(pressed).toEqual(["down"]);
+  });
+});
+
+describe("dialog watcher", () => {
+  const teach = ["▔".repeat(40), "  Teach auto mode about your environment?", "", "  ❯ Also scan shell history [✔]", "    Continue", "", "  Enter to continue · Esc to cancel"].join("\n");
+  const perm = ["─".repeat(40), " Bash command", "   rm -rf x", " Do you want to proceed?", " ❯ 1. Yes", "   2. No", " Esc to cancel"].join("\n");
+  const idle = "⏺ done\n❯ \n  ? for shortcuts";
+  const ch = (pane: string) => ({ kind: "tmux", pane, label: "team" + pane }) as any;
+
+  test("pushes once per new dialog, skips permission prompts, busy rooms and the first quiet pass", async () => {
+    const screens: Record<string, string> = { "%1": teach, "%2": perm, "%3": teach };
+    const rooms = new Map<string, any>([
+      ["a", { pid: 1, sessionId: "a", status: "idle", name: "team1", channel: ch("%1") }],
+      ["b", { pid: 2, sessionId: "b", status: "idle", name: "team2", channel: ch("%2") }],
+      ["c", { pid: 3, sessionId: "c", status: "busy", name: "team3", channel: ch("%3") }],
+    ]);
+    const sent: any[] = [];
+    const deps = { rooms: () => rooms, read: async (c: any) => screens[c.pane], notify: async (sid: string, kind: string, msg: any) => { sent.push([sid, kind, msg.title]); } };
+    const seen = new Map<string, string>();
+    expect(await dialogPass(deps, seen, true)).toEqual([]);          // after a restart: remember only
+    screens["%1"] = idle;
+    expect(await dialogPass(deps, seen)).toEqual([]);                 // closed
+    screens["%1"] = teach;
+    expect(await dialogPass(deps, seen)).toEqual(["a"]);              // opened again → push
+    expect(await dialogPass(deps, seen)).toEqual([]);                 // still the same dialog
+    expect(sent).toEqual([["a", "dialog", "❓ รอให้เลือก · team1"]]);
+    expect(JSON.stringify(sent)).not.toContain("Teach");             // no screen text leaves the Mac
   });
 });

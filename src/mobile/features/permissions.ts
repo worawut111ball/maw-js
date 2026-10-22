@@ -4,7 +4,8 @@
 //                                                          same dialog is still open (else 409).
 import { createHash } from "crypto";
 import { t } from "elysia";
-import { readScreen, pressKey, roomChannel } from "./ctx";
+import { readScreen, pressKey, roomChannel, readLiveRooms, notifyPhones } from "./ctx";
+import type { LiveRoom, ReplyChannel } from "./ctx";
 
 export type OptionKind = "allow" | "always" | "deny" | "other";
 export interface PromptOption { n: number; label: string; kind: OptionKind }
@@ -247,9 +248,52 @@ export function parseMenu(raw: string): MenuPrompt | null {
 /** Keys the phone may press inside an open dialog. */
 export const MENU_KEYS = ["up", "down", "left", "right", "enter", "esc", "tab", "space", "1", "2", "3", "4"];
 
+// ── push when a dialog opens ──
+// Permission prompts already push through the Claude hook; other dialogs (trust folder, "Teach auto mode…",
+// pickers) send no hook, so the screens of live rooms are checked here. Only the fact goes out, never the text.
+export const DIALOG_EVERY = 8_000;
+export interface WatchDeps {
+  rooms: () => Map<string, LiveRoom>;
+  read: (ch: ReplyChannel, lines: number) => Promise<string>;
+  notify: (sid: string, kind: string, msg: { title: string; body: string }) => Promise<unknown>;
+}
+/** One pass. `seen` holds the dialog each session showed last time; returns the sessions that were notified. */
+export async function dialogPass(deps: WatchDeps, seen: Map<string, string>, quiet = false): Promise<string[]> {
+  const sent: string[] = [];
+  const live = deps.rooms();
+  for (const sid of [...seen.keys()]) if (!live.has(sid)) seen.delete(sid);
+  for (const r of live.values()) {
+    if (!r.channel || r.status === "busy") continue;            // a dialog stops the agent, so it is never "busy"
+    let menu: MenuPrompt | null = null;
+    try { const raw = await deps.read(r.channel, SCREEN_LINES); menu = parsePrompt(raw) ? null : parseMenu(raw); } catch { continue; }
+    const prev = seen.get(r.sessionId);
+    if (!menu) { seen.delete(r.sessionId); continue; }
+    if (prev === menu.title) continue;                          // same dialog (cursor moves change the sig, not the title)
+    seen.set(r.sessionId, menu.title);
+    if (quiet) continue;
+    const room = r.name || (r.channel as any).label || "Claude";
+    await deps.notify(r.sessionId, "dialog", { title: `❓ รอให้เลือก · ${room}`, body: "มีหน้าถามเปิดค้างบน Mac — แตะเพื่อตอบจากมือถือ" }).catch(() => {});
+    sent.push(r.sessionId);
+  }
+  return sent;
+}
+let watching = false;
+function watchDialogs(): void {
+  if (watching) return; watching = true;
+  const seen = new Map<string, string>();
+  const deps: WatchDeps = { rooms: readLiveRooms, read: readScreen, notify: notifyPhones };
+  let first = true, running = false;
+  setInterval(async () => {
+    if (running) return; running = true;
+    try { await dialogPass(deps, seen, first); first = false; }   // first pass after a restart only remembers what is open
+    finally { running = false; }
+  }, DIALOG_EVERY).unref?.();
+}
+
 /** `deps` exists so tests can swap the terminal for a fake — production always uses the real helpers. */
 export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel } = { readScreen, pressKey, roomChannel }): void {
   const { readScreen: read, pressKey: press, roomChannel: chan } = deps;
+  if (deps.readScreen === readScreen) watchDialogs();   // the real server only — tests pass fakes
   app.get("/rooms/:ws/:room/prompt", async ({ params, set }: any) => {
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }

@@ -81,6 +81,8 @@ export function statusFromHook(event: string): AgentStatus | null {
       return "done";
     case "SessionEnd":
       return "ended";
+    case "StopFailure":
+      return "waiting"; // the turn died on an API error (overloaded, limit, network) → needs the human
     default:
       return null;
   }
@@ -190,7 +192,8 @@ const clip = (s: string | null | undefined, n = 280) => (s ? (s.length > n ? s.s
  */
 export function toMobileAgent(s: ClaudeSession, hook: HookState | undefined, room: LiveRoom | undefined): MobileAgent {
   const base: AgentStatus = room ? statusFromRoom(room.status) : "ended";
-  const status = hook && hook.at >= Date.parse(s.lastActivityAt) - 5_000 && (room || hook.status === "ended") ? hook.status : base;
+  // a live room means the process runs → its "ended" hook belongs to a run before a resume
+  const status = hook && hook.at >= Date.parse(s.lastActivityAt) - 5_000 && (room ? hook.status !== "ended" : hook.status === "ended") ? hook.status : base;
   const ch = room?.channel ?? null;
   return {
     id: s.sessionId,
@@ -357,11 +360,22 @@ export async function readScreen(ch: ReplyChannel, lines: number): Promise<strin
   return String(out.text ?? "");
 }
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   if (ch.kind === "tmux") {
     const tmux = new Tmux();
     await tmux.sendKeysLiteral(ch.pane, text);
+    // an Enter right behind a long paste is sometimes taken as part of the paste → the text sits in the
+    // box unsent. Pause, press, then check the box and press again while our text is still there.
+    await sleep(250);
     await tmux.sendKeys(ch.pane, "Enter");
+    const head = text.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 24);
+    for (let k = 0; k < 2 && head; k++) {
+      await sleep(700);
+      const box = inputDraft(await readScreen(ch, 40).catch(() => ""))?.text.replace(/\s+/g, " ") ?? "";
+      if (!box.startsWith(head)) return;
+      await tmux.sendKeys(ch.pane, "Enter");
+    }
     return;
   }
   ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
@@ -385,7 +399,7 @@ export function statusFromSuperset(state: string | null | undefined, hasAgent: b
   switch (state) {
     case "working": case "starting": return "working";
     case "blocked": return "waiting";
-    case "exited": return "ended";
+    case "exited": return "idle";   // the agent quit but the terminal is open → still typeable (e.g. `claude --continue`)
     default: return "idle";
   }
 }
@@ -408,12 +422,18 @@ function tabTitles(ws: any): Map<string, string> {
     const panes = (tab.panes ?? []).filter((p: any) => p.terminalId);
     for (const pane of panes) {
       if (!tab.title) continue;
-      // A split tab holds several terminals — add each pane's own title so the phone tabs stay distinct.
-      const own = cleanTitle(pane.terminalTitle || pane.title);
-      map.set(pane.terminalId, panes.length > 1 && own ? `${tab.title} · ${own}` : String(tab.title));
+      // A split tab holds several terminals — name each pane the way Superset's pane header does ("Claude", "Codex")
+      const own = cleanTitle(pane.title) || "Terminal";
+      map.set(pane.terminalId, panes.length > 1 ? `${tab.title} · ${own}` : tab.title);
     }
   }
   return map;
+}
+/** Position of each terminal in Superset's tab strip (left → right, panes in order) so the phone lists rooms the same way. */
+function tabOrder(ws: any): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const tab of ws.layout?.tabs ?? []) for (const pane of tab.panes ?? []) if (pane.terminalId && !order.has(pane.terminalId)) order.set(pane.terminalId, order.size);
+  return order;
 }
 
 // ── Local folders & repos (open any repo on this Mac from the phone) ─────────────
@@ -491,16 +511,18 @@ export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>, local
   }
   const fresh = (r: LiveRoom | undefined) => {
     const h = r && hookStates.get(r.sessionId);
-    return h && Date.now() - h.at < 6 * 3600e3 ? h.status : null;
+    // r is a live process: a SessionEnd from before a resume (same session id) is stale
+    return h && h.status !== "ended" && Date.now() - h.at < 6 * 3600e3 ? h.status : null;
   };
   const projects = new Map<string, Project>();
   for (const w of snapshot?.workspaces ?? []) {
     const name = String(w.project ?? w.name ?? "?");
     const p = projects.get(name) ?? { name, source: "superset" as const, workspaces: [] };
-    const titles = tabTitles(w);
+    const titles = tabTitles(w), order = tabOrder(w);
+    const pos = (t: any) => order.get(t.id) ?? 1e6;
     p.workspaces.push({
       id: String(w.id), name: String(w.name ?? ""), branch: w.branch ?? null,
-      rooms: (w.terminals ?? []).map((t: any) => {
+      rooms: [...(w.terminals ?? [])].sort((a: any, b: any) => pos(a) - pos(b)).map((t: any) => {
         const live = byTerminal.get(t.id);
         const agent = t.agent?.id ?? null;
         return {
@@ -903,6 +925,7 @@ export function pushFor(event: string, room: string, message?: string): { title:
   if (event === "Notification" || event === "PermissionRequest")
     return { title: `🟡 รอคำตอบ · ${room}`, body: /permission/i.test(message ?? "") || event === "PermissionRequest" ? "ขออนุญาตใช้ tool — แตะเพื่อตอบ" : "รอพี่ตอบอยู่ — แตะเพื่อเปิดห้อง" };
   if (event === "Stop") return { title: `✅ เสร็จแล้ว · ${room}`, body: "ทำงานรอบนี้เสร็จ — แตะเพื่อดูผล" };
+  if (event === "StopFailure") return { title: `🔴 error · ${room}`, body: `${message ? message + " — " : ""}Claude หยุดกลางทาง — แตะเพื่อดู` };
   return null;
 }
 const lastPush = new Map<string, number>();
@@ -913,7 +936,7 @@ export async function notifyPhones(sid: string, kind: string, msg: { title: stri
   lastPush.set(key, now);
   const d = loadPush(); if (!d.subs.length) return 0;
   webpush.setVapidDetails("mailto:maw-mobile@localhost", d.vapid.publicKey, d.vapid.privateKey);
-  const payload = JSON.stringify({ ...msg, tag: sid, url: `/m.html?open=${encodeURIComponent(sid)}` });
+  const payload = JSON.stringify({ ...msg, kind, tag: sid, url: `/m.html?open=${encodeURIComponent(sid)}` });
   let sent = 0; const keep: any[] = [];
   for (const sub of d.subs) {
     try { await webpush.sendNotification(sub, payload, { TTL: 600, urgency: "high" }); sent++; keep.push(sub); }
@@ -1372,8 +1395,11 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       if (!b.session_id || !status) return { ok: true, ignored: true };
       hookStates.set(String(b.session_id), { status, event: b.hook_event_name, message: clip(b.message, 200) ?? undefined, at: Date.now() });
       const room = readLiveRooms().get(String(b.session_id))?.name || String(b.cwd ?? "").split("/").filter(Boolean).pop() || "Claude";
-      const msg = pushFor(String(b.hook_event_name), room, b.message);
-      if (msg) notifyPhones(String(b.session_id), status, msg).catch(() => {});
+      const ev = String(b.hook_event_name);
+      // StopFailure: the error kind only ("rate_limit", "overloaded"…), never conversation text
+      const why = ev === "StopFailure" ? clip(String(b.error_type ?? (typeof b.error === "string" ? b.error : b.error?.type ?? b.error?.message) ?? b.reason ?? "").replace(/\s+/g, " "), 80) ?? undefined : b.message;
+      const msg = pushFor(ev, room, why);
+      if (msg) notifyPhones(String(b.session_id), ev === "StopFailure" ? "error" : status, msg).catch(() => {});
       return { ok: true };
     })
     .onBeforeHandle(({ request, path, set }) => {

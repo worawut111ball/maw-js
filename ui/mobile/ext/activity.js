@@ -44,8 +44,9 @@
   @keyframes act-pulse { 50% { background: color-mix(in srgb, var(--accent) 22%, transparent); } }
   #act-fab { position: fixed; right: 14px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
   #act-fab[hidden] { display: none; }
-  #act-fab .fab { position: relative; width: 52px; height: 52px; border-radius: 50%; background: #1b1233; border: 1.5px solid #7c3aed; color: #e9d5ff; font-size: 22px; display: grid; place-items: center; box-shadow: 0 6px 22px #000a; }
+  #act-fab .fab { position: relative; width: 52px; height: 52px; padding: 0; overflow: visible; border-radius: 50%; background: #05060a; border: 1.5px solid #7c3aed; color: #e9d5ff; font-size: 22px; display: grid; place-items: center; box-shadow: 0 6px 22px #000a; }
   #act-fab .fab::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid transparent; border-top-color: #a78bfa; border-right-color: #f472b6; animation: act-spin 1.4s linear infinite; }
+  #act-fab .fab img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
   #act-fab .fab .n { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: #f472b6; color: #1b0a14; font: 700 12px/20px var(--font); text-align: center; }
   #act-fab .items { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-height: 55vh; overflow-y: auto; }
   #act-fab .it { display: flex; align-items: center; gap: 8px; max-width: 78vw; padding: 7px 12px; border-radius: 999px; background: var(--card); border: 1px solid #3b2a66; color: var(--text); font: 13px var(--font); box-shadow: 0 4px 16px #0009; animation: act-pop .16s ease-out backwards; }
@@ -130,7 +131,7 @@
     f.hidden = false; placeFab(f);
     const items = S.fan ? `<div class="items">${running.map((r, i) => `<button class="it" data-i="${i}" style="animation-delay:${(running.length - i) * 25}ms">
         <span>${(KIND[r.kind] || ["•"])[0]}</span><span class="l">${esc(r.label || (KIND[r.kind] || [, r.kind])[1])}</span><span class="el">${ago(r.since)}</span></button>`).join("")}</div>` : "";
-    f.innerHTML = items + `<button class="fab" aria-label="งานที่กำลังรัน ${running.length} รายการ">🤖<span class="n">${running.length}</span></button>`;
+    f.innerHTML = items + `<button class="fab" aria-label="งานที่กำลังรัน ${running.length} รายการ"><img src="/icon-192.png" alt=""><span class="n">${running.length}</span></button>`;
     f.querySelector(".fab").onclick = () => {
       S.fan = !S.fan;
       if (S.fan) { const d = document.createElement("div"); d.id = "act-dim"; d.onclick = closeFan; document.body.appendChild(d); } else document.getElementById("act-dim")?.remove();

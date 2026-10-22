@@ -35,9 +35,17 @@ self.addEventListener("fetch", e => {
 // Push from the Mac (agent waiting / done) → system notification; tap opens that room.
 self.addEventListener("push", e => {
   let d = {}; try { d = e.data.json(); } catch { d = { title: "maw", body: e.data?.text() || "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "maw", {
-    body: d.body || "", tag: d.tag || "maw", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: d.url || "/m.html" },
-  }));
+  // the sound itself is Android's per-site setting; the buzz tells kinds apart without looking
+  const buzz = d.kind === "done" ? [70, 60, 70] : d.kind === "error" ? [320, 110, 320, 110, 320] : d.kind === "waiting" || d.kind === "dialog" ? [180, 90, 180, 90, 420] : [120];
+  e.waitUntil((async () => {
+    // app open on screen → it plays its own sound per kind (Android gives a site one sound only)
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const open = wins.find(c => c.visibilityState === "visible" && new URL(c.url).pathname === "/m.html");
+    if (open) { open.postMessage({ type: "sound", kind: d.kind, title: d.title, body: d.body, url: d.url }); return; }
+    await self.registration.showNotification(d.title || "maw", { vibrate: buzz,
+      body: d.body || "", tag: d.tag || "maw", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: d.url || "/m.html" },
+    });
+  })());
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();
