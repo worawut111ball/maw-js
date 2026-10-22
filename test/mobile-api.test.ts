@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -572,5 +572,26 @@ describe("open local repos / folders from the phone", () => {
     const c2: string[][] = [];
     await openTmuxRoom("/Users/x/work/erp", "shell; rm -rf /", undefined, (a: string[]) => { c2.push(a); return "%43"; });
     expect(c2[1]).toEqual(["new-window", "-P", "-F", "#{pane_id}", "-t", "=mm-erp:", "-c", "/Users/x/work/erp"]);
+  });
+});
+
+describe("new folder / git clone from the phone", () => {
+  test("folder names: one plain segment only", () => {
+    expect(safeFolderName("my-app")).toBe("my-app");
+    expect(safeFolderName("งานใหม่ 2")).toBe("งานใหม่ 2");
+    for (const bad of ["", ".ssh", "-rf", "a/b", "..", "a\\b", "x".repeat(81), "a:b"]) expect(safeFolderName(bad)).toBeNull();
+  });
+  test("clone URLs: https or git@ only — no local paths, options, ext:: or embedded credentials", () => {
+    expect(cloneUrlOk("https://github.com/worawut111ball/maw-js.git")).toBeTruthy();
+    expect(cloneUrlOk("git@github.com:worawut111ball/maw-js.git")).toBeTruthy();
+    for (const bad of ["/Users/x/repo", "file:///etc", "ext::sh -c id", "--upload-pack=x", "https://user:tok@github.com/a/b", "http://github.com/a/b", "https://github.com/a/b c"]) expect(cloneUrlOk(bad)).toBeNull();
+    expect(repoNameFromUrl("git@github.com:o/maw-js.git")).toBe("maw-js");
+    expect(repoNameFromUrl("https://github.com/o/r/")).toBe("r");
+  });
+  test("routes refuse bad input before touching the disk", async () => {
+    const post = (p: string, b: any) => req(p, { method: "POST", body: JSON.stringify(b), headers: { "content-type": "application/json", authorization: `Bearer ${cfg.token}` } });
+    expect((await post("/mobile/local/mkdir", { parent: "/etc", name: "x" })).status).toBe(400);
+    expect((await post("/mobile/local/mkdir", { parent: (await import("os")).homedir(), name: ".hidden" })).status).toBe(400);
+    expect((await post("/mobile/local/clone", { parent: (await import("os")).homedir(), url: "file:///etc/passwd" })).status).toBe(400);
   });
 });

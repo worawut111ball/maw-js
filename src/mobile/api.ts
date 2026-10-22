@@ -558,6 +558,22 @@ export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>, local
   return [...projects.values()];
 }
 
+/** A new folder's name: one plain segment, no hidden/dot names, no separators. */
+export function safeFolderName(name: unknown): string | null {
+  const n = String(name ?? "").trim();
+  if (!n || n.length > 80 || n.startsWith(".") || n.startsWith("-") || /[\/\\\x00-\x1f:]/.test(n)) return null;
+  return n;
+}
+/** Only https / ssh git URLs (no local paths, no "ext::", nothing that git could read as an option). */
+export function cloneUrlOk(url: unknown): string | null {
+  const u = String(url ?? "").trim();
+  if (u.length > 300 || /\s/.test(u)) return null;
+  if (/^https:\/\/[\w.-]+(:\d+)?\/[\w.~\-\/]+$/.test(u)) return u;
+  if (/^git@[\w.-]+:[\w.~\-\/]+$/.test(u)) return u;
+  return null;
+}
+export const repoNameFromUrl = (u: string) => (u.replace(/\/+$/, "").split(/[\/:]/).pop() || "repo").replace(/\.git$/, "");
+
 /** New tmux window (session "mm-<folder>", created if missing) running claude / codex / a shell in `dir`. */
 export async function openTmuxRoom(dir: string, agent: string, prompt?: string, run = (args: string[]) => execFileSync("tmux", args, { encoding: "utf-8", timeout: 5_000 })) {
   const session = "mm-" + (dir.split("/").pop() || "home").replace(/[^\w-]/g, "-").slice(0, 30);
@@ -1457,6 +1473,34 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       if ((body as any).pin !== false) list.unshift({ name: String((body as any).name || path.split("/").pop()).slice(0, 60), path });
       saveFolders(list);
       return { ok: true, id: dirId(path), folders: list };
+    })
+    // new empty folder inside a folder the phone may browse
+    .post("/local/mkdir", ({ body, set }) => {
+      const parent = allowedDir(String((body as any).parent ?? "")), name = safeFolderName((body as any).name);
+      if (!parent || !name) { set.status = 400; return { ok: false, error: "ชื่อหรือที่อยู่ไม่ถูกต้อง" }; }
+      const path = join(parent, name);
+      if (existsSync(path)) { set.status = 409; return { ok: false, error: "มีชื่อนี้อยู่แล้ว" }; }
+      try { mkdirSync(path); } catch (e: any) { set.status = 500; return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+      return { ok: true, path };
+    })
+    // git clone <https|ssh url> into a folder the phone may browse (no prompts: private repos need the Mac's saved credentials)
+    .post("/local/clone", async ({ body, set }) => {
+      const parent = allowedDir(String((body as any).parent ?? "")), url = cloneUrlOk((body as any).url);
+      if (!parent || !url) { set.status = 400; return { ok: false, error: "ใช้ได้เฉพาะลิงก์ https:// หรือ git@… ของ repo" }; }
+      const name = safeFolderName((body as any).name || repoNameFromUrl(url));
+      if (!name) { set.status = 400; return { ok: false, error: "ชื่อโฟลเดอร์ไม่ถูกต้อง" }; }
+      const path = join(parent, name);
+      if (existsSync(path)) { set.status = 409; return { ok: false, error: `มีโฟลเดอร์ ${name} อยู่แล้ว` }; }
+      const proc = Bun.spawn(["git", "clone", "--", url, path], { cwd: parent, stdout: "ignore", stderr: "pipe",
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" } });
+      const timer = setTimeout(() => proc.kill(), 300_000);
+      const code = await proc.exited; clearTimeout(timer);
+      if (code !== 0) {
+        const err = (await new Response(proc.stderr).text()).trim().split("\n").filter(l => /fatal|error/i.test(l)).pop() || `git clone ล้มเหลว (${code})`;
+        set.status = 502; return { ok: false, error: err.slice(0, 200) };
+      }
+      reposCache.at = 0;
+      return { ok: true, path, name };
     })
     .post("/local/superset-import", ({ body, set }) => {
       const path = allowedDir(String((body as any).path ?? ""));
