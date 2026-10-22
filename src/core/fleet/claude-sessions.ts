@@ -21,7 +21,7 @@ export interface ClaudeSession {
   ppid: number | null;
   parentChain: string[];
   tmuxTarget: string | null;
-  triggeredFrom: "maw-wake" | "tmux" | "desktop" | "cron" | "unknown";
+  triggeredFrom: "maw-wake" | "tmux" | "superset" | "desktop" | "cron" | "unknown";
   status: "active" | "idle" | "ended";
   lastActivityAt: string;
   lastUserMessage: string | null;
@@ -59,7 +59,9 @@ function listClaudePids(): PidInfo[] {
       try {
         cwd = process.platform === "linux"
           ? execSync(`readlink /proc/${pidStr}/cwd 2>/dev/null`, { encoding: "utf-8", timeout: 1000 }).trim()
-          : execSync(`lsof -p ${pidStr} -Fn 2>/dev/null | grep '^n/' | head -1`, { encoding: "utf-8", timeout: 2000 }).replace(/^n/, "").trim();
+          // macOS: absolute path — daemons started by launchd/brew services often lack /usr/sbin in PATH,
+          // which made every session look "ended". `-a -d cwd` returns the working directory, not the first open file.
+          : execSync(`/usr/sbin/lsof -a -p ${pidStr} -d cwd -Fn 2>/dev/null | grep '^n/' | head -1`, { encoding: "utf-8", timeout: 2000 }).replace(/^n/, "").trim();
       } catch { /* cwd not resolvable */ }
       if (cwd) results.push({ pid: +pidStr, ppid: +ppidStr, cwd, command });
     }
@@ -77,16 +79,18 @@ function classifyTrigger(ppid: number): { chain: string[]; trigger: ClaudeSessio
   for (let i = 0; i < 10 && cur > 1 && !seen.has(cur); i++) {
     seen.add(cur);
     try {
-      const info = execSync(`ps -o comm=,ppid= -p ${cur} 2>/dev/null`, { encoding: "utf-8", timeout: 1000 }).trim();
-      const parts = info.split(/\s+/);
-      const comm = parts.slice(0, -1).join(" ");
-      cur = +(parts.at(-1) || "0");
+      // ppid first + `-ww`: macOS truncates `comm` to 16 chars ("/Applications/Su") which hid Superset/app parents.
+      const info = execSync(`ps -ww -o ppid=,comm= -p ${cur} 2>/dev/null`, { encoding: "utf-8", timeout: 1000 }).trim();
+      const m = info.match(/^(\d+)\s+(.*)$/);
+      const comm = m ? m[2] : "";
+      cur = m ? +m[1] : 0;
       if (comm) chain.push(comm);
     } catch { break; }
   }
   const j = chain.join(" ").toLowerCase();
   if (j.includes("maw")) return { chain, trigger: "maw-wake" };
   if (j.includes("tmux")) return { chain, trigger: "tmux" };
+  if (j.includes("superset")) return { chain, trigger: "superset" };
   if (j.includes("cron") || j.includes("systemd")) return { chain, trigger: "cron" };
   if (j.includes("dock") || j.includes("launchd")) return { chain, trigger: "desktop" };
   return { chain, trigger: "unknown" };
