@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#020208" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="/manifest.json" />
+<title>ARRA Office — 3D Arena</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; overflow: hidden; font-family: 'SF Mono', monospace; }
+  #canvas-container { width: 100vw; height: 100vh; }
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    background: rgba(10,10,15,0.8); backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 20px; display: flex; align-items: center; gap: 16px;
+  }
+  #topbar .title { color: #64b5f6; font-weight: bold; letter-spacing: 4px; font-size: 13px; }
+  #topbar .stats { color: rgba(255,255,255,0.3); font-size: 11px; }
+  #topbar a { color: rgba(255,255,255,0.4); text-decoration: none; font-size: 11px; margin-left: auto; }
+  #topbar a:hover { color: #64b5f6; }
+  #connection {
+    position: fixed; bottom: 16px; left: 16px; z-index: 10;
+    font-size: 10px; color: rgba(255,255,255,0.2);
+  }
+  #connection.connected { color: #22c55e; }
+  #connection.disconnected { color: #ef4444; }
+  #load-status {
+    position: fixed; bottom: 16px; right: 16px; z-index: 10;
+    font-size: 10px; color: rgba(255,255,255,0.3); font-family: 'SF Mono', monospace;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/assets/arena-Co7c_x5q.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  <link rel="modulepreload" crossorigin href="/assets/three.module-CRdPeOSn.js">
+  <link rel="modulepreload" crossorigin href="/assets/OrbitControls-CGCNMYsB.js">
+</head>
+<body>
+
+<div id="topbar">
+  <span class="title">ARRA OFFICE</span>
+  <span class="stats" id="agent-count">0 agents</span>
+  <a href="/">← Dashboard</a>
+</div>
+
+<div id="canvas-container"></div>
+<div id="connection" class="disconnected">disconnected</div>
+<div id="load-status">loading model...</div>
+
+
+
+</body>
+</html>

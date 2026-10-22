@@ -1,0 +1,35 @@
+# maw serve — production single-node for Ball's Oracle hub
+# Start:  docker compose -f docker/compose.prod.yml up -d --build
+# Stop:   docker compose -f docker/compose.prod.yml down
+# Logs:   docker compose -f docker/compose.prod.yml logs -f
+
+services:
+  maw:
+    image: maw-js:prod
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    container_name: maw-serve
+    hostname: aidaeng
+    environment:
+      NODE_NAME: aidaeng
+      MAW_HOME: /root/.maw
+      MAW_HOST: "0.0.0.0"
+      TMUX_TMPDIR: /tmp/tmux-host
+    ports:
+      - "3456:3456"
+    volumes:
+      - maw-data:/root/.maw
+      - /Users/ball/.config/maw:/root/.config/maw:ro
+      - /Users/ball/oracle:/oracle:ro
+      - /Users/ball/ghq:/root/ghq:ro
+      - /tmp/tmux-501:/tmp/tmux-host:rw
+      - /Users/ball/.maw/ui/dist:/root/.maw/ui/dist:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3456/api/plugins"]
+      interval: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  maw-data:
