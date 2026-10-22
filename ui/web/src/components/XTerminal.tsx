@@ -1,0 +1,267 @@
+import { useEffect, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import "@xterm/xterm/css/xterm.css";
+import { apiUrl, wsUrl } from "../lib/api";
+import { ansiToHtml, processCapture } from "../lib/ansi";
+import type { AgentState } from "../lib/types";
+import { QuickCommandBar } from "./QuickCommandBar";
+
+interface XTerminalProps {
+  target: string;
+  onClose: () => void;
+  onNavigate: (dir: -1 | 1) => void;
+  siblings: AgentState[];
+  onSelectSibling: (agent: AgentState) => void;
+  readOnly?: boolean;
+  hideQuickCommandBar?: boolean;
+}
+
+// Catppuccin Mocha palette (matches AC array in ansi.ts)
+const THEME = {
+  background: "#0a0a0f",
+  foreground: "#cdd6f4",
+  cursor: "#22d3ee",
+  cursorAccent: "#0a0a0f",
+  selectionBackground: "#585b7066",
+  black: "#0a0a0f",
+  red: "#f38ba8",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  blue: "#89b4fa",
+  magenta: "#cba6f7",
+  cyan: "#94e2d5",
+  white: "#cdd6f4",
+  brightBlack: "#585b70",
+  brightRed: "#f38ba8",
+  brightGreen: "#a6e3a1",
+  brightYellow: "#f9e2af",
+  brightBlue: "#89b4fa",
+  brightMagenta: "#cba6f7",
+  brightCyan: "#94e2d5",
+  brightWhite: "#ffffff",
+};
+
+const TERMINAL_FONT_FAMILY = "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace";
+
+export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false, hideQuickCommandBar = false }: XTerminalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [mobileCapture, setMobileCapture] = useState("");
+  const mobileMirror = typeof window !== "undefined" && window.innerWidth < 640;
+
+  // Keep callbacks in refs so terminal effect doesn't re-run on every render
+  const onCloseRef = useRef(onClose);
+  const onNavigateRef = useRef(onNavigate);
+  const siblingsRef = useRef(siblings);
+  const onSelectSiblingRef = useRef(onSelectSibling);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { onNavigateRef.current = onNavigate; }, [onNavigate]);
+  useEffect(() => { siblingsRef.current = siblings; }, [siblings]);
+  useEffect(() => { onSelectSiblingRef.current = onSelectSibling; }, [onSelectSibling]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let cancelled = false;
+    let term: Terminal | null = null;
+    let openTimer: ReturnType<typeof setTimeout> | null = null;
+    let ws: WebSocket | null = null;
+    let dataSub: { dispose: () => void } | null = null;
+    let binSub: { dispose: () => void } | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+
+    async function initTerminal() {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+      if (cancelled) return;
+
+      const mobileTerminal = window.innerWidth < 640;
+      const activeTerm = new Terminal({
+        theme: THEME,
+        fontFamily: TERMINAL_FONT_FAMILY,
+        fontSize: mobileTerminal ? 14 : 13,
+        lineHeight: mobileTerminal ? 1.45 : 1.35,
+        cursorBlink: !readOnly,
+        cursorStyle: readOnly ? "underline" : "bar",
+        disableStdin: readOnly,
+        scrollback: 5000,
+        allowProposedApi: true,
+      });
+      term = activeTerm;
+
+      const fit = new FitAddon();
+      activeTerm.loadAddon(fit);
+      const unicode11 = new Unicode11Addon();
+      activeTerm.loadAddon(unicode11);
+      activeTerm.unicode.activeVersion = "11";
+      const decoder = new TextDecoder();
+
+      // Defer open until container has dimensions (avoids "dimensions" crash on first render)
+      openTimer = setTimeout(() => {
+        if (cancelled) return;
+        try {
+          activeTerm.open(container);
+          fit.fit();
+          activeTerm.focus();
+        } catch { return; }
+
+        // Connect to PTY WebSocket
+        ws = new WebSocket(wsUrl("/ws/pty"));
+        wsRef.current = ws;
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          ws!.send(JSON.stringify({
+            type: "attach",
+            target,
+            cols: activeTerm.cols,
+            rows: activeTerm.rows,
+          }));
+        };
+
+        ws.onmessage = (e) => {
+          if (typeof e.data === "string") {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === "attached") {
+                // Fit terminal to container — server ignores resize for grouped sessions
+                try { fit.fit(); } catch {}
+              }
+              if (msg.type === "detached") {
+                activeTerm.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
+              }
+            } catch {}
+          } else {
+            // Binary PTY data is UTF-8; decode as a stream so Thai and other
+            // multibyte glyphs survive chunk boundaries.
+            activeTerm.write(decoder.decode(new Uint8Array(e.data), { stream: true }));
+          }
+        };
+
+        ws.onclose = () => {
+          activeTerm.write("\r\n\x1b[31m[connection closed]\x1b[0m\r\n");
+        };
+
+        if (!readOnly) {
+          // Keystrokes → binary to PTY stdin
+          const encoder = new TextEncoder();
+          dataSub = activeTerm.onData((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(encoder.encode(data));
+            }
+          });
+
+          binSub = activeTerm.onBinary((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              const bytes = new Uint8Array(data.length);
+              for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
+              ws.send(bytes);
+            }
+          });
+        }
+
+        // Navigation shortcuts (work in both read-only and interactive)
+        activeTerm.attachCustomKeyEventHandler((e) => {
+          if (e.type !== "keydown") return true;
+          if (readOnly) return false; // Block all keys in read-only
+          if (e.altKey && e.key === "ArrowLeft") { onNavigateRef.current(-1); return false; }
+          if (e.altKey && e.key === "ArrowRight") { onNavigateRef.current(1); return false; }
+          if (e.altKey && e.key >= "1" && e.key <= "9") {
+            const idx = parseInt(e.key) - 1;
+            if (idx < siblingsRef.current.length) onSelectSiblingRef.current(siblingsRef.current[idx]);
+            return false;
+          }
+          return true;
+        });
+
+        // Auto-resize with debounce
+        resizeObserver = new ResizeObserver(() => {
+          if (resizeTimer) clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => {
+            try {
+              fit.fit();
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "resize", cols: activeTerm.cols, rows: activeTerm.rows }));
+              }
+            } catch {}
+          }, 200);
+        });
+        resizeObserver.observe(container);
+      }, 50);
+    }
+
+    void initTerminal();
+
+    return () => {
+      cancelled = true;
+      if (openTimer) clearTimeout(openTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeObserver?.disconnect();
+      dataSub?.dispose();
+      binSub?.dispose();
+      ws?.close();
+      if (wsRef.current === ws) wsRef.current = null;
+      term?.dispose();
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (!mobileMirror) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function pollCapture() {
+      try {
+        const res = await fetch(apiUrl(`/api/capture?target=${encodeURIComponent(target)}`));
+        const data = await res.json();
+        if (active) setMobileCapture(data.content || "");
+      } catch {}
+      if (active) timer = setTimeout(pollCapture, 1500);
+    }
+    pollCapture();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [mobileMirror, target]);
+
+  return (
+    <>
+      <div
+        data-testid="xterminal-content"
+        className={`relative h-full w-full overflow-hidden ${mobileMirror && !hideQuickCommandBar ? "pb-[132px]" : "pb-0"} sm:pb-0`}
+        style={{ touchAction: "pan-x pan-y" }}
+      >
+        <div
+          ref={containerRef}
+          className={`h-full w-full ${mobileMirror ? "pointer-events-none opacity-0" : "overflow-auto"}`}
+        />
+        {mobileMirror && (
+          <pre
+            className="absolute inset-0 overflow-y-auto overflow-x-auto whitespace-pre-wrap px-3 py-3 text-[12px] leading-[1.55] text-[#cdd6f4]"
+            style={{
+              fontFamily: TERMINAL_FONT_FAMILY,
+              wordBreak: "normal",
+              overflowWrap: "break-word",
+            }}
+            dangerouslySetInnerHTML={{ __html: ansiToHtml(processCapture(mobileCapture)) }}
+          />
+        )}
+      </div>
+      {!hideQuickCommandBar && (
+        <QuickCommandBar
+          targetLabel={target}
+          disabled={readOnly}
+          onCommand={(text) => {
+            if (readOnly || !text) return;
+            const ws = wsRef.current;
+            if (ws?.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(text));
+          }}
+        />
+      )}
+    </>
+  );
+}

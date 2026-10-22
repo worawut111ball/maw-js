@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#020208" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="manifest" href="/manifest.json" />
+<title>Talk — ARRA Oracle</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: #0a0a0f; color: #cdd6f4;
+    display: flex; flex-direction: column;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* TOP BAR */
+  .top-bar {
+    height: 60px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(10,10,15,0.95);
+  }
+  .oracle-icon { font-size: 1.4rem; }
+  .oracle-name {
+    font-size: 1.1rem; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #585b70; flex-shrink: 0;
+  }
+  .status-dot.connected { background: #a6e3a1; box-shadow: 0 0 6px #a6e3a1; }
+  .status-dot.error { background: #f38ba8; }
+  .oracle-sub {
+    font-size: 0.7rem; color: rgba(255,255,255,0.3);
+    margin-left: -4px;
+  }
+  .spacer { flex: 1; }
+  .top-btn {
+    background: none; border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.4); padding: 6px 12px;
+    border-radius: 6px; font-size: 0.75rem; cursor: pointer;
+    font-family: inherit; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .top-btn:hover { color: #cdd6f4; border-color: rgba(255,255,255,0.25); }
+
+  /* TERMINAL */
+  /* BIG MIC ORB */
+  .mic-orb-wrap {
+    flex-shrink: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 20px 0 12px; gap: 8px;
+    background: rgba(10,10,15,0.6);
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .mic-orb {
+    position: relative; width: 100px; height: 100px;
+    cursor: pointer; -webkit-user-select: none;
+  }
+  .mic-orb-inner {
+    width: 100%; height: 100%; border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, rgba(100,181,246,0.15), transparent 70%);
+    border: 2px solid rgba(100,181,246,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.2rem; transition: all 0.3s;
+    box-shadow: 0 0 30px rgba(100,181,246,0.08);
+  }
+  .mic-orb-inner:active { transform: scale(0.92); }
+  .mic-orb.listening .mic-orb-inner {
+    border-color: rgba(34,197,94,0.5);
+    box-shadow: 0 0 50px rgba(34,197,94,0.2);
+    animation: orbPulse 1.2s ease-in-out infinite;
+  }
+  .mic-ring {
+    position: absolute; border-radius: 50%; border: 1px solid rgba(100,181,246,0.06);
+    pointer-events: none;
+  }
+  .mic-ring-1 { inset: -12px; animation: ringRotate 15s linear infinite; }
+  .mic-ring-2 { inset: -24px; animation: ringRotate 25s linear infinite reverse; }
+  @keyframes orbPulse {
+    0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); }
+  }
+  @keyframes ringRotate { 100% { transform: rotate(360deg); } }
+  .mic-label {
+    font-size: 0.7rem; color: rgba(255,255,255,0.2);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .mic-label.active { color: rgba(34,197,94,0.7); }
+  .fullscreen .mic-orb-wrap { display: none; }
+
+  .terminal-wrap {
+    flex: 1; overflow: hidden;
+    position: relative;
+  }
+  .terminal-wrap .xterm { height: 100%; }
+  .terminal-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.2); font-size: 0.85rem;
+    pointer-events: none;
+  }
+  .terminal-overlay.hidden { display: none; }
+
+  /* INPUT BAR */
+  .input-bar {
+    height: 80px; flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    background: rgba(10,10,15,0.95);
+  }
+  .mic-btn {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.5); font-size: 1.2rem;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; transition: all 0.2s;
+  }
+  .mic-btn:hover { border-color: rgba(255,255,255,0.25); color: #cdd6f4; }
+  .mic-btn.listening {
+    border-color: #a6e3a1; color: #a6e3a1;
+    box-shadow: 0 0 12px rgba(166,227,161,0.2);
+    animation: micPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes micPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+  .input-bar input {
+    flex: 1; height: 44px; padding: 0 16px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    color: #cdd6f4; font-size: 0.9rem; font-family: inherit; outline: none;
+    -webkit-appearance: none;
+  }
+  .input-bar input:focus { border-color: rgba(100,181,246,0.4); }
+  .input-bar input::-webkit-search-cancel-button,
+  .input-bar input::-webkit-clear-button,
+  .input-bar input::-ms-clear { display: none; }
+  .input-bar input::placeholder { color: rgba(255,255,255,0.2); }
+  .send-btn {
+    height: 44px; padding: 0 20px; border-radius: 10px;
+    border: none; background: rgba(100,181,246,0.15);
+    color: #64b5f6; font-size: 0.85rem; font-weight: 700;
+    font-family: inherit; cursor: pointer; flex-shrink: 0;
+    letter-spacing: 1px;
+  }
+  .send-btn:hover { background: rgba(100,181,246,0.25); }
+  .send-btn:active { transform: scale(0.96); }
+  .send-btn:disabled { opacity: 0.3; cursor: default; }
+
+  /* Fullscreen */
+  .fullscreen .top-bar,
+  .fullscreen .input-bar { display: none; }
+  .fullscreen .terminal-wrap { flex: 1; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+  <span class="oracle-icon" id="oracleIcon">🟢</span>
+  <span class="oracle-name" id="oracleName">NEO</span>
+  <span class="status-dot" id="statusDot"></span>
+  <span class="oracle-sub" id="oracleSub">The Builder</span>
+  <div class="spacer"></div>
+  <button class="top-btn" id="fullscreenBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+  <a class="top-btn" href="/">← Office</a>
+</div>
+
+<!-- BIG MIC ORB -->
+<div class="mic-orb-wrap" id="micOrbWrap">
+  <div class="mic-orb" id="micOrb" onclick="toggleMic()">
+    <div class="mic-ring mic-ring-1"></div>
+    <div class="mic-ring mic-ring-2"></div>
+    <div class="mic-orb-inner" id="micOrbInner">🎙️</div>
+  </div>
+  <div class="mic-label" id="micLabel">tap to talk to the oracle</div>
+</div>
+
+<!-- TERMINAL -->
+<div class="terminal-wrap" id="terminalWrap">
+  <div class="terminal-overlay" id="terminalOverlay">Connecting to oracle...</div>
+  <div id="terminal" style="width:100%;height:100%;"></div>
+</div>
+
+<!-- INPUT BAR -->
+<div class="input-bar">
+  <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎙️</button>
+  <input type="text" id="msgInput" placeholder="Talk to oracle..."
+    inputMode="text" enterKeyHint="send" autocomplete="off" autocorrect="off"
+    style="-webkit-appearance:none;">
+  <button class="send-btn" id="sendBtn" onclick="sendMessage()">SEND</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+// ===== ORACLE THEMES =====
+const ORACLE_THEMES = {
+  neo:        { icon: '🟢', color: '#64b5f6', title: 'NEO',        sub: 'The Builder' },
+  pulse:      { icon: '💓', color: '#ef4444', title: 'PULSE',      sub: 'The Manager' },
+  hermes:     { icon: '📡', color: '#fbbf24', title: 'HERMES',     sub: 'The Messenger' },
+  mother:     { icon: '🔮', color: '#c084fc', title: 'MOTHER',     sub: 'The Awakener' },
+  calliope:   { icon: '📖', color: '#fb923c', title: 'CALLIOPE',   sub: 'The Storyteller' },
+  pigment:    { icon: '🎨', color: '#f472b6', title: 'PIGMENT',    sub: 'The Designer' },
+  homekeeper: { icon: '🏠', color: '#22d3ee', title: 'HOMEKEEPER', sub: 'The Guardian' },
+  odin:       { icon: '👁️', color: '#a78bfa', title: 'ODIN',       sub: 'The Seer' },
+  volt:       { icon: '⚡', color: '#facc15', title: 'VOLT',       sub: 'The Spark' },
+  arthur:     { icon: '🗡️', color: '#60a5fa', title: 'ARTHUR',     sub: 'The Knight' },
+  floodboy:   { icon: '🌊', color: '#38bdf8', title: 'FLOODBOY',   sub: 'The Watcher' },
+  fireman:    { icon: '🔥', color: '#f87171', title: 'FIREMAN',    sub: 'The Protector' },
+  nexus:      { icon: '🔍', color: '#4ade80', title: 'NEXUS',      sub: 'The Researcher' },
+};
+
+// ===== CONFIG =====
+const pathOracle = location.pathname.split('/').pop();
+const oracle = ORACLE_THEMES[pathOracle] ? pathOracle : 'neo';
+const theme = ORACLE_THEMES[oracle];
+
+// Host: ?host= param or current host
+const params = new URLSearchParams(location.search);
+const apiHost = params.get('host') || location.host;
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const httpProto = location.protocol;
+
+// Apply theme
+document.getElementById('oracleIcon').textContent = theme.icon;
+document.getElementById('oracleName').textContent = theme.title;
+document.getElementById('oracleName').style.color = theme.color;
+document.getElementById('oracleSub').textContent = theme.sub;
+document.title = `${theme.title} — Talk`;
+
+// ===== XTERM SETUP =====
+const XTERM_THEME = {
+  background:          '#0a0a0f',
+  foreground:          '#cdd6f4',
+  cursor:              '#22d3ee',
+  cursorAccent:        '#0a0a0f',
+  selectionBackground: '#585b7066',
+  black:        '#0a0a0f',
+  red:          '#f38ba8',
+  green:        '#a6e3a1',
+  yellow:       '#f9e2af',
+  blue:         '#89b4fa',
+  magenta:      '#cba6f7',
+  cyan:         '#94e2d5',
+  white:        '#cdd6f4',
+  brightBlack:  '#585b70',
+  brightRed:    '#f38ba8',
+  brightGreen:  '#a6e3a1',
+  brightYellow: '#f9e2af',
+  brightBlue:   '#89b4fa',
+  brightMagenta:'#cba6f7',
+  brightCyan:   '#94e2d5',
+  brightWhite:  '#ffffff',
+};
+
+const term = new Terminal({
+  theme: XTERM_THEME,
+  fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace",
+  fontSize: 13,
+  lineHeight: 1.35,
+  cursorBlink: false,
+  cursorStyle: 'underline',
+  disableStdin: true,
+  scrollback: 5000,
+});
+
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+
+const termEl = document.getElementById('terminal');
+const overlayEl = document.getElementById('terminalOverlay');
+const statusDot = document.getElementById('statusDot');
+
+// Open terminal
+term.open(termEl);
+requestAnimationFrame(() => fitAddon.fit());
+
+// ===== CONNECT TO ORACLE =====
+let oracleTarget = null;
+let ws = null;
+
+async function findTarget() {
+  try {
+    const res = await fetch(`${httpProto}//${apiHost}/api/sessions`);
+    const data = await res.json();
+    const sessions = data.sessions || data;
+    for (const s of sessions) {
+      for (const w of (s.windows || [])) {
+        if (w.name === oracle || w.name === `${oracle}-oracle`) {
+          return `${s.name}:${w.index}`;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to fetch sessions:', e);
+  }
+  return null;
+}
+
+async function connect() {
+  overlayEl.classList.remove('hidden');
+  overlayEl.textContent = 'Finding oracle session...';
+
+  oracleTarget = await findTarget();
+  if (!oracleTarget) {
+    overlayEl.textContent = `Oracle "${oracle}" not found. Retrying...`;
+    statusDot.className = 'status-dot error';
+    setTimeout(connect, 5000);
+    return;
+  }
+
+  overlayEl.textContent = `Connecting to ${oracleTarget}...`;
+
+  ws = new WebSocket(`${wsProto}//${apiHost}/ws/pty`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type: 'attach',
+      target: oracleTarget,
+      cols: term.cols,
+      rows: term.rows,
+    }));
+  };
+
+  ws.onmessage = (e) => {
+    if (typeof e.data === 'string') {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'attached') {
+          overlayEl.classList.add('hidden');
+          statusDot.className = 'status-dot connected';
+          fitAddon.fit();
+        }
+        if (msg.type === 'detached') {
+          term.write('\r\n\x1b[33m[session detached]\x1b[0m\r\n');
+          statusDot.className = 'status-dot error';
+        }
+      } catch {}
+    } else {
+      // Binary PTY data → render
+      term.write(new Uint8Array(e.data));
+    }
+  };
+
+  ws.onclose = () => {
+    statusDot.className = 'status-dot error';
+    term.write('\r\n\x1b[31m[connection closed — reconnecting...]\x1b[0m\r\n');
+    setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => {
+    statusDot.className = 'status-dot error';
+  };
+}
+
+connect();
+
+// ===== RESIZE =====
+const resizeObserver = new ResizeObserver(() => {
+  requestAnimationFrame(() => {
+    try {
+      fitAddon.fit();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    } catch {}
+  });
+});
+resizeObserver.observe(termEl);
+
+// ===== FULLSCREEN =====
+let isFullscreen = false;
+function toggleFullscreen() {
+  isFullscreen = !isFullscreen;
+  document.body.classList.toggle('fullscreen', isFullscreen);
+  document.getElementById('fullscreenBtn').textContent = isFullscreen ? '⛶ Exit' : '⛶ Fullscreen';
+  requestAnimationFrame(() => fitAddon.fit());
+}
+
+// ESC exits fullscreen
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isFullscreen) toggleFullscreen();
+});
+
+// ===== SEND MESSAGE =====
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+
+async function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  msgInput.value = '';
+  sendBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${httpProto}//${apiHost}/api/talk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oracle, message: text }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      term.write(`\r\n\x1b[31m[Error: ${data.error || 'send failed'}]\x1b[0m\r\n`);
+    }
+  } catch (err) {
+    term.write(`\r\n\x1b[31m[Error: ${err.message}]\x1b[0m\r\n`);
+  }
+
+  sendBtn.disabled = false;
+  msgInput.focus();
+}
+
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendMessage();
+});
+
+// Auto-focus input
+msgInput.focus();
+setTimeout(() => { msgInput.focus(); msgInput.click(); }, 50);
+
+// ===== VOICE INPUT =====
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = document.getElementById('micBtn');
+let recognition = null;
+let isListening = false;
+
+function toggleMic() {
+  if (!SpeechRecognition) {
+    msgInput.focus();
+    return;
+  }
+
+  if (isListening) {
+    recognition?.stop();
+    isListening = false;
+    micBtn.classList.remove('listening');
+    document.getElementById('micOrb').classList.remove('listening');
+    document.getElementById('micLabel').textContent = 'tap to talk to the oracle';
+    document.getElementById('micLabel').classList.remove('active');
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'th-TH';
+  recognition.interimResults = true;
+  recognition.continuous = false;
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add('listening');
+    document.getElementById('micOrb').classList.add('listening');
+    document.getElementById('micLabel').textContent = 'listening...';
+    document.getElementById('micLabel').classList.add('active');
+  };
+
+  recognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    msgInput.value = transcript;
+    if (e.results[0].isFinal && transcript.trim()) {
+      recognition.stop();
+      sendMessage();
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+  };
+
+  recognition.onerror = () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+  };
+
+  recognition.start();
+}
+</script>
+</body>
+</html>

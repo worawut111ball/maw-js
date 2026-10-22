@@ -1,0 +1,21 @@
+{
+  "name": "oracle-shrine",
+  "account_id": "a5eabdc2b11aae9bd5af46bd6a88179e",
+  "compatibility_date": "2025-01-01",
+  "main": "worker.ts",
+  "assets": {
+    "directory": "./public"
+  },
+  "routes": [
+    {
+      "pattern": "shrine.buildwithoracle.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SHRINE_KV",
+      "id": "ad1542056cc14c408c027d8b83c0a756"
+    }
+  ]
+}

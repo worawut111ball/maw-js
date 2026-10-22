@@ -1,0 +1,244 @@
+import { useState, useRef, useCallback, useMemo } from "react";
+import { apiUrl } from "../lib/api";
+
+export interface Attachment {
+  id: string;
+  url: string;
+  localUrl: string;
+  name: string;
+  size: number;
+  mimeType: string;
+}
+
+export type FileAttachMode = "camera" | "gallery" | "file";
+
+const FILE_ACCEPT = "image/*,application/pdf,.txt,.md,.json,.csv,.log,.yaml,.yml,.toml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.go,.rs,.sh,.sql,.zip,.tar.gz";
+const GALLERY_ACCEPT = "image/*,video/*";
+
+export function useFileAttach() {
+  const [uploading, setUploading] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [mode, setMode] = useState<FileAttachMode>("file");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const uploadFile = useCallback(async (file: File): Promise<Attachment> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(apiUrl("/api/attach"), { method: "POST", body: form });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "Upload failed");
+    return { id: data.id, url: data.url, localUrl: data.localUrl, name: data.name, size: data.size, mimeType: data.mimeType };
+  }, []);
+
+  const uploadFiles = useCallback(async (files: File[]): Promise<Attachment[]> => {
+    if (files.length === 0) return [];
+    setUploading(true);
+    const uploaded: Attachment[] = [];
+    try {
+      for (const file of files) {
+        try {
+          uploaded.push(await uploadFile(file));
+        } catch (e) {
+          console.error("Upload failed:", e);
+        }
+      }
+      if (uploaded.length > 0) {
+        setAttachments((prev) => [...prev, ...uploaded]);
+      }
+      return uploaded;
+    } finally {
+      setUploading(false);
+    }
+  }, [uploadFile]);
+
+  const upload = useCallback(async (file: File): Promise<Attachment | null> => {
+    const [att] = await uploadFiles([file]);
+    return att ?? null;
+  }, [uploadFiles]);
+
+  const pickFile = useCallback((nextMode: FileAttachMode = "file") => {
+    setMode(nextMode);
+    requestAnimationFrame(() => inputRef.current?.click());
+  }, []);
+
+  const pickCamera = useCallback(() => pickFile("camera"), [pickFile]);
+  const pickGallery = useCallback(() => pickFile("gallery"), [pickFile]);
+
+  const onFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.currentTarget.files ?? []);
+    await uploadFiles(files);
+    if (inputRef.current) inputRef.current.value = "";
+  }, [uploadFiles]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const clearAttachments = useCallback(() => {
+    setAttachments([]);
+  }, []);
+
+  /** Build text with attachment URLs appended */
+  const buildMessage = useCallback((text: string): string => {
+    if (attachments.length === 0) return text;
+    const urls = attachments.map((a) => a.localUrl);
+    const suffix = urls.length === 1
+      ? `\n[attached: ${attachments[0].name}] ${urls[0]}`
+      : `\n[${attachments.length} files attached]\n${attachments.map((a, i) => `- ${a.name}: ${urls[i]}`).join("\n")}`;
+    return text ? text + suffix : suffix.trim();
+  }, [attachments]);
+
+  /** Handle paste — extracts files (images from clipboard) */
+  const onPaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          // Give clipboard images a better name
+          const name = file.name === "image.png" || file.name === "blob"
+            ? `clipboard-${Date.now()}.${file.type.split("/")[1] || "png"}`
+            : file.name;
+          const renamed = new File([file], name, { type: file.type });
+          await uploadFiles([renamed]);
+        }
+      }
+    }
+  }, [uploadFiles]);
+
+  /** Drag & drop handlers — spread on a container */
+  const drag = useMemo(() => {
+    let dragCounter = 0;
+    return {
+      onDragEnter: (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter++;
+        (e.currentTarget as HTMLElement).dataset.dragOver = "true";
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter--;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          delete (e.currentTarget as HTMLElement).dataset.dragOver;
+        }
+      },
+      onDragOver: (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      onDrop: async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter = 0;
+        delete (e.currentTarget as HTMLElement).dataset.dragOver;
+        await uploadFiles(Array.from(e.dataTransfer.files));
+      },
+    };
+  }, [uploadFiles]);
+
+  // Keep old API for backward compat
+  const dragHandlers = useCallback(() => drag, [drag]);
+
+  return {
+    uploading,
+    attachments,
+    inputRef,
+    mode,
+    pickFile,
+    pickCamera,
+    pickGallery,
+    onFileChange,
+    removeAttachment,
+    clearAttachments,
+    buildMessage,
+    dragHandlers,
+    drag,
+    onPaste,
+    upload,
+  };
+}
+
+/** Tiny component for the hidden file input */
+export function FileInput({ inputRef, onChange, mode = "file" }: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  mode?: FileAttachMode;
+}) {
+  const accept = mode === "file" ? FILE_ACCEPT : mode === "camera" ? "image/*" : GALLERY_ACCEPT;
+  const capture = mode === "camera" ? "environment" : undefined;
+
+  return (
+    <input
+      data-testid="file-input"
+      ref={inputRef}
+      type="file"
+      multiple={mode !== "camera"}
+      accept={accept}
+      capture={capture}
+      onChange={onChange}
+      className="hidden"
+    />
+  );
+}
+
+export function FileAttachMenu({ onCamera, onGallery, onFile }: {
+  onCamera: () => void;
+  onGallery: () => void;
+  onFile: () => void;
+}) {
+  const buttonClass = "shrink-0 rounded-xl px-3 font-mono text-[12px] text-white/75 active:scale-95";
+  const buttonStyle = { minHeight: 44, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.045)" };
+
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+      <button data-testid="attach-camera" type="button" onClick={onCamera} className={buttonClass} style={buttonStyle}>📷 กล้อง</button>
+      <button data-testid="attach-gallery" type="button" onClick={onGallery} className={buttonClass} style={buttonStyle}>🖼 รูป</button>
+      <button data-testid="attach-file" type="button" onClick={onFile} className={buttonClass} style={buttonStyle}>📁 ไฟล์</button>
+    </div>
+  );
+}
+
+/** Attachment preview chips */
+export function AttachmentChips({ attachments, onRemove, uploading }: { attachments: Attachment[]; onRemove: (id: string) => void; uploading: boolean }) {
+  if (attachments.length === 0 && !uploading) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 py-1 px-1">
+      {attachments.map((a) => {
+        const isImage = a.mimeType.startsWith("image/");
+        return (
+          <div key={a.id} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px]"
+            style={{ background: "rgba(34,211,238,0.08)", border: "1px solid rgba(34,211,238,0.15)" }}>
+            {isImage && (
+              <img src={a.url} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+            )}
+            {!isImage && (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-cyan-400 flex-shrink-0">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><path d="M14 2v6h6" />
+              </svg>
+            )}
+            <span className="text-cyan-400 truncate max-w-[120px]">{a.name}</span>
+            <span className="text-white/30 text-[9px]">{formatSize(a.size)}</span>
+            <button onClick={() => onRemove(a.id)} className="text-white/40 hover:text-red-400 ml-0.5 text-xs leading-none cursor-pointer">&times;</button>
+          </div>
+        );
+      })}
+      {uploading && (
+        <div className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-cyan-400/60"
+          style={{ background: "rgba(34,211,238,0.05)" }}>
+          <span className="animate-pulse">uploading...</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}

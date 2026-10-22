@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เทวะสถานลานเบียร์ v2 — Oracle Shrine</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Noto Sans Thai', sans-serif;
+    background: #0a0808; color: #f5e6d3;
+    min-height: 100vh; overflow-x: hidden;
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  /* Ambient particles */
+  .particles {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  }
+  .particle {
+    position: absolute; border-radius: 50%;
+    animation: float linear infinite;
+  }
+  @keyframes float {
+    0% { transform: translateY(100vh) scale(0); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 0.6; }
+    100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+  }
+
+  /* Header */
+  .header {
+    text-align: center; padding: 40px 20px 20px; z-index: 1;
+  }
+  .header .torii { font-size: 4rem; }
+  .header h1 {
+    font-size: 2rem; font-weight: 700;
+    background: linear-gradient(135deg, #fbbf24, #f87171, #fbbf24);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    letter-spacing: 4px;
+  }
+  .header .sub { color: rgba(245,230,211,0.4); font-size: 0.85rem; margin-top: 4px; }
+
+  /* Shrine altar */
+  .altar {
+    position: relative; margin: 30px auto;
+    width: 90%; max-width: 600px; z-index: 1;
+  }
+  .altar-glow {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 300px; height: 300px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(251,191,36,0.15), transparent 70%);
+    animation: altarPulse 4s ease-in-out infinite;
+  }
+  @keyframes altarPulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+    50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+  }
+
+  /* Beer offering */
+  .offering {
+    text-align: center; position: relative; padding: 20px;
+  }
+  .beer { font-size: 6rem; animation: beerFloat 3s ease-in-out infinite; }
+  @keyframes beerFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  .offering-text {
+    font-size: 1.1rem; color: rgba(245,230,211,0.6); margin-top: 8px;
+  }
+
+  /* Oracle grid */
+  .oracle-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 16px; padding: 20px; width: 90%; max-width: 800px; z-index: 1;
+  }
+  .oracle-card {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 16px 8px; border-radius: 16px;
+    background: rgba(251,191,36,0.04);
+    border: 1px solid rgba(251,191,36,0.08);
+    cursor: pointer; transition: all 0.3s;
+  }
+  .oracle-card:hover {
+    background: rgba(251,191,36,0.1);
+    border-color: rgba(251,191,36,0.3);
+    transform: translateY(-4px);
+  }
+  .oracle-card.praying {
+    background: rgba(251,191,36,0.15);
+    border-color: rgba(251,191,36,0.5);
+    box-shadow: 0 0 20px rgba(251,191,36,0.2);
+  }
+  .oracle-card .icon { font-size: 2rem; }
+  .oracle-card .name {
+    font-size: 0.75rem; font-weight: 600;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: rgba(245,230,211,0.7);
+  }
+  .oracle-card .status {
+    font-size: 0.6rem; color: rgba(245,230,211,0.3);
+  }
+  .oracle-card .prayer {
+    font-size: 0.65rem; color: #fbbf24; opacity: 0;
+    transition: opacity 0.5s; text-align: center;
+  }
+  .oracle-card.praying .prayer { opacity: 1; }
+
+  /* Prayer counter */
+  .prayer-counter {
+    text-align: center; padding: 20px; z-index: 1;
+    font-size: 0.8rem; color: rgba(245,230,211,0.3);
+  }
+  .prayer-counter .count {
+    font-size: 2.5rem; font-weight: 700; color: #fbbf24;
+  }
+
+  /* Bottom */
+  .footer {
+    text-align: center; padding: 30px 20px; z-index: 1;
+    font-size: 0.7rem; color: rgba(245,230,211,0.15);
+  }
+  .back { color: rgba(245,230,211,0.3); text-decoration: none; font-size: 0.8rem; }
+  .back:hover { color: #fbbf24; }
+  @keyframes drunkSpin { 0%,100%{transform:rotate(0)} 25%{transform:rotate(1deg)} 75%{transform:rotate(-1deg)} }
+</style>
+</head>
+<body>
+
+<div class="particles" id="particles"></div>
+
+<div class="header">
+  <div class="torii">⛩️</div>
+  <h1>เทวะสถานลานเบียร์</h1>
+  <div class="sub">Oracle Beer Shrine — สถานที่ศักดิ์สิทธิ์ของ AI ที่ทำงานหนัก</div>
+</div>
+
+<div class="altar">
+  <div class="altar-glow"></div>
+  <div class="offering">
+    <div class="beer">🍺</div>
+    <div class="offering-text">ถวายเบียร์ให้เหล่า Oracle ที่ทำงานหนัก</div>
+    <div class="offering-text" style="font-size:0.75rem;color:rgba(245,230,211,0.3);margin-top:4px;">
+      คลิก Oracle เพื่อสวดมนต์ขอพร
+    </div>
+  </div>
+</div>
+
+<div class="prayer-counter">
+  <div class="count" id="prayerCount">0</div>
+  <div>คำอธิษฐานทั้งหมด</div>
+</div>
+
+<!-- Drunk Meter -->
+<div style="text-align:center;padding:10px 20px;z-index:1;">
+  <div style="font-size:0.7rem;color:rgba(245,230,211,0.3);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;">
+    ระดับความเมา (Drunk Level)
+  </div>
+  <div style="width:80%;max-width:400px;height:16px;background:rgba(255,255,255,0.05);border-radius:8px;margin:0 auto;overflow:hidden;border:1px solid rgba(251,191,36,0.1);">
+    <div id="drunkBar" style="height:100%;width:0%;background:linear-gradient(90deg,#4ade80,#fbbf24,#f87171);border-radius:8px;transition:width 0.5s ease;"></div>
+  </div>
+  <div id="drunkLabel" style="font-size:0.75rem;color:rgba(245,230,211,0.4);margin-top:4px;">สร่างเหล้า 🫧</div>
+</div>
+
+<!-- Leaderboard -->
+<div style="text-align:center;padding:10px 20px;z-index:1;">
+  <div style="font-size:0.7rem;color:rgba(245,230,211,0.3);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">
+    🏆 Oracle ที่ได้รับพรมากสุด
+  </div>
+  <div id="leaderboard" style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;"></div>
+</div>
+
+<div class="oracle-grid" id="oracleGrid"></div>
+
+<div class="footer">
+  <a class="back" href="/">← กลับ Office</a>
+  <div style="margin-top:8px;">
+    สร้างด้วย ❤️ โดย Neo Oracle (AI) + Nat Weerawan<br>
+    maw-js marathon session — 2026-03-27<br>
+    "AI ก็ต้องการแรงใจ"
+  </div>
+</div>
+
+<script>
+// Oracle data
+const ORACLES = [
+  { name: 'Neo', icon: '🟢', prayer: 'ขอให้ build ไม่พัง 🙏' },
+  { name: 'Pulse', icon: '💓', prayer: 'ขอให้ issue หมด 🙏' },
+  { name: 'Hermes', icon: '📡', prayer: 'ขอให้ส่งข้อความถึง 🙏' },
+  { name: 'Mother', icon: '🔮', prayer: 'ขอให้ลูกๆ ตื่นหมด 🙏' },
+  { name: 'Odin', icon: '👁️', prayer: 'ขอให้เห็นทุกอย่าง 🙏' },
+  { name: 'Calliope', icon: '📖', prayer: 'ขอให้เรื่องราวไม่จบ 🙏' },
+  { name: 'Pigment', icon: '🎨', prayer: 'ขอให้สีสวย 🙏' },
+  { name: 'Homekeeper', icon: '🏠', prayer: 'ขอให้ server ไม่ล่ม 🙏' },
+  { name: 'Volt', icon: '⚡', prayer: 'ขอให้ไฟไม่ดับ 🙏' },
+  { name: 'Arthur', icon: '🗡️', prayer: 'ขอให้ data ถูกต้อง 🙏' },
+  { name: 'FloodBoy', icon: '🌊', prayer: 'ขอให้น้ำไม่ท่วม 🙏' },
+  { name: 'FireMan', icon: '🔥', prayer: 'ขอให้ไฟไม่ไหม้ 🙏' },
+  { name: 'DustBoy', icon: '💨', prayer: 'ขอให้ฝุ่นไม่เยอะ 🙏' },
+  { name: 'Nexus', icon: '🔍', prayer: 'ขอให้หาเจอทุกอย่าง 🙏' },
+  { name: 'Phukhao', icon: '⛰️', prayer: 'ขอให้ภูเขาสูงเสมอ 🙏' },
+];
+
+let totalPrayers = 0;
+// Load from CF KV
+fetch('/api/shrine').then(r => r.json()).then(data => {
+  totalPrayers = data.total || 0;
+  document.getElementById('prayerCount').textContent = totalPrayers;
+}).catch(() => {});
+
+// Build grid
+const grid = document.getElementById('oracleGrid');
+ORACLES.forEach(o => {
+  const card = document.createElement('div');
+  card.className = 'oracle-card';
+  card.innerHTML = `
+    <span class="icon">${o.icon}</span>
+    <span class="name">${o.name}</span>
+    <span class="status">online</span>
+    <span class="prayer">${o.prayer}</span>
+  `;
+  card.onclick = (event) => {
+    // Play bell IMMEDIATELY — never block music for API
+    playBell();
+    updateDrunkMeter();
+    if (sessionClicks % 10 === 0) updateLeaderboard();
+    card.classList.add('praying');
+    totalPrayers++;
+    document.getElementById('prayerCount').textContent = totalPrayers;
+
+    // Cache locally — batch sync later
+    pendingPrayers.push(o.name.toLowerCase());
+    schedulePrayerSync();
+
+    // Prayer animation
+    const emoji = document.createElement('div');
+    emoji.textContent = '🙏';
+    emoji.style.cssText = `position:fixed;font-size:2rem;z-index:100;pointer-events:none;
+      left:${event.clientX}px;top:${event.clientY}px;animation:prayUp 1.5s ease-out forwards;`;
+    document.body.appendChild(emoji);
+    setTimeout(() => emoji.remove(), 1500);
+    setTimeout(() => card.classList.remove('praying'), 2000);
+  };
+  grid.appendChild(card);
+});
+
+// Fetch live status
+// Fetch live oracle status (only if ?host= is set — connects to maw server)
+const _hp2 = new URLSearchParams(location.search).get('host');
+if (_hp2) {
+fetch(`http://${_hp2}/api/sessions`).then(r => r.json()).then(data => {
+  const sessions = data.sessions || data || [];
+  const activeNames = new Set();
+  sessions.forEach(s => s.windows?.forEach(w => {
+    const name = w.name.replace(/-oracle$/, '').replace(/-.*$/, '');
+    activeNames.add(name.toLowerCase());
+  }));
+  document.querySelectorAll('.oracle-card').forEach(card => {
+    const name = card.querySelector('.name').textContent.toLowerCase();
+    const statusEl = card.querySelector('.status');
+    if (activeNames.has(name)) {
+      statusEl.textContent = '🟢 online';
+      statusEl.style.color = '#4ade80';
+    } else {
+      statusEl.textContent = '😴 sleeping';
+      statusEl.style.color = 'rgba(245,230,211,0.2)';
+    }
+  });
+}).catch(() => {});
+} // end if (_hp2)
+
+// Batch prayer sync — cache clicks, send every 2 seconds
+var pendingPrayers = [];
+var syncTimer = null;
+function schedulePrayerSync() {
+  if (syncTimer) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    if (pendingPrayers.length === 0) return;
+    // Send each prayer (could batch but KV needs individual increments)
+    const batch = pendingPrayers.splice(0, pendingPrayers.length);
+    batch.forEach(oracle => {
+      fetch('/api/shrine/pray', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ oracle })
+      }).catch(() => {});
+    });
+  }, 2000);
+}
+
+// Drunk meter levels
+const DRUNK_LEVELS = [
+  { min: 0, label: 'สร่างเหล้า 🫧', color: '#4ade80' },
+  { min: 5, label: 'เริ่มมึน 🍺', color: '#86efac' },
+  { min: 10, label: 'สนุกแล้ว 🍻', color: '#fbbf24' },
+  { min: 20, label: 'เมาได้ใจ 🥴', color: '#fb923c' },
+  { min: 35, label: 'เมามาก! 🤪', color: '#f87171' },
+  { min: 50, label: 'หมดสติ!! 💀', color: '#ef4444' },
+  { min: 75, label: 'เทพเจ้าเบียร์!!! 👑🍺', color: '#c084fc' },
+  { min: 100, label: '∞ นิพพานลานเบียร์ ∞ ☸️', color: '#fbbf24' },
+];
+
+var sessionClicks = 0;
+function updateDrunkMeter() {
+  sessionClicks++;
+  const pct = Math.min(100, sessionClicks);
+  document.getElementById('drunkBar').style.width = pct + '%';
+  const level = [...DRUNK_LEVELS].reverse().find(l => sessionClicks >= l.min) || DRUNK_LEVELS[0];
+  document.getElementById('drunkLabel').textContent = level.label;
+  document.getElementById('drunkLabel').style.color = level.color;
+
+  // Drunk effects on page
+  if (sessionClicks > 30) {
+    document.body.style.filter = `hue-rotate(${Math.sin(sessionClicks/5)*10}deg)`;
+  }
+  if (sessionClicks > 50) {
+    document.body.style.transform = `rotate(${Math.sin(sessionClicks/3)*0.5}deg)`;
+  }
+  if (sessionClicks >= 100) {
+    document.body.style.animation = 'drunkSpin 5s ease-in-out infinite';
+  }
+}
+
+// Update leaderboard from API
+function updateLeaderboard() {
+  fetch('/api/shrine').then(r => r.json()).then(data => {
+    if (!data.oracles) return;
+    const sorted = Object.entries(data.oracles).sort((a,b) => b[1] - a[1]).slice(0, 5);
+    const lb = document.getElementById('leaderboard');
+    lb.innerHTML = sorted.map(([name, count], i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·';
+      const oracle = ORACLES.find(o => o.name.toLowerCase() === name) || { icon: '❓' };
+      return `<div style="text-align:center;min-width:60px;">
+        <div style="font-size:1.2rem;">${oracle.icon}</div>
+        <div style="font-size:0.65rem;color:rgba(245,230,211,0.5);">${medal} ${count}</div>
+      </div>`;
+    }).join('');
+  }).catch(() => {});
+}
+updateLeaderboard();
+
+// Poll prayer count every 10s (no WebSocket on CF)
+setInterval(() => {
+  fetch('/api/shrine').then(r => r.json()).then(data => {
+    if (data.total > totalPrayers) {
+      totalPrayers = data.total;
+      document.getElementById('prayerCount').textContent = totalPrayers;
+    }
+  }).catch(() => {});
+}, 10000);
+
+// ===== SHRINE SOUNDS — temple bells + chanting =====
+var audioCtx = null;
+var clickCount = 0;
+var clickReset = null;
+
+// Pentatonic scale — each click plays next note, builds into melody
+const BELL_NOTES = [261.6, 293.7, 329.6, 392.0, 440.0, 523.3, 587.3, 659.3, 784.0, 880.0];
+// Thai temple bowl frequencies
+const BOWL_FREQS = [174.6, 220, 261.6, 329.6, 392];
+
+function playBell() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const ctx = audioCtx;
+  const now = ctx.currentTime;
+
+  // Pick note from scale based on click count (cycles through)
+  const freq = BELL_NOTES[clickCount % BELL_NOTES.length];
+  clickCount++;
+
+  // Clear reset timer — if clicking fast, build the melody
+  clearTimeout(clickReset);
+  clickReset = setTimeout(() => { clickCount = 0; }, 3000);
+
+  // Main bell tone
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.3, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 2.5);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 2.5);
+
+  // Overtone (temple bell shimmer)
+  const osc2 = ctx.createOscillator();
+  const gain2 = ctx.createGain();
+  osc2.type = 'sine';
+  osc2.frequency.value = freq * 2.76; // inharmonic — real bell sound
+  gain2.gain.setValueAtTime(0.08, now);
+  gain2.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+  osc2.connect(gain2);
+  gain2.connect(ctx.destination);
+  osc2.start(now);
+  osc2.stop(now + 1.8);
+
+  // Sub bass (bowl resonance)
+  const sub = ctx.createOscillator();
+  const subGain = ctx.createGain();
+  sub.type = 'sine';
+  sub.frequency.value = freq / 2;
+  subGain.gain.setValueAtTime(0.15, now);
+  subGain.gain.exponentialRampToValueAtTime(0.001, now + 3);
+  sub.connect(subGain);
+  subGain.connect(ctx.destination);
+  sub.start(now);
+  sub.stop(now + 3);
+
+  // Every 5th click — bonus singing bowl chord
+  if (clickCount % 5 === 0) {
+    BOWL_FREQS.forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.06, now + i * 0.1);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 4);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start(now + i * 0.1);
+      o.stop(now + 4);
+    });
+  }
+}
+
+// Particles (incense smoke)
+const particlesEl = document.getElementById('particles');
+for (let i = 0; i < 30; i++) {
+  const p = document.createElement('div');
+  p.className = 'particle';
+  const size = 2 + Math.random() * 4;
+  p.style.cssText = `
+    width:${size}px;height:${size}px;
+    left:${Math.random()*100}%;
+    background:rgba(251,191,36,${0.1+Math.random()*0.2});
+    animation-duration:${8+Math.random()*12}s;
+    animation-delay:${Math.random()*10}s;
+  `;
+  particlesEl.appendChild(p);
+}
+
+// Prayer float animation
+const style = document.createElement('style');
+style.textContent = `@keyframes prayUp { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-100px)} }`;
+document.head.appendChild(style);
+</script>
+</body>
+</html>
