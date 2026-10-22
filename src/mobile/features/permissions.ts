@@ -9,6 +9,7 @@ import { readScreen, pressKey, roomChannel } from "./ctx";
 export type OptionKind = "allow" | "always" | "deny" | "other";
 export interface PromptOption { n: number; label: string; kind: OptionKind }
 export interface PermissionPrompt {
+  kind?: "permission";
   agent: "claude" | "codex";
   title: string;
   detail: string;
@@ -189,15 +190,83 @@ export function parsePrompt(raw: string): PermissionPrompt | null {
   return { ...base, sig: promptSig(base) };
 }
 
+/** Any other open dialog (trust folder, "Teach auto mode…", pickers): shown as text + a key pad on the phone. */
+export interface MenuPrompt {
+  kind: "menu";
+  title: string;
+  /** Dialog body as on screen (cursor "❯" kept so the phone can highlight the selected row). */
+  body: string;
+  footer: string;
+  /** Numbered rows ("1. Yes") → number buttons. */
+  numbers: number[];
+  sig: string;
+}
+
+const MENU_RULE = /^\s*[╭┌╰└]?[─━═╌┄┈▔▁-]{6,}[╮┐╯┘]?\s*$/;
+// a dialog footer says how to answer it; Claude's normal input footer ("? for shortcuts", "shift+tab to cycle",
+// "esc to interrupt") must not count
+const MENU_FOOTER = /\b(?:enter|esc|space|tab)\b[^·]*\bto (?:continue|confirm|select|cancel|exit|go back|submit|toggle|save|skip|choose|proceed|open)\b|[←→↑↓]+(?:\/[←→↑↓]+)? to \w/i;
+const NOT_DIALOG = /for shortcuts|to cycle|to interrupt|auto mode on|bypass permissions on|accept edits on|plan mode on/i;
+
+/** The dialog still open at the bottom of the screen that is NOT a numbered permission prompt, else null. */
+export function parseMenu(raw: string): MenuPrompt | null {
+  const lines = stripAnsi(raw).split("\n").map(unbox);
+  let end = lines.length - 1;
+  while (end >= 0 && !lines[end].trim()) end--;
+  if (end < 0) return null;
+  // footer: within the last few non-empty lines
+  let foot = -1;
+  for (let i = end, seen = 0; i >= 0 && seen < 3; i--) {
+    if (!lines[i].trim() || MENU_RULE.test(lines[i])) continue;
+    seen++;
+    if (NOT_DIALOG.test(lines[i])) return null;
+    if (MENU_FOOTER.test(lines[i])) { foot = i; break; }
+  }
+  if (foot < 0) return null;
+  // top: the rule above, at most 40 lines up; stop at things that belong to the conversation
+  let top = -1;
+  for (let i = foot - 1; i >= Math.max(0, foot - 40); i--) {
+    if (MENU_RULE.test(lines[i])) { top = i; break; }
+    if (SPINNER.test(lines[i]) || /^\s*[⏺●⎿✻]/.test(lines[i])) { top = i; break; }
+  }
+  const block = lines.slice(top + 1, foot);
+  while (block.length && !block[0].trim()) block.shift();
+  while (block.length && !block[block.length - 1].trim()) block.pop();
+  if (!block.length || !block.some(l => /^\s*[❯›>▶]\s*\S/.test(l))) return null;   // a live menu has a cursor
+  const body = dedent(block);
+  const title = body[0].trim();
+  const rest = body.slice(1);
+  while (rest.length && !rest[0].trim()) rest.shift();
+  const numbers = rest.map(l => /^\s*[❯›>▶]?\s*(\d)[.)]\s+\S/.exec(l)).filter(Boolean).map(m => +m![1]).filter(n => n >= 1 && n <= 4);
+  const footer = lines[foot].trim();
+  const text = rest.join("\n").slice(0, MAX_DETAIL_CHARS);
+  const sig = createHash("sha1").update(["menu", title, text, footer].join("\u0001")).digest("hex").slice(0, 12);
+  return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], sig };
+}
+
+/** Keys the phone may press inside an open dialog. */
+export const MENU_KEYS = ["up", "down", "left", "right", "enter", "esc", "tab", "space", "1", "2", "3", "4"];
+
 /** `deps` exists so tests can swap the terminal for a fake — production always uses the real helpers. */
 export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel } = { readScreen, pressKey, roomChannel }): void {
   const { readScreen: read, pressKey: press, roomChannel: chan } = deps;
   app.get("/rooms/:ws/:room/prompt", async ({ params, set }: any) => {
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
-    try { return { ok: true, prompt: parsePrompt(await read(ch, SCREEN_LINES)) }; }
+    try { const raw = await read(ch, SCREEN_LINES); return { ok: true, prompt: parsePrompt(raw) ?? parseMenu(raw) }; }
     catch { return { ok: true, prompt: null }; }
   });
+
+  // one key into an open dialog (moving the cursor changes the dialog, so no sig — but a dialog must be open)
+  app.post("/rooms/:ws/:room/prompt/key", async ({ params, body, set }: any) => {
+    const ch = chan(params.ws, params.room);
+    if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
+    let open = false;
+    try { const raw = await read(ch, SCREEN_LINES); open = !!(parsePrompt(raw) ?? parseMenu(raw)); } catch { /* unreadable */ }
+    if (!open) { set.status = 409; return { ok: false, error: "หน้าถามปิดไปแล้ว — ไม่ได้กดอะไร" }; }
+    await press(ch, body.key);
+    return { ok: true };
+  }, { body: t.Object({ key: t.Union(MENU_KEYS.map(k => t.Literal(k))) }) });
 
   app.post("/rooms/:ws/:room/prompt/answer", async ({ params, body, set }: any) => {
     const ch = chan(params.ws, params.room);

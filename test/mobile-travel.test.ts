@@ -24,7 +24,7 @@ describe("travel mode (close the lid, keep working)", () => {
       if (args[0] === "-n") { if (!sudoOk) return { ok: false, out: "sudo: a password is required" }; sleepOff = args.at(-1) === "1"; return { ok: true, out: "" }; }
       return { ok: true, out: "" };
     };
-    const t = createTravel(run);
+    const t = createTravel(run, null);
     await expect(t.turn(true)).rejects.toThrow(/ตั้งสิทธิ์/);
     sudoOk = true;
     const s = await t.turn(true, 2);
@@ -33,4 +33,13 @@ describe("travel mode (close the lid, keep working)", () => {
     expect((await t.turn(false)).on).toBe(false);
     expect(calls).toContain("/usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0");
   });
+});
+
+test("auto-off time is kept across a restart", async () => {
+  const f = require("path").join(require("fs").mkdtempSync(require("path").join(require("os").tmpdir(), "tr-")), "travel.json");
+  let off = false;
+  const run = async (cmd: string, args: string[]) => (args[0] === "-g" ? { ok: true, out: off ? "SleepDisabled 1" : "" } : (args[0] === "-n" && args[1] !== "-l" && (off = args.at(-1) === "1"), { ok: true, out: "" }));
+  const a = await createTravel(run, f).turn(true, 3);
+  const b = await createTravel(run, f).status();   // "maw restarted"
+  expect(b.until).toBe(a.until);
 });

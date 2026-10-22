@@ -3,6 +3,15 @@
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 
+// The app page and feature packs must always come fresh from the Mac (Chrome otherwise keeps a cached copy
+// and the phone runs an old version after an update).
+self.addEventListener("fetch", e => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (url.pathname === "/m.html" || url.pathname.startsWith("/m-ext/") || url.pathname === "/manifest.json")
+    e.respondWith(fetch(e.request, { cache: "no-store" }).catch(() => fetch(e.request)));
+});
+
 // Share sheet → "maw": Android POSTs the screenshot/file here (manifest share_target).
 // Park the files in a cache, then open the app, which asks which room to put them in.
 self.addEventListener("fetch", e => {

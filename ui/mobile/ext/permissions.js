@@ -26,7 +26,15 @@
   .perm-o button.deny { background: #ef44441a; border-color: #ef444466; } .perm-o button.deny .n { background: var(--danger, #ef4444); color: #1a0303; }
   .perm-o button:active { transform: scale(.985); filter: brightness(1.2); }
   .perm-o button:disabled { opacity: .5; }
-  .perm-f { padding: 0 14px 11px; font-size: 11.5px; color: var(--dim); }`;
+  .perm-f { padding: 0 14px 11px; font-size: 11.5px; color: var(--dim); }
+  .perm.menu { border-color: #a78bfa66; box-shadow: 0 6px 24px #0007, 0 0 0 3px #a78bfa14; }
+  .perm-d .ln { display: block; min-height: 1.45em; }
+  .perm-d .cur { color: #c4b5fd; font-weight: 700; background: #a78bfa1f; border-radius: 4px; }
+  .perm-k { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 6px; }
+  .perm-k button { min-width: 44px; height: 40px; padding: 0 12px; border-radius: 10px; font: 700 14px var(--font); color: var(--text); background: var(--card2); border: 1px solid var(--line); }
+  .perm-k button.go { background: #22c55e24; border-color: #22c55e77; } .perm-k button.no { background: #ef44441a; border-color: #ef444466; }
+  .perm-k button.num { background: #60a5fa1c; border-color: #60a5fa66; }
+  .perm-k button:active { transform: scale(.96); filter: brightness(1.25); } .perm-k button:disabled { opacity: .5; }`;
   const style = document.createElement("style"); style.textContent = css; document.head.appendChild(style);
 
   const slot = () => document.getElementById("ext-room-bottom");
@@ -41,6 +49,7 @@
     el.querySelector(".perm")?.remove();
     if (!p) return;
     const card = document.createElement("div");
+    if (p.kind === "menu") return renderMenu(el, card, w, room, p);
     card.className = "perm";
     card.innerHTML = `
       <div class="perm-h"><span>🔐</span><span class="t">ขออนุญาต · ${esc(shortTitle(p.title))}</span><span class="ag">${esc(AG[p.agent] || p.agent)}</span></div>
@@ -50,6 +59,31 @@
       <div class="perm-f">กดแล้วจะส่งปุ่ม ${p.options.map(o => o.n).join("/")} ไปที่ ${p.agent === "codex" ? "Codex" : "Claude"} บน Mac ทันที</div>`;
     card.querySelectorAll("[data-pn]").forEach(b => b.onclick = () => answer(w, room, +b.dataset.pn, card));
     el.prepend(card);
+  }
+
+  // any other dialog (trust folder, "Teach auto mode…", question pickers): show it and give a key pad
+  const MENU_KEYS = [["up", "↑"], ["down", "↓"], ["left", "←"], ["right", "→"], ["space", "␣ เลือก"], ["tab", "Tab"], ["enter", "⏎ Enter", "go"], ["esc", "Esc", "no"]];
+  function renderMenu(el, card, w, room, p) {
+    card.className = "perm menu";
+    const body = p.body.split("\n").map(l => `<span class="ln ${/^\s*[❯›>▶]\s*\S/.test(l) ? "cur" : ""}">${esc(l) || " "}</span>`).join("");
+    const lr = /[←→◀▶]/.test(p.footer + p.body);
+    card.innerHTML = `
+      <div class="perm-h"><span>❓</span><span class="t">${esc(p.title)}</span><span class="ag">รอคำตอบ</span></div>
+      ${p.body ? `<div class="perm-d">${body}</div>` : ""}
+      <div class="perm-k">${p.numbers.map(n => `<button class="num" data-mk="${n}">${n}</button>`).join("")}${MENU_KEYS.filter(([k]) => lr || (k !== "left" && k !== "right")).map(([k, l, c]) => `<button class="${c || ""}" data-mk="${k}">${l}</button>`).join("")}</div>
+      <div class="perm-f">${esc(p.footer)} — กดแล้วส่งปุ่มไปที่ Mac ทันที แถบที่ไฮไลต์คือตัวที่เลือกอยู่</div>`;
+    card.querySelectorAll("[data-mk]").forEach(b => b.onclick = () => pressMenu(w, room, b.dataset.mk, card));
+    el.prepend(card);
+    const d = card.querySelector(".perm-d"), cur = card.querySelector(".cur");
+    if (d && cur) d.scrollTop = Math.max(0, cur.offsetTop - d.offsetTop - d.clientHeight / 2);   // keep the selected row in view
+  }
+  async function pressMenu(w, room, key, card) {
+    if (P.busy) return;
+    P.busy = true; card.querySelectorAll("button").forEach(b => b.disabled = true);
+    try { await api(url(w, room, "/key"), { method: "POST", body: JSON.stringify({ key }) }); }
+    catch (e) { toast(e.message || "กดไม่สำเร็จ"); }
+    finally { P.busy = false; card.querySelectorAll("button").forEach(b => b.disabled = false); }
+    setTimeout(() => { P.last = 0; check(w, room, true); }, 350);   // the dialog redraws → show its new state
   }
 
   async function answer(w, room, n, card) {

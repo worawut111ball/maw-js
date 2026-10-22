@@ -4,6 +4,9 @@
 // Safety: auto-off on low battery (unplugged), on thermal throttling, and after a timer — then the Mac
 // sleeps normally. The phone is told via push before that happens.
 import { execFile } from "child_process";
+import { readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { macHealth, notifyPhones } from "../api";
 
 type Run = (cmd: string, args: string[]) => Promise<{ ok: boolean; out: string }>;
@@ -28,8 +31,12 @@ export function safetyReason(h: { battery?: { pct: number; ac: boolean } | null 
   return null;
 }
 
-export function createTravel(run: Run = realRun) {
-  let until: number | null = null, lastReason: string | null = null, timer: ReturnType<typeof setInterval> | null = null;
+// the auto-off time survives a maw restart (otherwise a restart mid-trip would leave sleep disabled forever)
+const STATE_FILE = join(homedir(), ".maw", "travel.json");
+export function createTravel(run: Run = realRun, file: string | null = STATE_FILE) {
+  const load = () => { try { return JSON.parse(readFileSync(file!, "utf-8")).until ?? null; } catch { return null; } };
+  const save = () => { if (file) try { writeFileSync(file, JSON.stringify({ until }), { mode: 0o600 }); } catch { /* best effort */ } };
+  let until: number | null = file ? load() : null, lastReason: string | null = null, timer: ReturnType<typeof setInterval> | null = null;
   const sudoReady = async () => (await run(SUDO, ["-n", "-l", PMSET, "-a", "disablesleep", "1"])).ok;
   const isOn = async () => parseSleepDisabled((await run(PMSET, ["-g"])).out);
   const set = async (on: boolean) => {
@@ -45,15 +52,20 @@ export function createTravel(run: Run = realRun) {
       lastReason = reason;
       await notifyPhones("travel", "off", { title: "🧳 ปิดโหมดเดินทางแล้ว", body: `${reason} — Mac จะหลับเมื่อพับจอ` }).catch(() => 0);
       await set(false).catch(() => {});
-      clearInterval(timer!); timer = null; until = null;
+      clearInterval(timer!); timer = null; until = null; save();
     }, 60_000);
   };
   return {
-    async status() { const on = await isOn(); if (on) watch(); return { on, sudoReady: await sudoReady(), until, lastReason }; },
+    async status() {
+      const on = await isOn();
+      if (on && !until) { until = Date.now() + DEFAULT_HOURS * 3600_000; save(); }
+      if (on) watch();
+      return { on, sudoReady: await sudoReady(), until, lastReason };
+    },
     async turn(on: boolean, hours = DEFAULT_HOURS) {
       await set(on);
       until = on ? Date.now() + Math.min(Math.max(hours, 0.5), 24) * 3600_000 : null;
-      lastReason = null;
+      lastReason = null; save();
       if (on) watch(); else if (timer) { clearInterval(timer); timer = null; }
       return this.status();
     },

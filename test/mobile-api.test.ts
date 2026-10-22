@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -501,4 +501,67 @@ test("visible replies stored as plain-text thinking blocks are shown; empty (hid
   ];
   writeFileSync(join(dir, "s7.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
   expect(claudeTranscript("s7", root)!.map(x => [x.role, x.text])).toEqual([["assistant", "ผมจะปรับแพ็ก P3"]]);
+});
+
+test("process usage: maw itself, claude agents, codex agents", () => {
+  const ps = "  PID  %CPU    RSS COMM\n 4844  36.0 1006432 /Users/x/.local/share/claude/versions/2.1/claude\n 94783 11.1 389040 claude\n 79598 0.0 68848 /opt/homebrew/bin/codex\n 82536 0.0 3088 codex-code-mode-host\n 78771 1.5 692128 /opt/homebrew/bin/bun\n 353 0.0 7584 powerd";
+  expect(processUsage(ps, 78771)).toEqual({ maw: { cpu: 2, ramMB: 676 }, claude: { cpu: 47, ramMB: 1363, n: 2 }, codex: { cpu: 0, ramMB: 70, n: 1 } });
+});
+
+test("compact progress: elapsed from the spinner, estimate from past compactions, capped at 95 %", () => {
+  expect(elapsedSeconds("1m 5s · ↓ 3k tokens")).toBe(65);
+  expect(elapsedSeconds("25s")).toBe(25);
+  expect(elapsedSeconds("thinking")).toBeNull();
+  const rate = compactMsPerToken([{ preTokens: 946070, durationMs: 213422 }, { preTokens: 664693, durationMs: 187463 }, { preTokens: 967271, durationMs: 102958 }]);
+  expect(rate.n).toBe(3);
+  const p = compactProgress(60, 800_000, rate);         // median ≈ 0.2256 ms/token → ~180 s
+  expect(p.expectedS).toBeGreaterThan(150); expect(p.expectedS).toBeLessThan(200);
+  expect(p.pct).toBeGreaterThan(25); expect(p.pct).toBeLessThan(45);
+  expect(compactProgress(999, 800_000, rate).pct).toBe(95);
+});
+
+describe("open local repos / folders from the phone", () => {
+  const { allowedDir, dirId, dirFromId, openTmuxRoom, scanRepos, buildProjects } = require("../src/mobile/api");
+  const fs = require("fs"), os = require("os"), path = require("path");
+  test("allowedDir: inside home only, never hidden folders or Library", () => {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "home-")));
+    for (const d of ["work/app", ".ssh", "Library/Keys", "work/.secret"]) fs.mkdirSync(path.join(home, d), { recursive: true });
+    expect(allowedDir(path.join(home, "work/app"), home)).toBe(path.join(home, "work/app"));
+    expect(allowedDir(path.join(home, ".ssh"), home)).toBeNull();
+    expect(allowedDir(path.join(home, "Library/Keys"), home)).toBeNull();
+    expect(allowedDir(path.join(home, "work/.secret"), home)).toBeNull();
+    expect(allowedDir(path.join(home, "work/app/../../.."), home)).toBeNull();
+    expect(allowedDir("/etc", home)).toBeNull();
+  });
+  test("dir ids round-trip and reject junk", () => {
+    const h = fs.realpathSync(os.homedir());
+    expect(dirFromId(dirId(h))).toBe(h);
+    expect(dirFromId("dir:../../etc")).toBeNull();
+  });
+  test("scanRepos finds git repos, skips node_modules", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "rh-"));
+    fs.mkdirSync(path.join(home, "artron/erp/.git"), { recursive: true }); fs.writeFileSync(path.join(home, "artron/erp/.git/HEAD"), "ref: refs/heads/develop\n");
+    fs.mkdirSync(path.join(home, "my-project/x/node_modules/dep/.git"), { recursive: true });
+    const r = scanRepos(home);
+    expect(r.map((x: any) => [x.name, x.branch])).toEqual([["erp", "develop"]]);
+  });
+  test("pinned folder becomes a project; tmux rooms working inside it move under it", () => {
+    const home = fs.realpathSync(os.homedir());
+    const p = buildProjects({ workspaces: [] }, new Map(), {
+      folders: [{ name: "erp", path: home + "/zz-erp" }],
+      panes: [{ id: "%7", session: "mm-erp", window: "claude", cwd: home + "/zz-erp/src", agent: "claude" }, { id: "%8", session: "mm-x", window: "zsh", cwd: "/tmp", agent: null }],
+    });
+    const f = p.find((x: any) => x.source === "folder");
+    expect(f.name).toBe("📁 erp"); expect(f.workspaces[0].rooms.map((r: any) => r.id)).toEqual(["%7"]);
+    expect(p.find((x: any) => x.name === "tmux").workspaces[0].rooms.map((r: any) => r.id)).toEqual(["%8"]);
+  });
+  test("openTmuxRoom: new session when missing, new window when it exists; agent command only from allow-list", async () => {
+    const calls: string[][] = [];
+    const run = (args: string[]) => { calls.push(args); if (args[0] === "has-session") throw new Error("no"); return "%42\n"; };
+    expect(await openTmuxRoom("/Users/x/work/erp", "codex", undefined, run)).toEqual({ session: "mm-erp", pane: "%42" });
+    expect(calls[1]).toEqual(["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "mm-erp", "-c", "/Users/x/work/erp", "codex"]);
+    const c2: string[][] = [];
+    await openTmuxRoom("/Users/x/work/erp", "shell; rm -rf /", undefined, (a: string[]) => { c2.push(a); return "%43"; });
+    expect(c2[1]).toEqual(["new-window", "-P", "-F", "#{pane_id}", "-t", "=mm-erp:", "-c", "/Users/x/work/erp"]);
+  });
 });

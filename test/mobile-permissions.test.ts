@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePrompt, optionKind, stripAnsi, promptSig, mount } from "../src/mobile/features/permissions";
+import { parsePrompt, parseMenu, optionKind, stripAnsi, promptSig, mount } from "../src/mobile/features/permissions";
 
 const E = "\x1b[";
 const dim = (s: string) => `${E}2m${s}${E}22m`;
@@ -270,5 +270,74 @@ describe("routes", () => {
     expect((await call(answer, { ws: "tmux", room: "%7" }, { n: 4 })).status).toBe(409);
     expect((await call(answer, { ws: "bogus", room: "x" }, { n: 1 })).status).toBe(404);
     expect(pressed).toEqual([]);
+  });
+});
+
+describe("parseMenu — other dialogs", () => {
+  const teach = [
+    "✻ Brewed for 56s · done 9:07 PM",
+    "▔".repeat(60),
+    "   Teach auto mode about your environment?",
+    "",
+    "   Claude Code reads this project, your recent Claude sessions, and optionally",
+    "",
+    "     How you use Claude here    ◀ Mixed ▶",
+    "   ❯ Also scan shell history    [✔]",
+    "     Also scan your other repos [ ]",
+    "",
+    "     Continue",
+    "",
+    "   ←/→ to change usage · Enter to continue · Esc to cancel",
+  ].join("\n");
+  const trust = [
+    "─".repeat(60),
+    " Accessing workspace:",
+    " /Users/ball",
+    " Quick safety check: Is this a project you created or one you trust?",
+    " Claude Code'll be able to read, edit, and execute files here.",
+    " Security guide",
+    " ❯ 1. No, exit",
+    "   2. Yes, I trust this folder",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n");
+
+  test("toggle menu without numbers → title, body with cursor, footer", () => {
+    const m = parseMenu(teach)!;
+    expect(m.kind).toBe("menu");
+    expect(m.title).toBe("Teach auto mode about your environment?");
+    expect(m.body).toContain("❯ Also scan shell history");
+    expect(m.footer).toContain("Enter to continue");
+    expect(m.numbers).toEqual([]);
+  });
+
+  test("trust prompt (no 'Do you want' question) → menu with number buttons", () => {
+    expect(parsePrompt(trust)).toBeNull();
+    const m = parseMenu(trust)!;
+    expect(m.title).toBe("Accessing workspace:");
+    expect(m.numbers).toEqual([1, 2]);
+  });
+
+  test("normal input box and answered dialogs are not menus", () => {
+    expect(parseMenu("⏺ done\n\n" + "─".repeat(20) + "\n❯ \n" + "─".repeat(20) + "\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← 3 agents")).toBeNull();
+    expect(parseMenu(teach + "\n\n⏺ Saved.\n\n❯ \n  ? for shortcuts")).toBeNull();
+    expect(parseMenu("✻ Thinking… (3s · esc to interrupt)")).toBeNull();
+  });
+
+  test("POST /prompt/key presses only while a dialog is open", async () => {
+    const pressed: string[] = [];
+    let screen = teach;
+    const routes: Record<string, Function> = {};
+    mount({ get: (p: string, h: Function) => { routes["GET " + p] = h; }, post: (p: string, h: Function) => { routes["POST " + p] = h; } }, {
+      readScreen: async () => screen,
+      pressKey: async (_c: unknown, k: string) => { pressed.push(k); },
+      roomChannel: () => ({ kind: "tmux", pane: "%7", label: "%7" }),
+    } as any);
+    const call = async (body: any) => { const set: any = {}; const r = await routes["POST /rooms/:ws/:room/prompt/key"]({ params: { ws: "tmux", room: "%7" }, body, set }); return set.status ?? 200; };
+    const got: any = await routes["GET /rooms/:ws/:room/prompt"]({ params: { ws: "tmux", room: "%7" }, set: {} });
+    expect(got.prompt.kind).toBe("menu");
+    expect(await call({ key: "down" })).toBe(200);
+    screen = "⏺ ok\n❯ \n  ? for shortcuts";
+    expect(await call({ key: "enter" })).toBe(409);
+    expect(pressed).toEqual(["down"]);
   });
 });

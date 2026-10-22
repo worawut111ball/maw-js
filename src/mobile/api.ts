@@ -309,6 +309,46 @@ export function agentSpinner(raw: string): { verb: string; detail: string } | nu
   return null;
 }
 
+// ── /compact progress: Claude shows only "Compacting conversation… (25s)", so estimate from past compactions ──
+/** "1m 5s · ↓ 3k tokens" → 65 */
+export function elapsedSeconds(detail: string): number | null {
+  const m = /^(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?/.exec(detail.trim());
+  if (!m || !(m[1] || m[2] || m[3])) return null;
+  return (+(m[1] ?? 0)) * 3600 + (+(m[2] ?? 0)) * 60 + (+(m[3] ?? 0));
+}
+/** Past compactions (compact_boundary entries) → median milliseconds per pre-compact token.
+ *  Refreshed in the background at most hourly (a full scan of all transcripts takes ~20 s): find files that
+ *  contain a boundary (fast, stops at first hit), then read only the 5 newest of those. */
+let compactRate: { at: number; msPerToken: number | null; n: number; busy?: boolean } = { at: 0, msPerToken: null, n: 0 };
+const medianRate = (list: { preTokens: number; durationMs: number }[]) => {
+  const r = list.map(x => x.durationMs / x.preTokens).sort((a, b) => a - b);
+  return { msPerToken: r.length ? r[Math.floor(r.length / 2)] : null, n: r.length };
+};
+async function refreshCompactRate() {
+  if (compactRate.busy) return;
+  compactRate.busy = true;
+  try {
+    const p = Bun.spawn(["/bin/sh", "-c", `ls -t -- "$HOME"/.claude/projects/*/*.jsonl 2>/dev/null | head -150 | xargs /usr/bin/grep -lF '"subtype":"compact_boundary"' 2>/dev/null | head -5 | xargs /usr/bin/grep -hF '"subtype":"compact_boundary"' 2>/dev/null | /usr/bin/grep -o '"preTokens":[0-9]*\\|"durationMs":[0-9]*'`], { stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(p.stdout).text(); await p.exited;
+    const list: { preTokens: number; durationMs: number }[] = []; let pre = 0;
+    for (const l of out.split("\n")) {
+      const m = /"(preTokens|durationMs)":(\d+)/.exec(l); if (!m) continue;
+      if (m[1] === "preTokens") pre = +m[2]; else if (pre > 10_000 && +m[2] > 1000) { list.push({ preTokens: pre, durationMs: +m[2] }); pre = 0; }
+    }
+    compactRate = { at: Date.now(), ...medianRate(list) };
+  } catch { compactRate = { ...compactRate, at: Date.now(), busy: false }; }
+}
+export function compactMsPerToken(samples?: { preTokens: number; durationMs: number }[]): { msPerToken: number | null; n: number } {
+  if (samples) return medianRate(samples);
+  if (Date.now() - compactRate.at > 3600_000) refreshCompactRate();   // non-blocking; first call uses the default estimate
+  return { msPerToken: compactRate.msPerToken, n: compactRate.n };
+}
+/** {pct, leftS} while compacting; never claims more than 95 % until Claude actually finishes. */
+export function compactProgress(elapsedS: number, contextTokens: number | null, rate = compactMsPerToken()) {
+  const expected = Math.min(600, Math.max(30, rate.msPerToken && contextTokens ? (rate.msPerToken * contextTokens) / 1000 : 150));
+  return { elapsedS, expectedS: Math.round(expected), pct: Math.min(95, Math.round((elapsedS / expected) * 100)), leftS: Math.max(0, Math.round(expected - elapsedS)), basedOn: rate.n };
+}
+
 export const ss = (args: string[]) => execFileSync(SUPERSET_BIN, args, { encoding: "utf-8", timeout: 15_000 });
 
 export async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
@@ -338,7 +378,7 @@ export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
 
 export interface Room { id: string; title: string; agent: string | null; status: AgentStatus; claudeSessionId: string | null }
 export interface Workspace { id: string; name: string; branch: string | null; rooms: Room[] }
-export interface Project { name: string; source: "superset" | "tmux"; workspaces: Workspace[] }
+export interface Project { name: string; source: "superset" | "tmux" | "folder"; path?: string; workspaces: Workspace[] }
 
 export function statusFromSuperset(state: string | null | undefined, hasAgent: boolean): AgentStatus {
   if (!hasAgent) return "idle";
@@ -376,7 +416,73 @@ function tabTitles(ws: any): Map<string, string> {
   return map;
 }
 
-export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>): Project[] {
+// ── Local folders & repos (open any repo on this Mac from the phone) ─────────────
+export interface PinnedFolder { name: string; path: string }
+export interface TmuxPane { id: string; session: string; window: string; cwd: string; agent: string | null }
+const FOLDERS_FILE = join(homedir(), ".maw", "folders.json");
+const b64u = (s: string) => Buffer.from(s).toString("base64url");
+export const dirId = (path: string) => "dir:" + b64u(path);
+/** Only real folders inside $HOME, never hidden ones (.ssh, .aws, …) or ~/Library. */
+export function allowedDir(path: string, home = homedir()): string | null {
+  try {
+    const real = realpathSync(path), h = realpathSync(home);
+    if (real !== h && !real.startsWith(h + "/")) return null;
+    const rel = real.slice(h.length + 1);
+    if (rel && (rel.split("/").some(seg => seg.startsWith(".")) || /^Library(\/|$)/.test(rel))) return null;
+    return statSync(real).isDirectory() ? real : null;
+  } catch { return null; }
+}
+export function dirFromId(id: string): string | null {
+  if (!/^dir:[A-Za-z0-9_-]+$/.test(id)) return null;
+  return allowedDir(Buffer.from(id.slice(4), "base64url").toString("utf-8"));
+}
+export function loadFolders(file = FOLDERS_FILE): PinnedFolder[] {
+  try { return (JSON.parse(readFileSync(file, "utf-8")) as PinnedFolder[]).filter(f => allowedDir(f.path)); } catch { return []; }
+}
+export function saveFolders(list: PinnedFolder[], file = FOLDERS_FILE) {
+  mkdirSync(join(file, ".."), { recursive: true }); writeFileSync(file, JSON.stringify(list, null, 2), { mode: 0o600 });
+}
+function gitBranchOf(path: string): string | null {
+  try { const head = readFileSync(join(path, ".git", "HEAD"), "utf-8").trim(); return head.startsWith("ref: refs/heads/") ? head.slice(16) : head.slice(0, 8); } catch { return null; }
+}
+let panesCache = { at: 0, list: [] as TmuxPane[] };
+export function listTmuxPanes(): TmuxPane[] {
+  if (Date.now() - panesCache.at < 2_000) return panesCache.list;
+  let list: TmuxPane[] = [];
+  try {
+    // printable separator: tmux escapes control characters like TAB in -F output
+    const out = execFileSync("tmux", ["list-panes", "-a", "-F", "#{pane_id}|~|#{session_name}|~|#{window_name}|~|#{pane_current_path}|~|#{pane_start_command}|~|#{pane_current_command}"], { encoding: "utf-8", timeout: 3_000 });
+    list = out.split("\n").filter(l => l.includes("|~|")).map(l => {
+      const [id, session = "", window = "", cwd = "", start = "", cur = ""] = l.split("|~|");
+      const cmd = `${start} ${cur}`;
+      return { id, session, window, cwd, agent: /\bclaude\b/.test(cmd) ? "claude" : /\bcodex\b/.test(cmd) ? "codex" : null };
+    });
+  } catch { /* no tmux server */ }
+  panesCache = { at: Date.now(), list };
+  return list;
+}
+const REPO_ROOTS = ["artron", "my-project", "oracle", "Desktop", "Documents", "Projects", "code", "dev"];
+let reposCache = { at: 0, list: [] as { name: string; path: string; branch: string | null; mtime: number }[] };
+/** git repos under the usual folders of $HOME (3 levels deep), newest first; cached 5 min. */
+export function scanRepos(home = homedir(), roots = REPO_ROOTS) {
+  if (home === homedir() && Date.now() - reposCache.at < 300_000) return reposCache.list;
+  const out: { name: string; path: string; branch: string | null; mtime: number }[] = [];
+  const walk = (dir: string, depth: number) => {
+    let ents: any[] = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    if (ents.some(d => d.name === ".git")) {
+      let mtime = 0; try { mtime = statSync(join(dir, ".git")).mtimeMs; } catch { /* */ }
+      out.push({ name: dir.split("/").pop()!, path: dir, branch: gitBranchOf(dir), mtime });
+    }
+    if (depth >= 3) return;
+    for (const d of ents) if (d.isDirectory() && !d.name.startsWith(".") && !/^(node_modules|build|dist|vendor|Pods|target)$/.test(d.name)) walk(join(dir, d.name), depth + 1);
+  };
+  for (const r of roots) { const p = join(home, r); if (existsSync(p)) walk(p, 1); }
+  out.sort((a, b) => b.mtime - a.mtime);
+  if (home === homedir()) reposCache = { at: Date.now(), list: out };
+  return out;
+}
+
+export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>, local: { folders?: PinnedFolder[]; panes?: TmuxPane[] } = {}): Project[] {
   const byTerminal = new Map<string, LiveRoom>();
   const tmuxRooms: LiveRoom[] = [];
   for (const r of rooms.values()) {
@@ -408,17 +514,45 @@ export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>): Proj
     });
     projects.set(name, p);
   }
-  if (tmuxRooms.length) {
-    projects.set("tmux", { name: "tmux", source: "tmux", workspaces: [{ id: "tmux", name: "tmux", branch: null,
-      rooms: tmuxRooms.map(r => ({ id: (r.channel as Channel).pane, title: (r.channel as Channel).label, agent: "claude",
-        status: fresh(r) ?? statusFromRoom(r.status), claudeSessionId: r.sessionId })) }] });
+  // tmux: Claude panes (live sessions) + every pane of a session the phone opened ("mm-…", may run codex / a shell)
+  const byPane = new Map<string, Room>();
+  // a pane that is still open always takes keys (trust prompt, a shell after claude quit) → never "ended"
+  const openPanes = new Set((local.panes ?? []).map(p => p?.id).filter(Boolean));
+  for (const r of tmuxRooms) {
+    const pane = (r.channel as Channel).pane, st = fresh(r) ?? statusFromRoom(r.status);
+    byPane.set(pane, { id: pane, title: (r.channel as Channel).label, agent: "claude", status: st === "ended" && openPanes.has(pane) ? "idle" : st, claudeSessionId: r.sessionId });
   }
+  for (const p of local.panes ?? []) if (p?.id && !byPane.has(p.id))
+    byPane.set(p.id, { id: p.id, title: String(p.session ?? "").startsWith("mm-") ? `${p.session.slice(3)} · ${p.window}` : p.session, agent: p.agent, status: "idle", claudeSessionId: null });
+  const paneCwd = new Map((local.panes ?? []).map(p => [p.id, p.cwd]));
+  // pinned folders become projects; a tmux room working inside one moves under it
+  for (const f of local.folders ?? []) {
+    const id = dirId(f.path), inside = (c?: string) => !!c && (c === f.path || c.startsWith(f.path + "/"));
+    const mine = [...byPane.values()].filter(r => inside(paneCwd.get(r.id)));
+    for (const r of mine) byPane.delete(r.id);
+    projects.set(`📁 ${f.name}`, { name: `📁 ${f.name}`, source: "folder", path: f.path, workspaces: [{ id, name: f.name, branch: gitBranchOf(f.path), rooms: mine }] });
+  }
+  if (byPane.size) projects.set("tmux", { name: "tmux", source: "tmux", workspaces: [{ id: "tmux", name: "tmux", branch: null, rooms: [...byPane.values()] }] });
   return [...projects.values()];
+}
+
+/** New tmux window (session "mm-<folder>", created if missing) running claude / codex / a shell in `dir`. */
+export async function openTmuxRoom(dir: string, agent: string, prompt?: string, run = (args: string[]) => execFileSync("tmux", args, { encoding: "utf-8", timeout: 5_000 })) {
+  const session = "mm-" + (dir.split("/").pop() || "home").replace(/[^\w-]/g, "-").slice(0, 30);
+  const cmd = agent === "claude" ? ["claude"] : agent === "codex" ? ["codex"] : [];
+  let exists = true; try { run(["has-session", "-t", "=" + session]); } catch { exists = false; }
+  const pane = (exists
+    ? run(["new-window", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "-c", dir, ...cmd])
+    : run(["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", session, "-c", dir, ...cmd])).trim();
+  if (!/^%\d+$/.test(pane)) throw new Error("tmux ไม่คืน pane id");
+  if (prompt && cmd.length) setTimeout(async () => { try { await typeInto({ kind: "tmux", pane, label: pane }, prompt); } catch { /* window closed */ } }, 4_000);
+  panesCache.at = 0;
+  return { session, pane };
 }
 
 /** Resolve a (workspace, room) pair from the phone into something we can read/type into. */
 export function roomChannel(ws: string, room: string): ReplyChannel | null {
-  if (ws === "tmux") return /^%\d+$/.test(room) ? { kind: "tmux", pane: room, label: room } : null;
+  if (ws === "tmux" || ws.startsWith("dir:")) return /^%\d+$/.test(room) ? { kind: "tmux", pane: room, label: room } : null;
   if (!/^[0-9a-f-]{36}$/i.test(ws) || !/^[0-9a-f-]{36}$/i.test(room)) return null;
   return { kind: "superset", workspaceId: ws, terminalId: room, label: room };
 }
@@ -487,7 +621,7 @@ function userMessage(raw: string): { role: "user" | "system"; text: string } | n
   return text ? { role: "user", text } : null;
 }
 
-interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[] }
+interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[]; skipFirst?: boolean }
 const transcripts = new Map<string, ParseState>();
 const BOOT_ID = Date.now().toString(36);
 
@@ -593,10 +727,16 @@ function transcriptFile(sessionId: string, root = join(homedir(), ".claude", "pr
 type LineParser = (st: ParseState, lines: string[]) => void;
 
 /** Parse a growing JSONL transcript once, then only the bytes appended since the last call. */
+/** Transcripts can be hundreds of MB; the phone only needs the recent part. Bigger files start at the last 24 MB. */
+export const TAIL_START = 32 * 1024 * 1024, TAIL_BYTES = 24 * 1024 * 1024;
 function readIncremental(file: string, parse: LineParser): ChatItem[] {
   const size = statSync(file).size;
   let st = transcripts.get(file);
-  if (!st || size < st.size) { st = { size: 0, partial: "", items: [], tools: new Map() }; transcripts.set(file, st); }
+  if (!st || size < st.size) {
+    st = { size: 0, partial: "", items: [], tools: new Map() };
+    if (size > TAIL_START) { st.size = size - TAIL_BYTES; st.skipFirst = true; } // the first line there is cut in half
+    transcripts.set(file, st);
+  }
   if (size > st.size) {
     const fd = openSync(file, "r");
     try {
@@ -604,6 +744,7 @@ function readIncremental(file: string, parse: LineParser): ChatItem[] {
       readSync(fd, buf, 0, buf.length, st.size);
       const lines = (st.partial + buf.toString("utf-8")).split("\n");
       st.partial = lines.pop() ?? "";
+      if (st.skipFirst) { lines.shift(); st.skipFirst = false; }
       parse(st, lines);
       st.size = size;
     } finally { closeSync(fd); }
@@ -855,6 +996,20 @@ export function codexLimits(root = join(homedir(), ".codex", "sessions")) {
 
 const sh = async (cmd: string[]) => { const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" }); const out = await new Response(p.stdout).text(); await p.exited; return out; };
 let macCache: { at: number; v: any } | null = null;
+const THERMAL_BIN = join(homedir(), ".maw", "bin", "thermal");
+/** CPU % (of one core, like Activity Monitor) and RAM of maw itself and of all Claude / Codex agents. */
+export function processUsage(psOut: string, selfPid: number) {
+  const out = { maw: { cpu: 0, ramMB: 0 }, claude: { cpu: 0, ramMB: 0, n: 0 }, codex: { cpu: 0, ramMB: 0, n: 0 } };
+  for (const line of psOut.split("\n").slice(1)) {
+    const m = /^\s*(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/.exec(line); if (!m) continue;
+    const name = m[4].trim().split("/").pop()!, cpu = +m[2], mb = +m[3] / 1024;
+    const g = +m[1] === selfPid ? out.maw : name === "claude" ? out.claude : /^codex/.test(name) ? out.codex : null;
+    if (!g) continue;
+    g.cpu += cpu; g.ramMB += mb; if ("n" in g && (name === "claude" || name === "codex")) (g as any).n++;
+  }
+  for (const g of Object.values(out)) { g.cpu = Math.round(g.cpu); g.ramMB = Math.round(g.ramMB); }
+  return out;
+}
 /** Battery, CPU, RAM, disk of this Mac (cached 10 s; CPU needs a 1 s sample). */
 export async function macHealth() {
   if (macCache && Date.now() - macCache.at < 10_000) return macCache.v;
@@ -863,6 +1018,11 @@ export async function macHealth() {
     sh(["/usr/bin/pmset", "-g", "batt"]), sh(["/usr/bin/top", "-l", "2", "-n", "0", "-s", "1"]), sh(["/usr/bin/memory_pressure", "-Q"]),
     sh(["/usr/sbin/sysctl", "-n", "hw.memsize"]), sh(["/bin/df", "-k", "/System/Volumes/Data"]),
   ].map(p => p.catch(() => "")));
+  // heat: macOS thermal state via scripts/thermal.swift (0 ปกติ · 1 อุ่น · 2 ร้อน · 3 ร้อนจัด); and who uses the machine
+  const [therm, procs] = await Promise.all([
+    existsSync(THERMAL_BIN) ? sh([THERMAL_BIN]).catch(() => "") : Promise.resolve(""),
+    sh(["/bin/ps", "-axo", "pid,pcpu,rss,comm"]).catch(() => ""),
+  ]);
   const b = /(\d+)%;\s*([\w ]+?);\s*(?:(\d+:\d+) remaining)?/.exec(batt);
   const cpuL = [...top.matchAll(/CPU usage:.*?([\d.]+)% idle/g)].pop();
   const freePct = Number(/free percentage:\s*(\d+)%/.exec(mem)?.[1] ?? NaN);
@@ -872,6 +1032,8 @@ export async function macHealth() {
     battery: b ? { pct: +b[1], state: b[2].trim(), remaining: b[3] ?? null, ac: /AC Power/.test(batt) } : null,
     cpu: cpuL ? Math.round(100 - Number(cpuL[1])) : null,
     ram: memTotal && !isNaN(freePct) ? { pct: 100 - freePct, totalGB: +(memTotal / 2 ** 30).toFixed(0), usedGB: +((memTotal / 2 ** 30) * (100 - freePct) / 100).toFixed(1) } : null,
+    heat: /^[0-3]$/.test(therm.trim()) ? +therm.trim() : null,
+    usage: processUsage(procs, process.pid),
     disk: dfl.length > 3 ? { totalGB: Math.round(+dfl[1] / 2 ** 20), freeGB: Math.round(+dfl[3] / 2 ** 20), pct: Math.round(100 - (+dfl[3] / +dfl[1]) * 100) } : null,
   };
   macCache = { at: Date.now(), v };
@@ -968,6 +1130,7 @@ export function slashCommands(agent: string, cwd: string | null, home = homedir(
 
 export function workspacePath(wsId: string): string | null {
   if (wsId === "tmux") return null;
+  if (wsId.startsWith("dir:")) return dirFromId(wsId);
   if (Date.now() - wsPaths.at > 30_000) {
     const map = new Map<string, string>();
     try {
@@ -1189,13 +1352,13 @@ const MAX_DIFF = 200_000;
 /** Keys the phone may send (label → tmux key name). */
 export const QUICK_KEYS: Record<string, string> = {
   enter: "Enter", esc: "Escape", up: "Up", down: "Down", tab: "Tab", ctrlc: "C-c",
-  btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u",
+  btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u", space: "Space",
   "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
 };
 /** Same labels in Superset CLI key names. */
 export const SUPERSET_KEYS: Record<string, string> = {
   enter: "enter", esc: "esc", up: "up", down: "down", tab: "tab", ctrlc: "ctrl+c",
-  btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u",
+  btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u", space: "space",
   "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
 };
 
@@ -1246,7 +1409,36 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       return { ok: true };
     }, { body: t.Object({ key: t.String() }) })
     // ── projects / rooms ──
-    .get("/projects", () => ({ projects: buildProjects(supersetSnapshot(), readLiveRooms()) }))
+    .get("/projects", () => ({ projects: buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() }) }))
+    .get("/local/repos", () => {
+      const pinned = new Set(loadFolders().map(f => f.path));
+      return { ok: true, repos: scanRepos().slice(0, 200).map(r => ({ ...r, pinned: pinned.has(r.path) })) };
+    })
+    .get("/local/dirs", ({ query, set }) => {
+      const dir = allowedDir(String(query.path || homedir()));
+      if (!dir) { set.status = 400; return { ok: false, error: "เปิดโฟลเดอร์นี้ไม่ได้" }; }
+      const pinned = new Set(loadFolders().map(f => f.path));
+      let ents: any[] = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { /* */ }
+      const dirs = ents.filter(d => d.isDirectory() && !d.name.startsWith(".") && !(dir === realpathSync(homedir()) && d.name === "Library"))
+        .map(d => { const p = join(dir, d.name); return { name: d.name, path: p, git: existsSync(join(p, ".git")), pinned: pinned.has(p) }; })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return { ok: true, path: dir, home: realpathSync(homedir()), parent: dir === realpathSync(homedir()) ? null : join(dir, ".."), git: existsSync(join(dir, ".git")), pinned: pinned.has(dir), dirs };
+    }, { query: t.Object({ path: t.Optional(t.String()) }) })
+    .post("/local/folders", ({ body, set }) => {
+      const path = allowedDir(String((body as any).path ?? ""));
+      if (!path) { set.status = 400; return { ok: false, error: "เปิดโฟลเดอร์นี้ไม่ได้" }; }
+      const list = loadFolders().filter(f => f.path !== path);
+      if ((body as any).pin !== false) list.unshift({ name: String((body as any).name || path.split("/").pop()).slice(0, 60), path });
+      saveFolders(list);
+      return { ok: true, id: dirId(path), folders: list };
+    })
+    .post("/local/superset-import", ({ body, set }) => {
+      const path = allowedDir(String((body as any).path ?? ""));
+      if (!path || !existsSync(join(path, ".git"))) { set.status = 400; return { ok: false, error: "ต้องเป็น git repo ใน home" }; }
+      const name = String((body as any).name || path.split("/").pop()).replace(/[^\w.\- ]/g, "").slice(0, 60) || "project";
+      try { const out = ss(["projects", "create", "--local", "--import", path, "--name", name, "--json"]); snapCache.at = 0; return { ok: true, result: JSON.parse(out) }; }
+      catch (e: any) { set.status = 502; return { ok: false, error: String(e?.stderr || e?.message || e).slice(0, 300) }; }
+    })
     .get("/rooms/:ws/:room/commands", async ({ params, query }) => {
       // working folder: Superset workspace path, or the tmux pane's current folder
       let cwd: string | null = null;
@@ -1373,9 +1565,21 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
       const usage = query.agent === "codex" ? (f => f ? codexUsage(f) : null)(codexFileFor(params.room)) : query.sid ? claudeUsage(String(query.sid)) : null;
-      try { const scr = await readScreen(ch, 60); return { ok: true, suggestion: promptSuggestion(scr), draft: inputDraft(scr), spinner: agentSpinner(scr), queued: queuedMessages(scr), usage }; }
+      try {
+        const scr = await readScreen(ch, 60), spinner = agentSpinner(scr);
+        const el = spinner && /^compact/i.test(spinner.verb) ? elapsedSeconds(spinner.detail) : null;
+        const compact = el != null ? compactProgress(el, usage?.context?.used ?? null) : null;
+        return { ok: true, suggestion: promptSuggestion(scr), draft: inputDraft(scr), spinner, compact, queued: queuedMessages(scr), usage };
+      }
       catch { return { ok: true, suggestion: null, spinner: null, queued: [], usage }; }
     }, { query: t.Object({ agent: t.Optional(t.String()), sid: t.Optional(t.String()) }) })
+    // phone UI version = newest mtime of the deployed page + feature packs (the page reloads itself when it changes)
+    .get("/version", () => {
+      const dir = process.env.MAW_UI_DIR ?? join(homedir(), ".maw", "ui", "dist");
+      const files = ["m.html", "sw.js", ...(() => { try { return readdirSync(join(dir, "m-ext")).map(f => join("m-ext", f)); } catch { return []; } })()];
+      let v = 0; for (const f of files) { try { v = Math.max(v, statSync(join(dir, f)).mtimeMs); } catch { /* missing */ } }
+      return { ok: true, v: Math.round(v) };
+    })
     .get("/push/key", () => ({ ok: true, key: loadPush().vapid.publicKey }))
     .post("/push/subscribe", ({ body }) => {
       const sub = (body as any).subscription;
@@ -1399,7 +1603,13 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       return { ok: true };
     }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()) }) })
     // Open a new room in a Superset workspace: an agent with a first prompt, or a plain shell.
-    .post("/workspaces/:ws/rooms", ({ params, body, set }) => {
+    .post("/workspaces/:ws/rooms", async ({ params, body, set }) => {
+      if (params.ws.startsWith("dir:")) {
+        const dir = dirFromId(params.ws);
+        if (!dir) { set.status = 400; return { ok: false, error: "เปิดโฟลเดอร์นี้ไม่ได้" }; }
+        try { return { ok: true, result: await openTmuxRoom(dir, body.agent, body.prompt) }; }
+        catch (e: any) { set.status = 502; return { ok: false, error: String(e?.message || e).slice(0, 300) }; }
+      }
       if (!/^[0-9a-f-]{36}$/i.test(params.ws)) { set.status = 400; return { ok: false, error: "bad workspace" }; }
       try {
         const out = body.agent === "shell"
@@ -1423,5 +1633,6 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     });
   // feature packs (src/mobile/features/*) add their routes after the auth guard above
   mountFeatures(app);
+  setTimeout(() => compactMsPerToken(), 30_000).unref?.(); // warm the /compact estimate in the background
   return app;
 }

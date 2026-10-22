@@ -136,6 +136,11 @@
   .pcp { position: absolute; top: 4px; right: 4px; width: 30px; height: 28px; border-radius: 8px; background: #1f2440cc; color: var(--dim); font-size: 13px; z-index: 1; }
   .pcp.ok { background: #22c55e33; color: #4ade80; }
   .spin[hidden] { display: none; }
+  .cprog[hidden] { display: none; }
+  .cprog { margin: 4px 14px 0; padding: 6px 10px; border-radius: 10px; background: #0e749022; border: 1px solid #0e749066; flex: none; font-size: 12.5px; }
+  .cprog .ct { display: flex; gap: 6px; align-items: baseline; } .cprog .ct span { margin-left: auto; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .cprog .bar { height: 6px; margin-top: 5px; } .cprog .bar > i { background: linear-gradient(90deg, #22d3ee, #a78bfa); transition: width 2s linear; }
+  .cprog .hint { color: var(--dim); font-size: 11px; margin-top: 3px; }
   .spin { display: flex; align-items: baseline; gap: 8px; margin: 6px 14px 0; font: 600 14px var(--mono); flex: none; white-space: nowrap; overflow: hidden; }
   .spin .gl { color: #d97757; width: 1em; text-align: center; animation: spinc 2.4s linear infinite; }
   .spin .vb { background: linear-gradient(90deg, #d97757, #f472b6, #c084fc, #f472b6, #d97757); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
@@ -177,10 +182,18 @@
   .lim .who2 { font-weight: 700; } .lim .who2.claude { color: #f0a17f; } .lim .who2.codex { color: #6ee7b7; }
   .lim .cell { min-width: 0; } .lim .cell .t { display: flex; justify-content: space-between; gap: 4px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; } .lim .cell .t b { color: var(--text); }
   .lim .cell .t span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .rc-trav { display: inline-flex; align-items: center; gap: 2px; font: 600 11px var(--mono); color: #67e8f9; margin-right: 2px; }
+  .trav-cd { font-variant-numeric: tabular-nums; }
+  .heatrow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .heatrow .heat, .heatrow .use { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 10px; background: var(--card2); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 0; }
+  .heatrow .k { font-size: 11px; color: var(--dim); white-space: nowrap; } .heatrow b { font-size: 12.5px; white-space: nowrap; } .heatrow span:last-child { color: var(--dim); }
+  .heatrow .heat { box-shadow: inset 3px 0 0 var(--hc); } .heatrow .heat b { color: var(--hc); }
   .trav { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--card2); font-size: 13px; }
   .trav .k { color: var(--dim); font-size: 12px; } .trav.on { background: #0e7490; } .trav.on .k { color: #cffafe; }
   .trav button { flex: none; height: 32px; padding: 0 12px; border-radius: 9px; background: var(--accent); color: #031022; font-weight: 700; font-size: 12.5px; }
   .trav.on button { background: #fff; }
+  .rawnote { position: sticky; top: -1px; z-index: 1; margin: -2px -2px 8px; padding: 6px 10px; border-radius: 8px; background: #1e293bf2; color: #94a3b8; font: 12px/1.4 var(--font); white-space: normal; }
+  .rawnote button { color: var(--accent); font-weight: 700; text-decoration: underline; }
   .ctxrow[hidden] { display: none; }
   .ctxrow { display: flex; align-items: center; gap: 8px; padding: 4px 14px 0; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
   .ctxrow .bar { flex: 0 0 70px; margin: 0; } .ctxrow b { color: var(--text); }
@@ -192,6 +205,12 @@
   @keyframes rcin { from { opacity: 0; transform: translateY(-6px); } }
   .msg.me.queued .bubble { background: transparent; border: 1.5px dashed #3b82f6; color: #bfdbfe; }
   .msg.me.queued .who { color: #93c5fd; }
+.msg.me.pend.sending .bubble { opacity: .72; }
+.msg.me.pend.sent .who { color: #86efac; }
+.msg.me.pend.failed .bubble { background: transparent; border: 1.5px solid #ef4444; color: var(--text, #e5e7eb); }
+.msg.me.pend.failed .who { color: #fca5a5; }
+.pact { display: flex; gap: 6px; margin-top: 4px; }
+.pact button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid #475569; background: #1e293b; color: #e5e7eb; }
   .msg.me.canceled .bubble { background: transparent; border: 1px solid #475569; color: #64748b; text-decoration: line-through; } .msg.me.canceled .who { color: #94a3b8; }
   .draftbar { display: flex; align-items: center; gap: 6px; margin: 6px 12px 0; padding: 6px 6px 6px 12px; border-radius: 12px; background: #f59e0b14; border: 1px solid #f59e0b55; flex: none; font-size: 13px; }
   .draftbar[hidden] { display: none; } .draftbar .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fde68a; } .draftbar .t b { color: #fbbf24; margin-right: 4px; }
@@ -204,6 +223,33 @@
   .sharebar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sharebar button { flex: none; padding: 6px 10px; border-radius: 8px; background: var(--accent); color: #031022; font-weight: 700; font-size: 12.5px; }
   .share-prev { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; } .share-prev img { height: 90px; border-radius: 10px; border: 1px solid var(--line); }
   .share-prev .f { padding: 8px 10px; border-radius: 10px; background: var(--card2); font-size: 12.5px; white-space: nowrap; }
+  /* ── compact room chrome (พี่ Ball: "ลดขนาด มันกินพื้นที่ห้องแชท") ── */
+  .roomhead .mode button { padding: 3px 10px; font-size: 12px; }
+  .roominfo { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; padding: 3px 12px 0; flex: none; }
+  .roominfo .ctxrow { padding: 0; flex: 1 1 auto; min-width: 0; font-size: 11.5px; gap: 6px; }
+  .roominfo .ctxrow .bar { flex: 0 0 48px; }
+  .roominfo #ext-room-top { display: contents; }
+  .roominfo .mm-row { padding: 0 !important; order: 2; }
+  .roominfo .mm-chip { height: 22px !important; padding: 0 8px !important; font-size: 11px !important; border-radius: 11px !important; }
+  .roominfo .mm-meta { display: none; }
+  .roominfo #act-box { flex: 1 1 100%; order: 3; margin: 0 !important; }
+  .roominfo #act-box .act-bar { min-height: 24px; padding: 2px 8px; font-size: 11.5px; }
+  .keys { padding-top: 5px !important; gap: 5px !important; }
+  .key { min-width: 38px !important; height: 32px !important; padding: 0 9px !important; font-size: 13px; border-radius: 9px !important; }
+  .spin { margin-top: 3px !important; font-size: 12.5px !important; }
+  #act-fab .fab { width: 40px !important; height: 40px !important; font-size: 17px !important; }
+  #act-fab .fab .n { min-width: 17px !important; height: 17px !important; font-size: 10.5px !important; line-height: 17px !important; top: -3px !important; right: -3px !important; }
+  #act-fab .fab::before { inset: -3px !important; }
+  /* ── open local repos / folders ── */
+  .openproj { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px dashed #3b4266; background: transparent; color: var(--accent); font-weight: 600; font-size: 14px; margin-bottom: 10px; text-align: left; }
+  .op-tabs { display: flex; gap: 6px; margin: 10px 0 8px; } .op-tabs button { flex: 1; padding: 8px; border-radius: 10px; background: var(--card2); color: var(--dim); font-weight: 600; } .op-tabs button.on { background: var(--accent); color: #031022; }
+  .op-list { max-height: 52dvh; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; }
+  .op-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-bottom: 1px solid #ffffff08; text-align: left; }
+  .op-row .n { flex: 1; min-width: 0; } .op-row .n b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .op-row .n span { display: block; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .op-row .tag { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--card2); color: var(--dim); } .op-row .tag.git { color: #fbbf24; } .op-row .tag.pin { color: #22d3ee; }
+  .op-crumb { font: 12px var(--mono); color: var(--dim); margin: 0 0 6px; word-break: break-all; }
+  .op-acts { display: grid; gap: 8px; margin-top: 10px; } .op-acts button { padding: 12px; border-radius: 12px; background: var(--card2); font-weight: 600; text-align: left; } .op-acts button small { display: block; color: var(--dim); font-weight: 400; font-size: 12px; }
+  .op-agents { display: flex; gap: 6px; } .op-agents button { flex: 1; padding: 10px 6px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-weight: 600; } .op-agents button.on { background: var(--accent); color: #031022; }
   /* ── VS Code explorer tree ── */
   .xp.tree { padding: 0 0 24px; }
   .vh { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px 12px; background: var(--bg); font: 700 11.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
@@ -330,6 +376,12 @@ const ICON = { claude: "✳ Claude", codex: "◎ Codex", opencode: "OpenCode", g
 const $app = document.getElementById("app");
 let state = { projects: [], project: null, ws: null, room: null, follow: true, showEmpty: false, presets: [], mode: "chat", chat: null, open: new Set(), pview: "rooms", fpath: "", fview: null, gview: null, files: [] };
 let timer = null;
+// per-room chat memory so switching rooms paints instantly (last 12 rooms)
+const chatCache = new Map(), chatHtmlCache = new Map();
+function rememberChatHtml(room, html) {
+  chatHtmlCache.delete(room); chatHtmlCache.set(room, html);
+  while (chatHtmlCache.size > 12) { const k = chatHtmlCache.keys().next().value; chatHtmlCache.delete(k); chatCache.delete(k); }
+}
 // Extension points for feature packs in ui/mobile/ext/*.js (PLAN-maw-mobile.md §9):
 //   onRoom({p,w,room})  after a room view is drawn · onPoll({p,w,room,live}) every ~2.5 s in a room
 //   onHome()  after home is drawn · onComposer({w,room,msg})  composer ready · tabs [{key,label,render(w, el)}] extra project tabs
@@ -380,6 +432,7 @@ function renderHome() {
       <button class="iconbtn" id="desktop" style="font-size:13px">หน้าเดิม</button>
       <button class="iconbtn" id="refresh" aria-label="รีเฟรช">↻</button></header>
     <main>
+      <button class="openproj" id="openproj">➕ เปิดโปรเจค · repo ในเครื่อง · โฟลเดอร์</button>
       <div id="ext-home"></div>
       ${waiting.length ? `<div class="section">🟡 รอคำตอบ</div>${waiting.map(r => `
         <button class="card waitcard" data-go="${esc(r.project)}|${esc(r.ws)}|${esc(r.id)}">
@@ -394,6 +447,7 @@ function renderHome() {
   document.getElementById("refresh").onclick = () => load(true);
   document.getElementById("toggleEmpty").onclick = () => { state.showEmpty = !state.showEmpty; renderHome(); };
   document.getElementById("bell").onclick = e => togglePush(e.currentTarget);
+  document.getElementById("openproj").onclick = () => openProjectSheet();
   extCall("onHome");
   document.getElementById("desktop").onclick = () => { store.set("maw-desktop-ui", "1"); location.href = "/?host=" + encodeURIComponent(location.origin) + "#fleet"; };
 }
@@ -425,9 +479,10 @@ function renderProject() {
   const room = w?.rooms.find(r => r.id === state.room);
   const canType = !!room && room.status !== "ended";
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
-  const seg = p.source === "superset" ? `<div class="seg">${[["rooms", "💬 ห้อง"], ["files", "📁 ไฟล์"], ["git", "⎇ Git"], ...mawExt.tabs.map(t => [t.key, t.label])].map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
-  if (state.pview !== "rooms" && p.source === "superset") {
-    $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}<span style="color:var(--dim);font-size:12.5px;flex:none">⎇ ${esc(w?.branch || "")}</span></header>
+  const segTabs = p.source === "superset" ? [["rooms", "💬 ห้อง"], ["files", "📁 ไฟล์"], ["git", "⎇ Git"], ...mawExt.tabs.map(t => [t.key, t.label])] : p.source === "folder" ? [["rooms", "💬 ห้อง"], ["files", "📁 ไฟล์"], ["git", "⎇ Git"]] : null;
+  const seg = segTabs ? `<div class="seg">${segTabs.map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
+  if (state.pview !== "rooms" && segTabs) {
+    $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}<span style="color:var(--dim);font-size:12.5px;flex:none">⎇ ${esc(w?.branch || "")}</span>${p.source === "folder" ? `<button class="iconbtn" data-unpin="${esc(p.path)}" title="เลิกปัก">📌</button>` : ""}</header>
       ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
       ${seg}<div class="xp" id="xp">กำลังโหลด…</div>`;
     document.getElementById("back").onclick = () => history.back();
@@ -443,18 +498,18 @@ function renderProject() {
     ${seg}
     ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
     <div class="tabs" id="tabs">${(w?.rooms || []).map(r => `<button class="tab ${r.id === state.room ? "on" : ""}" data-r="${esc(r.id)}">${dot(r.status)}<span class="t">${esc(r.title)}</span></button>`).join("")}
-      ${p.source === "superset" ? `<button class="tab add" id="add" aria-label="เปิดห้องใหม่">+</button>` : ""}</div>
+      <button class="tab add" id="add" aria-label="เปิดห้องใหม่">+</button></div>
     ${room ? `
-      <div style="padding:6px 14px 0;color:var(--dim);font-size:12.5px" class="row">${agentChip(room.agent)}
+      <div style="padding:4px 12px 0;color:var(--dim);font-size:12px" class="row roomhead">${agentChip(room.agent)}
         <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(room.title)}</span>
         <span class="mode"><button data-m="chat" class="${state.mode === "chat" ? "on" : ""}">แชท</button><button data-m="raw" class="${state.mode === "raw" ? "on" : ""}">จอ</button></span></div>
-      <div class="ctxrow" id="ctx" hidden></div>
-      <div id="ext-room-top"></div>
-      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">กำลังโหลด…</div></div>
+      <div class="roominfo"><div class="ctxrow" id="ctx" hidden></div><div id="ext-room-top"></div></div>
+      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">${(state.mode === "chat" && chatHtmlCache.get(state.room)) || "กำลังโหลด…"}</div></div>
       ${canType ? `
-      <div class="keys"><button class="key sk" id="skbtn">/ สกิล</button>${mawExt.keys.map((k, i) => `<button class="key ${esc(k.cls || "")}" data-xk="${i}">${esc(k.label)}</button>`).join("")}${[["enter", "⏎"], ["1", "1"], ["2", "2"], ["3", "3"], ["esc", "Esc"], ["up", "↑"], ["down", "↓"], ["tab", "Tab"], ["ctrlc", "Ctrl+C"]]
+      <div class="keys"><button class="key sk" id="skbtn">/ สกิล</button>${mawExt.keys.map((k, i) => !k.show || k.show({ w, room }) ? `<button class="key ${esc(k.cls || "")}" data-xk="${i}">${esc(k.label)}</button>` : "").join("")}${[["enter", "⏎"], ["1", "1"], ["2", "2"], ["3", "3"], ["esc", "Esc"], ["up", "↑"], ["down", "↓"], ["tab", "Tab"], ["ctrlc", "Ctrl+C"]]
         .map(([k, l]) => `<button class="key ${k === "ctrlc" ? "warn" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
       <div class="spin" id="spin" hidden><span class="gl"></span><span class="vb"></span><span class="dt"></span></div>
+      <div class="cprog" id="cprog" hidden></div>
       <div id="ext-room-bottom"></div>
       <div class="slash" id="slash" hidden></div>
       <div class="draftbar" id="draft" hidden></div>
@@ -462,11 +517,11 @@ function renderProject() {
       <div class="att" id="att"></div>
       <div class="composer"><button class="clip" id="clip" aria-label="แนบไฟล์">📎</button><button class="clip" id="cam" aria-label="ถ่ายรูป">📷</button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden>
         <textarea id="msg" rows="1" placeholder="พิมพ์ในห้องนี้…"></textarea><button class="send" id="send" disabled aria-label="ส่ง">↑</button></div>` : ""}`
-    : `<div class="empty">ยังไม่มีห้อง${p.source === "superset" ? " — กด + เพื่อเปิดห้องใหม่" : ""}</div>`}`;
+    : `<div class="empty">ยังไม่มีห้อง — กด + เพื่อเปิดห้องใหม่</div>`}`;
   document.getElementById("back").onclick = () => history.back();
   $app.querySelectorAll("[data-ws]").forEach(b => b.onclick = () => { state.ws = b.dataset.ws; const ww = p.workspaces.find(x => x.id === state.ws); state.room = ww?.rooms[0]?.id; renderProject(); });
   $app.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { state.room = b.dataset.r; state.follow = true; state.chat = null; state.queued = []; state.open = new Set(); renderProject(); });
-  const add = document.getElementById("add"); if (add) add.onclick = () => openNewRoom(w);
+  const add = document.getElementById("add"); if (add) add.onclick = () => p.source === "tmux" ? openProjectSheet() : openNewRoom(w);
   $app.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { state.pview = b.dataset.pv; renderProject(); });
   $app.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { state.mode = b.dataset.m; state.follow = true; renderProject(); });
   document.querySelector(".tab.on")?.scrollIntoView({ inline: "center", block: "nearest" });
@@ -474,14 +529,21 @@ function renderProject() {
   $app.querySelectorAll("[data-xk]").forEach(b => b.onclick = () => { try { mawExt.keys[+b.dataset.xk].onClick({ w, room }); } catch (e) { toast(e.message); } });
   extCall("onRoom", { p, w, room });
   const scr = document.getElementById("screen");
+  paintPending(); // bubbles still on their way to the Mac
+  // opening / switching to a room → start at the newest message (the cached chat is painted at the top otherwise)
+  if (state.lastRoomShown !== state.room) { state.lastRoomShown = state.room; state.follow = true; }
+  if (state.follow) { scr.scrollTop = scr.scrollHeight; requestAnimationFrame(() => { scr.scrollTop = scr.scrollHeight; }); }
   scr.onscroll = () => { state.follow = scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 30; if (state.follow) scr.parentElement.querySelector('.newpill')?.remove(); };
   const msg = document.getElementById("msg"), send = document.getElementById("send");
   if (msg) {
-    msg.oninput = () => { send.disabled = !msg.value.trim() && !state.files.length; msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight, 140) + "px"; };
+    const dkey = `${w.id}/${room.id}`;
+    if (state.filesRoom !== dkey) { state.filesRoom = dkey; state.files = []; } // attachments belong to one room
+    msg.oninput = () => { send.disabled = !msg.value.trim() && !state.files.length; msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight, 140) + "px"; saveDraftText(dkey, msg.value); };
     wireSlash(w, room, msg);
     extCall("onComposer", { w, room, msg });
     const att = document.getElementById("att"), fileIn = document.getElementById("fileIn");
     const drawAtt = () => {
+      if (drawAtt.ready) saveDraftFiles(dkey, state.files); // not before the saved ones were restored
       att.innerHTML = state.files.map((f, k) => `<div class="chipf">${f.type.startsWith("image/") ? `<img src="${f._url || (f._url = URL.createObjectURL(f))}">` : `📄<br>${esc(f.name.slice(0, 14))}`}<button data-rm="${k}">✕</button></div>`).join("");
       att.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { state.files.splice(+b.dataset.rm, 1); drawAtt(); msg.oninput(); });
     };
@@ -499,29 +561,26 @@ function renderProject() {
     document.getElementById("cam").onclick = () => camIn.click();
     camIn.onchange = () => { state.files.push(...camIn.files); camIn.value = ""; drawAtt(); msg.oninput(); };
     drawAtt();
+    // Android may kill the page while the camera / gallery is open → bring back what was typed and attached
+    restoreDraft(dkey, msg, drawAtt).finally(() => { drawAtt.ready = true; if (state.files.length) saveDraftFiles(dkey, state.files); });
+    msg.addEventListener("maw-redraw-att", () => drawAtt());
     msg.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } };
     send.onclick = doSend;
     async function doSend() {
-      let text = msg.value.trim(); if (!text && !state.files.length) return; send.disabled = true;
+      const text = msg.value.trim(), files = [...state.files]; if (!text && !files.length) return;
       if (state.macDraft) { // typing goes into the same box → it would be glued onto what's already there
+        send.disabled = true;
         const how = await askMacDraft(state.macDraft);
-        if (!how) { send.disabled = false; return; }
+        send.disabled = false;
+        if (!how) return;
         if (how === "clear") await roomKey("ctrlu");
       }
-      try {
-        const paths = [];
-        for (const [k, f] of state.files.entries()) {
-          toast(`กำลังอัปโหลด ${k + 1}/${state.files.length}…`);
-          const up = await shrinkImage(f);
-          const r = await fetch(`/mobile/upload?name=${encodeURIComponent(up.name)}`, { method: "POST", body: up, headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
-          const j = await r.json(); if (!j.ok) throw new Error(j.error || "อัปโหลดไม่ได้");
-          paths.push(j.path);
-        }
-        if (paths.length) text = (text ? text + "\n\n" : "") + paths.map(x => `[แนบไฟล์] ${x}`).join("\n");
-        await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/send`, { method: "POST", body: JSON.stringify({ text }) });
-        msg.value = ""; state.files = []; drawAtt(); msg.oninput(); toast("ส่งแล้ว"); setTimeout(loadScreen, 500);
-      }
-      catch (e) { toast("ส่งไม่ได้: " + e.message); send.disabled = false; }
+      // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
+      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, text, files, at: Date.now(), state: "sending", note: "",
+        pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
+      pendingSends.push(pend);
+      msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
+      paintPending(); queueSend(pend);
     }
     $app.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
       if (b.dataset.k === "ctrlc" && !b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้ง"; setTimeout(() => { delete b.dataset.armed; b.textContent = "Ctrl+C"; }, 2500); return; }
@@ -663,22 +722,31 @@ function renderList(list) {
 }
 
 async function loadChat(scr, older) {
-  const base = `/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/chat`;
+  const ws = state.ws, room = state.room;
+  const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
   const q = older && state.chat ? `?before=${state.chat.start}&limit=150` : "?limit=150";
   const c = await api(base + q);
+  // the reply of a room we already left must not land in the room on screen now
+  if (state.ws !== ws || state.room !== room || !scr.isConnected) return { kind: "stale" };
   if (c.kind !== "messages") return c;
   const prev = state.chat;
-  if (!prev || prev.room !== state.room || prev.epoch !== c.epoch || c.total < prev.total) { state.chat = { room: state.room, epoch: c.epoch, start: c.start, total: c.total, items: new Map() }; scr._sig = ""; }
+  // switching rooms: reuse that room's cached items (shown instantly by renderProject), refresh in place
+  if (!prev || prev.room !== state.room) { const cached = chatCache.get(state.room); if (cached && cached.epoch === c.epoch && c.total >= cached.total) state.chat = cached; }
+  const cur = state.chat;
+  if (!cur || cur.room !== state.room || cur.epoch !== c.epoch || c.total < cur.total) { state.chat = { room: state.room, epoch: c.epoch, start: c.start, total: c.total, items: new Map() }; scr._sig = ""; }
+  chatCache.set(state.room, state.chat);
   const ch = state.chat;
   for (const it of c.items) ch.items.set(it.i, it);
   ch.start = older ? c.start : Math.min(ch.start, c.start);
   const grew = c.total > ch.total; ch.total = c.total;
   const list = [...ch.items.values()].sort((a, b) => a.i - b.i);
   const sig = ch.total + ":" + list.filter(m => m.queued).length + ":" + list.filter(m => m.canceled).length + ":" + list.filter(m => m.tool).map(m => m.tool.bg === "running" ? 2 : m.tool.output == null ? 0 : 1).join("") + ":" + [...state.open].join(",");
-  if (scr._sig === sig) return c;
+  if (scr._sig === sig) { if (pendingSends.length) { reconcilePending(list); paintPending(); } return c; }
   const atBottom = scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60, oldH = scr.scrollHeight, oldTop = scr.scrollTop;
   scr._sig = sig;
   scr.innerHTML = (ch.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${ch.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list);
+  rememberChatHtml(state.room, scr.innerHTML);
+  reconcilePending(list); paintPending();
   scr.querySelector("#older")?.addEventListener("click", () => loadChat(scr, true));
   scr.querySelectorAll("details.tool").forEach(d => d.addEventListener("toggle", e => { e.stopPropagation(); const i = +d.dataset.i; d.open ? state.open.add(i) : state.open.delete(i); }));
   scr.querySelectorAll("details.tgroup").forEach(d => d.addEventListener("toggle", () => { const g = d.dataset.g; d.open ? state.open.add(g) : state.open.delete(g); }));
@@ -687,6 +755,67 @@ async function loadChat(scr, older) {
   else if (state.follow || atBottom || !prev) scr.scrollTop = scr.scrollHeight;
   else if (grew) showNewPill(scr);
   return c;
+}
+// ── optimistic send: phone bubble first, Mac second ──
+const pendingSends = []; let pendSeq = 0, sendChain = Promise.resolve();
+const queueSend = p => { sendChain = sendChain.then(() => runSend(p)); }; // one at a time → the Mac gets them in order
+async function runSend(p) {
+  p.state = "sending"; p.err = ""; paintPending();
+  try {
+    const paths = [];
+    for (const [k, f] of p.files.entries()) {
+      p.note = p.files.length > 1 ? `อัปโหลด ${k + 1}/${p.files.length}` : "อัปโหลดไฟล์"; paintPending();
+      const up = await shrinkImage(f);
+      const r = await fetch(`/mobile/upload?name=${encodeURIComponent(up.name)}`, { method: "POST", body: up, headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+      const j = await r.json(); if (!j.ok) throw new Error(j.error || "อัปโหลดไม่ได้");
+      paths.push(j.path);
+    }
+    p.note = "";
+    const text = (p.text ? p.text + (paths.length ? "\n\n" : "") : "") + paths.map(x => `[แนบไฟล์] ${x}`).join("\n");
+    p.paths = paths;
+    await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", body: JSON.stringify({ text }) });
+    p.state = "sent"; p.sentAt = Date.now();
+    const box = document.getElementById("msg");
+    if (state.filesRoom !== p.key || (!box?.value.trim() && !state.files.length)) clearDraft(p.key); // keep a newer draft typed meanwhile
+    paintPending(); setTimeout(loadScreen, 400);
+  } catch (e) { p.state = "failed"; p.err = e.message; p.note = ""; paintPending(); }
+}
+function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); if (!quiet) paintPending(); }
+/** Sent bubbles leave once the real message shows up in the chat (or after a minute as a fallback). */
+function reconcilePending(list) {
+  const mine = list.filter(m => m.role === "user").slice(-12);
+  for (const p of [...pendingSends]) {
+    if (p.state !== "sent" || p.ws !== state.ws || p.room !== state.room) continue;
+    const head = (p.text || p.paths?.[0] || "").slice(0, 40).trim();
+    const seen = mine.some(m => (!m.ts || Date.parse(m.ts) >= p.at - 120_000) && head && String(m.text || "").includes(head));
+    if (seen || Date.now() - p.sentAt > 60_000) dropPending(p, true);
+  }
+}
+function paintPending() {
+  const scr = document.getElementById("screen"); if (!scr) return;
+  scr.querySelectorAll(".pend").forEach(n => n.remove());
+  if (state.mode !== "chat") return;
+  for (const p of [...pendingSends]) if (p.state === "sent" && Date.now() - p.sentAt > 60_000) dropPending(p, true);
+  const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room);
+  if (!mine.length) return;
+  const atBottom = state.follow || scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60;
+  for (const p of mine) {
+    const who = p.state === "failed" ? `⚠️ ส่งไม่ได้ · ${esc(p.err)}` : p.state === "sent" ? "✓ ส่งแล้ว" : `⏳ ${p.note ? esc(p.note) + "…" : "กำลังส่ง…"}`;
+    const el = document.createElement("div");
+    el.className = `msg me pend ${p.state}`;
+    el.innerHTML = `<div class="who">${who}</div><div class="bubble">${p.pics.length ? `<div class="pics">${p.pics.map(u => `<img class="upimg" src="${u}" data-zoom="${u}">`).join("")}</div>` : ""}${esc(p.text)}${p.names.map(n => `<div class="upfile">📎 ${esc(n)}</div>`).join("")}</div>`
+      + (p.state === "failed" ? `<div class="pact"><button data-a="retry">↻ ลองใหม่</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button></div>` : "");
+    el.querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
+      if (b.dataset.a === "retry") return queueSend(p);
+      if (b.dataset.a === "edit") {
+        const box = document.getElementById("msg");
+        if (box) { box.value = p.text + (box.value ? "\n" + box.value : ""); state.files = [...p.files, ...state.files]; box.dispatchEvent(new Event("maw-redraw-att")); box.oninput(); box.focus(); }
+      }
+      dropPending(p);
+    });
+    scr.appendChild(el);
+  }
+  if (atBottom) scr.scrollTop = scr.scrollHeight;
 }
 function showNewPill(scr) {
   const wrap = scr.parentElement; if (wrap.querySelector(".newpill")) return;
@@ -719,10 +848,21 @@ async function loadSuggestion() {
   if (!room || !["claude", "codex"].includes(room.agent)) { hide(); if (spin) spin.hidden = true; return; }
   try {
     const r = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/suggestion?${qs({ agent: room.agent, sid: room.claudeSessionId || "" })}`);
+    if (state.ws !== w.id || state.room !== room.id) return; // left this room while waiting
     renderCtx(r.usage);
     extCall("onPoll", { p: state.projects.find(x => x.name === state.project), w, room, live: r });
 
     // animated "✽ Moonwalking… (19s · ↓ 564 tokens)" line, same as the terminal
+    // /compact: estimated progress bar (Claude itself shows only a timer)
+    const cp = document.getElementById("cprog");
+    if (cp) {
+      if (!r.compact) cp.hidden = true;
+      else {
+        const c = r.compact, mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+        cp.hidden = false;
+        cp.innerHTML = `<div class="ct">🗜 กำลังย่อบทสนทนา <b>~${c.pct}%</b><span>${c.leftS ? `เหลือราว ${mmss(c.leftS)}` : "ใกล้เสร็จ"}</span></div><div class="bar"><i style="width:${c.pct}%"></i></div><div class="hint">ประมาณจากการ compact ${c.basedOn || 0} ครั้งก่อนหน้า · ใช้ไปแล้ว ${mmss(c.elapsedS)}</div>`;
+      }
+    }
     if (spin) {
       if (r.spinner) {
         spin.hidden = false; spin.querySelector(".vb").textContent = r.spinner.verb; spin.querySelector(".dt").textContent = r.spinner.detail ? `(${r.spinner.detail})` : "";
@@ -754,6 +894,10 @@ async function loadSuggestion() {
 }
 async function loadScreen() {
   const scr = document.getElementById("screen"); if (!scr || !state.room) return;
+  // one request per room at a time: on slow 4G the 2.5 s poll would otherwise pile up behind itself
+  const key = `${state.ws}/${state.room}/${state.mode}`;
+  if (loadScreen.busy?.key === key && Date.now() - loadScreen.busy.at < 15_000) return;
+  const mine = loadScreen.busy = { key, at: Date.now() };
   loadSuggestion();
   try {
     if (state.mode === "chat") {
@@ -762,16 +906,19 @@ async function loadScreen() {
       else if (c.kind === "none") { state.mode = "raw"; scr.className = "screen raw"; return loadScreen(); }
     } else {
       const s = await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/screen?lines=1000`);
+      if (key !== `${state.ws}/${state.room}/${state.mode}` || !scr.isConnected) return;
       // keep the terminal's own colours (tmux sends them; Superset's reader returns plain text)
       const lines = String(s.content ?? "").replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n").filter(l => !SEP.test(stripAnsi(l)));
       const html = ansiHtml(lines.join("\n").replace(/(\n\s*){3,}/g, "\n\n").trimEnd());
       if (scr._raw !== html) {
         const fromBottom = scr.scrollHeight - scr.scrollTop; // keep the reader's place while the screen updates
-        scr._raw = html; scr.innerHTML = html || "(จอว่าง)";
+        scr._raw = html; scr.innerHTML = `<div class="rawnote">แสดงเฉพาะจอปัจจุบัน (Claude วาดจอทับที่เดิม ไม่เก็บประวัติ) · ย้อนหลังทั้งหมดอยู่ใน <button data-gochat>แชท</button></div>` + (html || "(จอว่าง)");
+        scr.querySelector("[data-gochat]").onclick = () => { state.mode = "chat"; state.follow = true; renderProject(); };
         scr.scrollTop = state.follow ? scr.scrollHeight : scr.scrollHeight - fromBottom;
       }
     }
-  } catch (e) { if (e.message !== "unauthorized") scr.textContent = "อ่านไม่ได้: " + e.message; }
+  } catch (e) { if (e.message !== "unauthorized" && scr.isConnected && key === `${state.ws}/${state.room}/${state.mode}`) scr.textContent = "อ่านไม่ได้: " + e.message; }
+  finally { if (loadScreen.busy === mine) loadScreen.busy = null; }
 }
 
 // ── explorer: files + git (read-only) ──
@@ -1046,17 +1193,29 @@ function sysHtml() {
       ${tile("CPU", m.cpu != null ? m.cpu + "%" : "—", m.cpu)}
       ${tile("RAM", m.ram ? `${m.ram.usedGB}/${m.ram.totalGB}G` : "—", m.ram?.pct)}
       ${tile("ดิสก์ว่าง", m.disk ? `${m.disk.freeGB} GB` : "—", m.disk?.pct)}</div>
+    ${heatHtml(m)}
     ${lim("✳ Claude", "claude", s.limits?.claude)}${lim("Codex", "codex", s.limits?.codex)}
     ${travelHtml()}`;
 }
 // 🧳 travel mode: Mac keeps running with the lid closed (features/travel.ts) — safety auto-off on low battery / heat / timer
+// countdown "7:59:42" — ticks every second wherever it is shown (panel + header widget)
+const cdText = until => { const s = Math.max(0, Math.round(((until || 0) - Date.now()) / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+setInterval(() => document.querySelectorAll(".trav-cd").forEach(el => { el.textContent = cdText(+el.dataset.until); }), 1000);
+// heat (macOS thermal state) + how much maw and the agents use
+const HEAT = [["ปกติ", "#22c55e", "🙂"], ["อุ่น", "#eab308", "😐"], ["ร้อน", "#f97316", "🥵"], ["ร้อนจัด", "#ef4444", "🔥"]];
+function heatHtml(m) {
+  const h = HEAT[m.heat] || null, u = m.usage;
+  const gb = mb => mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB";
+  const cell = (k, x, extra = "") => x ? `<div class="use"><span class="k">${k}${extra}</span><b>CPU ${x.cpu}%</b><span>${gb(x.ramMB)}</span></div>` : "";
+  return `<div class="heatrow">${h ? `<div class="heat" style="--hc:${h[1]}"><span class="k">ความร้อน</span><b>${h[2]} ${h[0]}</b></div>` : ""}
+    ${cell("maw", u?.maw)}${cell("Claude", u?.claude, u?.claude?.n ? ` ×${u.claude.n}` : "")}${cell("Codex", u?.codex, u?.codex?.n ? ` ×${u.codex.n}` : "")}</div>`;
+}
 function travelHtml() {
   const t = state.travel; if (!t) return "";
   if (!t.sudoReady) return `<div class="trav"><div><b>🧳 โหมดเดินทาง</b> <span class="k">พับจอได้ งานยังวิ่ง</span></div>
     <div class="k" style="margin-top:4px">ต้องตั้งสิทธิ์บน Mac หนึ่งครั้ง (ใส่รหัสเครื่อง) — ดูคำสั่งในแชท/README ของ maw mobile</div></div>`;
-  const left = t.until ? Math.max(0, Math.round((t.until - Date.now()) / 60000)) : 0;
   return `<div class="trav ${t.on ? "on" : ""}"><div style="flex:1;min-width:0"><b>🧳 โหมดเดินทาง</b>
-      <div class="k">${t.on ? `เปิดอยู่ · พับจอได้ · ปิดเองใน ${Math.floor(left / 60)} ชม. ${left % 60} นาที` : t.lastReason ? `ปิดเองแล้ว: ${esc(t.lastReason)}` : "ปิดอยู่ · พับจอแล้ว Mac จะหลับ"}</div></div>
+      <div class="k">${t.on ? `เปิดอยู่ · พับจอได้ · ปิดเองใน <b class="trav-cd" data-until="${t.until || 0}">${cdText(t.until)}</b>` : t.lastReason ? `ปิดเองแล้ว: ${esc(t.lastReason)}` : "ปิดอยู่ · พับจอแล้ว Mac จะหลับ"}</div></div>
     <button data-travel="${t.on ? "off" : "on"}">${t.on ? "ปิด" : "เปิด 8 ชม."}</button></div>`;
 }
 document.addEventListener("click", async e => {
@@ -1077,7 +1236,7 @@ function renderCtx(u) {
   if (!c || c.pct == null) { el.hidden = true; return; }
   const L = u.limits;
   el.hidden = false;
-  el.innerHTML = `<span>context <b>${c.pct}%</b></span>${barHtml(c.pct)}<span>${kTok(c.used)}/${c.size ? kTok(c.size) : "?"}</span>${L?.h5 ? `<span>· 5ชม. <b>${L.h5.pct}%</b></span>` : ""}${L?.d7 ? `<span>· 7วัน <b>${L.d7.pct}%</b></span>` : ""}`;
+  el.innerHTML = `<span>context <b>${c.pct}%</b></span>${barHtml(c.pct)}<span>${kTok(c.used)}/${c.size ? kTok(c.size) : "?"}</span>`; // 5h / 7d limits are in the cat panel — keeps this row short
 }
 
 // ── RunCat: a cat in the header that runs faster when the Mac's CPU is busier; tap = details ──
@@ -1103,7 +1262,7 @@ let catFrame = 0;
 function rcHtml() {
   const m = state.sys?.mac, cpu = m?.cpu, b = m?.battery;
   const cls = cpu >= 85 ? "burn" : cpu >= 60 ? "hot" : "";
-  return `<button class="rc ${cls}" data-rc aria-label="สถานะเครื่อง">${state.travel?.on ? "🧳" : ""}<span class="cat-box">${catSvg(catFrame)}</span><span>${cpu != null ? cpu + "%" : "…"}</span>${b ? `<span class="bt ${b.pct <= 20 && !b.ac ? "low" : ""}">${b.ac ? "⚡" : "🔋"}${b.pct}</span>` : ""}</button>`;
+  return `<button class="rc ${cls}" data-rc aria-label="สถานะเครื่อง">${state.travel?.on ? `<span class="rc-trav">🧳<b class="trav-cd" data-until="${state.travel.until || 0}">${cdText(state.travel.until)}</b></span>` : ""}<span class="cat-box">${catSvg(catFrame)}</span><span>${cpu != null ? cpu + "%" : "…"}</span>${b ? `<span class="bt ${b.pct <= 20 && !b.ac ? "low" : ""}">${b.ac ? "⚡" : "🔋"}${b.pct}</span>` : ""}</button>`;
 }
 function refreshRc() {
   document.querySelectorAll("[data-rc]").forEach(el => { const t = document.createElement("div"); t.innerHTML = rcHtml(); el.replaceWith(t.firstElementChild); });
@@ -1135,9 +1294,18 @@ async function takeShared() {
   // Android adds the screenshot's own title ("Screenshot (22 ต.ค. 2026 17:32:07)") as text — that's noise, drop it
   const note = files.length && /^(Screenshot|ภาพหน้าจอ|IMG|Screen ?shot)[\s_(]/i.test(text) ? "" : text;
   const open = x => {
-    state.project = x.p.name; state.ws = x.w.id; state.room = x.r.id; state.pview = "rooms"; state.files = files;
+    state.project = x.p.name; state.ws = x.w.id; state.room = x.r.id; state.pview = "rooms";
+    const key = `${x.w.id}/${x.r.id}`;
+    const before = state.filesRoom === key ? state.files : null;
     history.pushState({ v: "p" }, ""); renderProject();
-    const m = document.getElementById("msg"); if (m) { if (note) m.value = note; m.oninput(); m.focus(); }
+    // add to what is already attached / typed in that room (never replace it)
+    setTimeout(async () => {
+      const m = document.getElementById("msg"); if (!m) return;
+      const kept = before ?? await loadDraftFiles(key);
+      state.filesRoom = key; state.files = [...kept, ...files];
+      if (note) m.value = (m.value || store.get("maw-draft:" + key) || "") + (m.value ? "\n" : "") + note;
+      m.oninput(); m.dispatchEvent(new Event("maw-redraw-att")); m.focus();
+    }, 50);
   };
   const pick = () => {
     const bg = document.createElement("div"); bg.className = "sheet-bg";
@@ -1241,6 +1409,122 @@ function askMacDraft(draft) {
   });
 }
 
+// ── per-room drafts: typed text (localStorage) + attachments (Cache Storage) survive a page reload ──
+const ATT_CACHE = "maw-att";
+function saveDraftText(key, text) { if (text) store.set("maw-draft:" + key, text); else store.del("maw-draft:" + key); }
+let attSaveSeq = 0;
+async function saveDraftFiles(key, files) {
+  if (!("caches" in window)) return;
+  const seq = ++attSaveSeq;
+  try {
+    const box = await caches.open(ATT_CACHE), prefix = location.origin + "/att/" + encodeURIComponent(key) + "/";
+    for (const k of await box.keys()) if (k.url.startsWith(prefix)) await box.delete(k);
+    if (seq !== attSaveSeq) return;
+    for (const [i, f] of files.entries()) await box.put(prefix + i, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }));
+  } catch { /* storage full / private mode — still works in memory */ }
+}
+async function loadDraftFiles(key) {
+  if (!("caches" in window)) return [];
+  try {
+    const box = await caches.open(ATT_CACHE), prefix = location.origin + "/att/" + encodeURIComponent(key) + "/";
+    const keys = (await box.keys()).filter(k => k.url.startsWith(prefix)).sort((a, b) => +a.url.split("/").pop() - +b.url.split("/").pop());
+    const out = [];
+    for (const k of keys) { const r = await box.match(k); out.push(new File([await r.blob()], decodeURIComponent(r.headers.get("x-name") || "file"), { type: r.headers.get("content-type") || "" })); }
+    return out;
+  } catch { return []; }
+}
+async function restoreDraft(key, msg, drawAtt) {
+  const text = store.get("maw-draft:" + key);
+  if (text && !msg.value) { msg.value = text; msg.oninput(); }
+  if (!state.files.length) {
+    const files = await loadDraftFiles(key);
+    if (files.length && state.filesRoom === key && !state.files.length) { state.files = files; drawAtt(); msg.oninput(); }
+  }
+}
+function clearDraft(key) { store.del("maw-draft:" + key); saveDraftFiles(key, []); }
+
+// ── open a repo / folder on this Mac: pin it as a project, open a tmux room there, or import into Superset ──
+const tildePath = p => String(p).replace(/^\/Users\/[^/]+/, "~");
+const dirIdOf = path => "dir:" + btoa(unescape(encodeURIComponent(path))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function openProjectSheet() {
+  let tab = store.get("maw-op-tab") || "repos", cwd = null;
+  const bg = document.createElement("div"); bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><h2>เปิดโปรเจค</h2><div style="color:var(--dim);font-size:13px">repo / โฟลเดอร์บน Mac นี้ (เฉพาะใน home · ไม่แสดงโฟลเดอร์ลับ)</div>
+    <div class="op-tabs"><button data-t="repos">📦 Repo ในเครื่อง</button><button data-t="dirs">📂 เลือกโฟลเดอร์</button></div>
+    <div id="opbody"><div class="empty">กำลังโหลด…</div></div><button class="ghost" id="opc" style="margin-top:10px">ปิด</button></div>`;
+  document.body.appendChild(bg);
+  const body = bg.querySelector("#opbody");
+  bg.querySelector("#opc").onclick = () => bg.remove();
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  const tabs = () => bg.querySelectorAll("[data-t]").forEach(b => { b.classList.toggle("on", b.dataset.t === tab); b.onclick = () => { tab = b.dataset.t; store.set("maw-op-tab", tab); draw(); }; });
+  const rowHtml = (x, k) => `<button class="op-row" data-k="${k}"><span>${x.git === false ? "📁" : "📦"}</span><span class="n"><b>${esc(x.name)}</b><span>‎${esc(tildePath(x.path))}</span></span>${x.branch ? `<span class="tag git">⎇ ${esc(x.branch)}</span>` : x.git ? `<span class="tag git">git</span>` : ""}${x.pinned ? `<span class="tag pin">📌</span>` : ""}</button>`;
+  async function draw() {
+    tabs();
+    try {
+      if (tab === "repos") {
+        const r = await api("/local/repos"); const list = r.repos;
+        body.innerHTML = `<div class="op-list">${list.map((x, k) => rowHtml(x, k)).join("") || `<div class="empty">ไม่เจอ git repo ใน ~/artron · ~/my-project · ~/oracle</div>`}</div>`;
+        body.querySelectorAll("[data-k]").forEach(b => b.onclick = () => actions(list[+b.dataset.k]));
+      } else {
+        const r = await api("/local/dirs?" + qs({ path: cwd || "" })); cwd = r.path; state.home = r.home;
+        const list = r.dirs;
+        body.innerHTML = `<div class="op-crumb">${esc(r.path.replace(r.home, "~"))}</div>
+          <div class="op-list">${r.parent ? `<button class="op-row" data-up="1"><span>⬆</span><span class="n"><b>ย้อนขึ้น</b></span></button>` : ""}
+          <button class="op-row" data-here="1"><span>✅</span><span class="n"><b>ใช้โฟลเดอร์นี้</b><span>‎${esc(r.path.replace(r.home, "~"))}</span></span>${r.git ? `<span class="tag git">git</span>` : ""}</button>
+          ${list.map((x, k) => `<button class="op-row" data-d="${k}"><span>${x.git ? "📦" : "📁"}</span><span class="n"><b>${esc(x.name)}</b></span>${x.git ? `<span class="tag git">git</span>` : ""}${x.pinned ? `<span class="tag pin">📌</span>` : ""}<span style="color:var(--dim)">›</span></button>`).join("")}</div>`;
+        body.querySelector("[data-up]")?.addEventListener("click", () => { cwd = r.parent; draw(); });
+        body.querySelector("[data-here]").onclick = () => actions({ name: r.path.split("/").pop(), path: r.path, git: r.git, pinned: r.pinned });
+        body.querySelectorAll("[data-d]").forEach(b => b.onclick = () => { cwd = list[+b.dataset.d].path; draw(); });
+      }
+    } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }
+  function actions(x) {
+    let agent = "claude";
+    body.innerHTML = `<div class="op-row" style="border:1px solid var(--line);border-radius:12px"><span>📦</span><span class="n"><b>${esc(x.name)}</b><span>‎${esc(tildePath(x.path))}</span></span>${x.branch ? `<span class="tag git">⎇ ${esc(x.branch)}</span>` : ""}</div>
+      <div class="op-acts">
+        <button data-a="pin">📌 ${x.pinned ? "เปิดโปรเจคที่ปักไว้" : "ปักไว้ในแอป"}<small>ขึ้นเป็นโปรเจคในหน้าแรก มีแท็บ 📁 ไฟล์ · ⎇ Git</small></button>
+        <div style="padding:10px;border-radius:12px;background:var(--card2)"><b>▶ เปิดห้องใหม่ที่นี่ (tmux)</b>
+          <div class="op-agents" style="margin-top:8px"><button data-ag="claude" class="on">✳ Claude</button><button data-ag="codex">Codex</button><button data-ag="shell">⌨ Terminal</button></div>
+          <textarea id="opp" rows="2" placeholder="สั่งงานแรก (ไม่ใส่ก็ได้)" style="margin-top:8px"></textarea>
+          <button data-a="room" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;background:var(--accent);color:#031022;font-weight:700">▶ เปิดห้อง</button></div>
+        ${x.git !== false ? `<button data-a="ss">＋ เพิ่มเข้า Superset<small>superset projects create --import · ใช้ workspace/branch แยกของ Superset ได้</small></button>` : ""}
+        <button class="ghost" data-a="back">← กลับไปเลือก</button></div>`;
+    body.querySelectorAll("[data-ag]").forEach(b => b.onclick = () => { agent = b.dataset.ag; body.querySelectorAll("[data-ag]").forEach(y => y.classList.toggle("on", y === b)); body.querySelector("#opp").style.display = agent === "shell" ? "none" : ""; });
+    const pinAndOpen = async (room) => {
+      const r = await api("/local/folders", { method: "POST", body: JSON.stringify({ path: x.path, name: x.name }) });
+      await load();
+      const p = state.projects.find(q => q.workspaces.some(w => w.id === r.id));
+      if (!p) return toast("ปักแล้ว");
+      bg.remove(); state.project = p.name; state.ws = r.id; state.pview = "rooms"; state.room = room || p.workspaces[0].rooms.at(-1)?.id || null; state.chat = null;
+      history.pushState({ v: "p" }, ""); renderProject();
+    };
+    body.querySelector('[data-a="back"]').onclick = () => draw();
+    body.querySelector('[data-a="pin"]').onclick = async e => { e.currentTarget.disabled = true; try { await pinAndOpen(); } catch (err) { toast(err.message); } };
+    body.querySelector('[data-a="room"]').onclick = async e => {
+      const b = e.currentTarget; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้งเพื่อเปิดห้อง"; return; }
+      b.disabled = true; b.textContent = "กำลังเปิด…";
+      try {
+        const r = await api(`/workspaces/${encodeURIComponent(dirIdOf(x.path))}/rooms`, { method: "POST", body: JSON.stringify({ agent, prompt: body.querySelector("#opp").value.trim() }) });
+        await new Promise(res => setTimeout(res, 1200));
+        await pinAndOpen(r.result?.pane); toast("เปิดห้องแล้ว");
+      } catch (err) { toast("เปิดไม่ได้: " + err.message); b.disabled = false; b.textContent = "เปิดห้อง"; delete b.dataset.armed; }
+    };
+    body.querySelector('[data-a="ss"]')?.addEventListener("click", async e => {
+      const b = e.currentTarget; if (!b.dataset.armed) { b.dataset.armed = 1; b.firstChild.textContent = "แตะอีกครั้ง: เพิ่ม " + x.name + " เข้า Superset"; return; }
+      b.disabled = true;
+      try { await api("/local/superset-import", { method: "POST", body: JSON.stringify({ path: x.path, name: x.name }) }); bg.remove(); toast("เพิ่มเข้า Superset แล้ว"); await load(); renderHome(); }
+      catch (err) { toast("เพิ่มไม่ได้: " + err.message); b.disabled = false; }
+    });
+  }
+  draw();
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest && e.target.closest("[data-unpin]"); if (!b) return;
+  e.stopPropagation();
+  if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "เลิกปัก?"; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "📌"; } }, 3000); return; }
+  try { await api("/local/folders", { method: "POST", body: JSON.stringify({ path: b.dataset.unpin, pin: false }) }); toast("เลิกปักแล้ว (ไฟล์ไม่ถูกลบ)"); history.back(); await load(); renderHome(); } catch (err) { toast(err.message); }
+}, true);
+
 // ── "/" picker: skills + slash commands, like typing "/" in Claude Code ──
 const SK_SRC = { builtin: "ในตัว", project: "โปรเจค", user: "ของฉัน", plugin: "plugin", prompt: "prompt", skill: "skill" };
 function roomCommands(w, room) {
@@ -1305,8 +1589,10 @@ async function openSkillSheet(w, room, msg) {
 
 // ── new room sheet ──
 async function openNewRoom(w) {
-  if (!state.presets.length) { try { state.presets = (await api("/agent-presets")).presets; } catch {} }
-  const opts = [...state.presets.map(p => ({ id: p.id, label: ICON[p.id] || p.label })), { id: "shell", label: "⌨ Terminal เปล่า" }];
+  const local = String(w.id).startsWith("dir:");
+  if (!local && !state.presets.length) { try { state.presets = (await api("/agent-presets")).presets; } catch {} }
+  const opts = local ? [{ id: "claude", label: ICON.claude || "✳ Claude" }, { id: "codex", label: ICON.codex || "Codex" }, { id: "shell", label: "⌨ Terminal เปล่า" }]
+    : [...state.presets.map(p => ({ id: p.id, label: ICON[p.id] || p.label })), { id: "shell", label: "⌨ Terminal เปล่า" }];
   let pick = "claude";
   const bg = document.createElement("div"); bg.className = "sheet-bg";
   bg.innerHTML = `<div class="sheet"><h2>เปิดห้องใหม่</h2><div style="color:var(--dim);font-size:13px">${esc(state.project)} · ${esc(w.branch || w.name)}</div>
@@ -1315,7 +1601,7 @@ async function openNewRoom(w) {
     <button class="primary" id="go">เปิดห้อง</button><button class="ghost" id="cancel">ยกเลิก</button></div>`;
   document.body.appendChild(bg);
   const np = bg.querySelector("#np"), go = bg.querySelector("#go");
-  const sync = () => { np.style.display = pick === "shell" ? "none" : ""; go.disabled = pick !== "shell" && !np.value.trim(); };
+  const sync = () => { np.style.display = pick === "shell" ? "none" : ""; go.disabled = !local && pick !== "shell" && !np.value.trim(); };
   bg.querySelectorAll("[data-o]").forEach(b => b.onclick = () => { pick = b.dataset.o; bg.querySelectorAll("[data-o]").forEach(x => x.classList.toggle("on", x === b)); sync(); });
   np.oninput = sync; sync();
   bg.querySelector("#cancel").onclick = () => bg.remove();
@@ -1361,7 +1647,22 @@ function refreshTabs() {
   }
   for (const r of w.rooms) { const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
 }
-window.addEventListener("popstate", () => { if (state.project) renderHome(); });
+window.addEventListener("popstate", () => { if (state.project) renderHome(); state.lastRoomShown = null; });
+// New version on the Mac → reload by itself (only when nothing is half-typed), so the phone never runs stale code
+let pageStamp = null;
+async function checkVersion() {
+  try {
+    const v = (await api("/version")).v; if (!v) return;
+    if (pageStamp === null) { pageStamp = v; return; }
+    if (v === pageStamp) return;
+    const typing = document.getElementById("msg")?.value.trim() || state.files?.length || document.querySelector(".sheet-bg");
+    if (typing) { toast("มีเวอร์ชันใหม่ — จะโหลดเมื่อช่องพิมพ์ว่าง"); return; }
+    location.reload();
+  } catch { /* offline */ }
+}
+setInterval(() => { if (!document.hidden) checkVersion(); }, 60_000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
+checkVersion();
 function start() {
   clearInterval(timer); clearInterval(start._sys);
   load(); loadSys(); takeShared(); takeOpen(); start._sys = setInterval(() => { if (!document.hidden) loadSys(); }, 10_000);

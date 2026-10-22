@@ -312,6 +312,7 @@
   const whyIdx = mawExt.keys.length;
   mawExt.keys.push({
     label: "❓ ทำไมค้าง", cls: "ssx-why-key",
+    show: ({ w }) => !!w && w.id !== "tmux" && !String(w.id).startsWith("dir:"), // Superset rooms only
     onClick({ w, room }) {
       if (!w || w.id === "tmux") return toast("ใช้ได้เฉพาะห้องของ Superset");
       explainSheet(w, room);
