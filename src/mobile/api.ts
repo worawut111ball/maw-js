@@ -1,0 +1,1176 @@
+/**
+ * Mobile API — phone-friendly view of every coding agent on this machine.
+ *
+ * Mounted at /mobile (NOT under /api) so `tailscale serve --set-path /mobile`
+ * can expose only this surface. The /api write routes trust loopback callers,
+ * and tailscale serve proxies from 127.0.0.1 — never expose /api to the tailnet.
+ *
+ * Auth (every route except /mobile/hook):
+ *   - `Authorization: Bearer <token>` from ~/.maw/mobile.json, or
+ *   - `Tailscale-User-Login` header matching `allowedLogins` in the same file.
+ * /mobile/hook only accepts `X-Mobile-Hook-Token` (written by the local Claude/Codex hook).
+ *
+ * Plan: ~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/PLAN-maw-mobile.md
+ */
+import { Elysia, t } from "elysia";
+import { execFileSync } from "child_process";
+import { closeSync, realpathSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join, resolve } from "path";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { listClaudeSessions, type ClaudeSession } from "../core/fleet/claude-sessions";
+import { capture } from "../core/transport/ssh";
+import { Tmux } from "../core/transport/tmux";
+
+// ── Config + secrets (~/.maw/mobile.json, mode 600) ──────────────
+
+interface MobileConfig { token: string; hookToken: string; allowedLogins: string[] }
+
+const CONFIG_PATH = join(homedir(), ".maw", "mobile.json");
+
+export function loadMobileConfig(path = CONFIG_PATH): MobileConfig {
+  if (existsSync(path)) {
+    const c = JSON.parse(readFileSync(path, "utf-8"));
+    return { token: c.token, hookToken: c.hookToken, allowedLogins: c.allowedLogins ?? [] };
+  }
+  const c: MobileConfig = {
+    token: randomBytes(24).toString("hex"),
+    hookToken: randomBytes(24).toString("hex"),
+    allowedLogins: [],
+  };
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, JSON.stringify(c, null, 2), { mode: 0o600 });
+  return c;
+}
+
+function sameSecret(a: string | null | undefined, b: string): boolean {
+  if (!a) return false;
+  const x = Buffer.from(a), y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+export function isAuthorized(headers: Headers, cfg: MobileConfig): boolean {
+  const bearer = headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (sameSecret(bearer, cfg.token)) return true;
+  const login = headers.get("tailscale-user-login");
+  return !!login && cfg.allowedLogins.includes(login);
+}
+
+// ── Hook state (Claude Code hooks / Codex notify) ────────────────
+
+export type AgentStatus = "working" | "waiting" | "done" | "idle" | "ended";
+
+interface HookState { status: AgentStatus; event: string; message?: string; at: number }
+
+/** Latest hook event per session id. In memory: hooks re-fire on the next turn after a restart. */
+export const hookStates = new Map<string, HookState>();
+
+/** Map a Claude Code hook event to an agent status. */
+export function statusFromHook(event: string): AgentStatus | null {
+  switch (event) {
+    case "UserPromptSubmit":
+    case "PreToolUse":
+    case "PostToolUse":
+      return "working";
+    case "Notification":
+    case "PermissionRequest":
+      return "waiting"; // permission prompt or idle-waiting-for-input
+    case "Stop":
+      return "done";
+    case "SessionEnd":
+      return "ended";
+    default:
+      return null;
+  }
+}
+
+// ── Live rooms: one entry per running Claude process ─────────────
+// Claude Code writes ~/.claude/sessions/<pid>.json (pid ↔ sessionId, status, tmux pane), so several
+// rooms in the same project folder are told apart exactly. Superset puts its workspace/terminal ids
+// in each terminal's environment, which the Superset CLI uses to read and type into that room.
+
+export interface Channel { kind: "tmux"; pane: string; label: string }
+export interface SupersetChannel { kind: "superset"; workspaceId: string; terminalId: string; label: string }
+export type ReplyChannel = Channel | SupersetChannel;
+
+export interface LiveRoom { pid: number; sessionId: string; status: string | null; name: string | null; channel: ReplyChannel | null }
+
+const SESSIONS_DIR = join(homedir(), ".claude", "sessions");
+export const SUPERSET_BIN = join(homedir(), ".superset", "bin", "superset");
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
+}
+
+function envOf(pid: number): Record<string, string> {
+  try {
+    const out = execFileSync("ps", ["eww", "-o", "command=", "-p", String(pid)], { encoding: "utf-8", timeout: 1500 });
+    const env: Record<string, string> = {};
+    for (const m of out.matchAll(/(?:^|\s)(SUPERSET_[A-Z_]+)=(\S+)/g)) env[m[1]] = m[2];
+    return env;
+  } catch { return {}; }
+}
+
+/** tmux field looks like "team1-oracle:@0.%0" → send to pane "%0", show "team1-oracle". */
+export function tmuxChannel(tmux: string | null | undefined): Channel | null {
+  if (!tmux) return null;
+  const pane = tmux.match(/(%\d+)$/)?.[1];
+  return pane ? { kind: "tmux", pane, label: tmux.split(":")[0] } : null;
+}
+
+let supersetTitles: { at: number; map: Map<string, string> } = { at: 0, map: new Map() };
+function supersetTitle(terminalId: string): string | null {
+  if (Date.now() - supersetTitles.at > 15_000) {
+    const map = new Map<string, string>();
+    try {
+      const snap = JSON.parse(execFileSync(SUPERSET_BIN, ["snapshot", "--json"], { encoding: "utf-8", timeout: 5000 }));
+      for (const w of snap.workspaces ?? []) for (const t of w.terminals ?? []) if (t.title) map.set(t.id, String(t.title).replace(/^[◐◑◒◓●○◌⠀-⣿✳✻·*\s]+/, ""));
+    } catch { /* Superset not running */ }
+    supersetTitles = { at: Date.now(), map };
+  }
+  return supersetTitles.map.get(terminalId) ?? null;
+}
+
+export function readLiveRooms(dir = SESSIONS_DIR): Map<string, LiveRoom> {
+  const rooms = new Map<string, LiveRoom>();
+  let files: string[] = [];
+  try { files = readdirSync(dir).filter(f => /^\d+\.json$/.test(f)); } catch { return rooms; }
+  for (const f of files) {
+    try {
+      const d = JSON.parse(readFileSync(join(dir, f), "utf-8"));
+      const pid = +d.pid;
+      if (!d.sessionId || !pid || !alive(pid)) continue;
+      let channel: ReplyChannel | null = tmuxChannel(d.tmux);
+      if (!channel) {
+        const env = envOf(pid);
+        if (env.SUPERSET_WORKSPACE_ID && env.SUPERSET_TERMINAL_ID) {
+          channel = { kind: "superset", workspaceId: env.SUPERSET_WORKSPACE_ID, terminalId: env.SUPERSET_TERMINAL_ID,
+                      label: supersetTitle(env.SUPERSET_TERMINAL_ID) ?? "Superset" };
+        }
+      }
+      rooms.set(String(d.sessionId), { pid, sessionId: String(d.sessionId), status: d.status ?? null, name: d.name ?? null, channel });
+    } catch { /* half-written file */ }
+  }
+  return rooms;
+}
+
+/** Claude's own status word (busy / idle / waiting…) → ours. */
+export function statusFromRoom(st: string | null): AgentStatus {
+  if (!st) return "idle";
+  if (/busy|work|run|think/i.test(st)) return "working";
+  if (/wait|block|input|permission|ask/i.test(st)) return "waiting";
+  return "idle";
+}
+
+// ── Agent list ───────────────────────────────────────────────────
+
+export interface MobileAgent {
+  id: string;
+  title: string;
+  room: string | null;
+  branch: string | null;
+  projectPath: string;
+  source: ClaudeSession["triggeredFrom"];
+  status: AgentStatus;
+  canReply: boolean;
+  tmuxTarget: string | null;
+  lastUser: string | null;
+  lastAssistant: string | null;
+  lastActivityAt: string;
+  hookMessage: string | null;
+}
+
+const clip = (s: string | null | undefined, n = 280) => (s ? (s.length > n ? s.slice(0, n) + "…" : s) : null);
+
+/**
+ * Status priority: a fresh hook event → Claude's own room status → "ended" when no live process owns
+ * this session (older transcripts in the same folder used to borrow the live room's pid).
+ */
+export function toMobileAgent(s: ClaudeSession, hook: HookState | undefined, room: LiveRoom | undefined): MobileAgent {
+  const base: AgentStatus = room ? statusFromRoom(room.status) : "ended";
+  const status = hook && hook.at >= Date.parse(s.lastActivityAt) - 5_000 && (room || hook.status === "ended") ? hook.status : base;
+  const ch = room?.channel ?? null;
+  return {
+    id: s.sessionId,
+    title: s.worktree?.name || s.projectPath.split("/").pop() || s.projectPath,
+    room: ch?.label ?? room?.name ?? null,
+    branch: s.worktree?.branch ?? null,
+    projectPath: s.projectPath,
+    source: ch?.kind === "superset" ? "superset" : ch?.kind === "tmux" ? "tmux" : s.triggeredFrom,
+    status,
+    canReply: !!ch && status !== "ended",
+    tmuxTarget: ch?.kind === "tmux" ? ch.label : null,
+    lastUser: clip(s.lastUser),
+    lastAssistant: clip(s.lastAssistant),
+    lastActivityAt: s.lastActivityAt,
+    hookMessage: hook?.message ?? null,
+  };
+}
+
+async function listAgentsWithRooms(): Promise<{ agent: MobileAgent; room: LiveRoom | undefined }[]> {
+  // The same session can appear under two project folders (symlinked paths) — keep one per id.
+  const seen = new Set<string>();
+  const sessions = (await listClaudeSessions()).filter(s => !seen.has(s.sessionId) && !!seen.add(s.sessionId));
+  const rooms = readLiveRooms();
+  return sessions
+    .map(s => { const room = rooms.get(s.sessionId); return { agent: toMobileAgent(s, hookStates.get(s.sessionId), room), room }; })
+    .sort((a, b) => b.agent.lastActivityAt.localeCompare(a.agent.lastActivityAt));
+}
+
+async function listAgents(): Promise<MobileAgent[]> {
+  return (await listAgentsWithRooms()).map(x => x.agent);
+}
+
+async function findRoom(id: string) {
+  return (await listAgentsWithRooms()).find(x => x.agent.id === id);
+}
+
+// ── Talking to a room (tmux or Superset) ─────────────────────────
+
+/**
+ * Claude Code's grey "prompt suggestion" in the input box (e.g. "ไปต่อเลย เสร็จแล้วสรุปมา").
+ * It is not saved in the transcript, so it is read off the screen: the live input line starts with
+ * "❯" + NBSP (sent messages above use a normal space). tmux keeps colours, so ghost text is
+ * recognised by its dim style; Superset's reader returns plain text, so there it may also be a
+ * half-typed draft on the Mac (`sure: false`).
+ */
+export function promptSuggestion(raw: string): { text: string; sure: boolean } | null {
+  const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n");
+  const plainOf = (l: string) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+    const plain = plainOf(lines[i]);
+    if (!/^❯\u00a0/.test(plain)) continue;
+    const text = plain.slice(2).trim();
+    if (!text || /^Try "/.test(text)) return null; // empty box, or the static placeholder hint
+    if (!/\x1b\[/.test(lines[i])) return { text, sure: false };
+    const after = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^\u00a0/, "");
+    const sgr = (after.match(/^(?:\x1b\[[0-9;]*m)+/) ?? [""])[0];
+    return /\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m/.test(sgr) ? { text, sure: true } : null;
+  }
+  return null;
+}
+
+/**
+ * The live "working" line an agent draws above its input box, e.g.
+ *   Claude: "✽ Moonwalking… (19s · ↓ 564 tokens · thinking)"
+ *   Codex:  "• Working (12s • esc to interrupt)"
+ * Finished lines ("✻ Brewed for 35s · done 4:42 PM") have no "…" and are ignored.
+ */
+export function agentSpinner(raw: string): { verb: string; detail: string } | null {
+  const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n");
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 40); i--) {
+    const l = lines[i].trim();
+    let m = /^[·✢✳✶✻✽*]\s+(\S[^(…]*…)\s*(?:\((.*)\))?\s*$/u.exec(l);
+    if (m) return { verb: m[1].trim(), detail: (m[2] ?? "").trim() };
+    m = /^•\s+(Working|Thinking|Exploring|Running)\b[^(]*\((.*)\)\s*$/.exec(l);
+    if (m) return { verb: m[1] + "…", detail: m[2].replace(/\s*•\s*esc to interrupt/, "").trim() };
+  }
+  return null;
+}
+
+const ss = (args: string[]) => execFileSync(SUPERSET_BIN, args, { encoding: "utf-8", timeout: 15_000 });
+
+async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
+  if (ch.kind === "tmux") return capture(ch.pane, lines);
+  const out = JSON.parse(ss(["terminals", "read", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--max-lines", String(lines), "--json"]));
+  return String(out.text ?? "");
+}
+
+async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
+  if (ch.kind === "tmux") {
+    const tmux = new Tmux();
+    await tmux.sendKeysLiteral(ch.pane, text);
+    await tmux.sendKeys(ch.pane, "Enter");
+    return;
+  }
+  ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
+}
+
+async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
+  if (ch.kind === "tmux") return new Tmux().sendKeys(ch.pane, QUICK_KEYS[label]);
+  ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--keys", SUPERSET_KEYS[label]]);
+}
+
+
+// ── Projects view (Superset-style: project → workspace → rooms/tabs) ─────
+// Source of truth is the Superset snapshot (every terminal, any agent) plus tmux panes that run an agent.
+
+export interface Room { id: string; title: string; agent: string | null; status: AgentStatus; claudeSessionId: string | null }
+export interface Workspace { id: string; name: string; branch: string | null; rooms: Room[] }
+export interface Project { name: string; source: "superset" | "tmux"; workspaces: Workspace[] }
+
+export function statusFromSuperset(state: string | null | undefined, hasAgent: boolean): AgentStatus {
+  if (!hasAgent) return "idle";
+  switch (state) {
+    case "working": case "starting": return "working";
+    case "blocked": return "waiting";
+    case "exited": return "ended";
+    default: return "idle";
+  }
+}
+
+const cleanTitle = (t: string | null | undefined) => String(t ?? "").replace(/^[◐◑◒◓●○◌✳✻·*\s]+/, "").trim();
+
+let snapCache: { at: number; data: any } = { at: 0, data: null };
+function supersetSnapshot(): any {
+  if (Date.now() - snapCache.at < 2_000 && snapCache.data) return snapCache.data;
+  let data: any = { workspaces: [] };
+  try { data = JSON.parse(ss(["snapshot", "--json"])); } catch { /* Superset not running */ }
+  snapCache = { at: Date.now(), data };
+  return data;
+}
+
+/** Tab titles the user typed in Superset (e.g. "claude Jtekt 2") beat the terminal's auto title. */
+function tabTitles(ws: any): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const tab of ws.layout?.tabs ?? []) {
+    const panes = (tab.panes ?? []).filter((p: any) => p.terminalId);
+    for (const pane of panes) {
+      if (!tab.title) continue;
+      // A split tab holds several terminals — add each pane's own title so the phone tabs stay distinct.
+      const own = cleanTitle(pane.terminalTitle || pane.title);
+      map.set(pane.terminalId, panes.length > 1 && own ? `${tab.title} · ${own}` : String(tab.title));
+    }
+  }
+  return map;
+}
+
+export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>): Project[] {
+  const byTerminal = new Map<string, LiveRoom>();
+  const tmuxRooms: LiveRoom[] = [];
+  for (const r of rooms.values()) {
+    if (r.channel?.kind === "superset") byTerminal.set(r.channel.terminalId, r);
+    if (r.channel?.kind === "tmux") tmuxRooms.push(r);
+  }
+  const fresh = (r: LiveRoom | undefined) => {
+    const h = r && hookStates.get(r.sessionId);
+    return h && Date.now() - h.at < 6 * 3600e3 ? h.status : null;
+  };
+  const projects = new Map<string, Project>();
+  for (const w of snapshot?.workspaces ?? []) {
+    const name = String(w.project ?? w.name ?? "?");
+    const p = projects.get(name) ?? { name, source: "superset" as const, workspaces: [] };
+    const titles = tabTitles(w);
+    p.workspaces.push({
+      id: String(w.id), name: String(w.name ?? ""), branch: w.branch ?? null,
+      rooms: (w.terminals ?? []).map((t: any) => {
+        const live = byTerminal.get(t.id);
+        const agent = t.agent?.id ?? null;
+        return {
+          id: String(t.id),
+          title: titles.get(t.id) || cleanTitle(t.title) || (agent ? agent : "terminal"),
+          agent,
+          status: fresh(live) ?? (live ? statusFromRoom(live.status) : statusFromSuperset(t.agent?.state, !!agent)),
+          claudeSessionId: live?.sessionId ?? null,
+        };
+      }),
+    });
+    projects.set(name, p);
+  }
+  if (tmuxRooms.length) {
+    projects.set("tmux", { name: "tmux", source: "tmux", workspaces: [{ id: "tmux", name: "tmux", branch: null,
+      rooms: tmuxRooms.map(r => ({ id: (r.channel as Channel).pane, title: (r.channel as Channel).label, agent: "claude",
+        status: fresh(r) ?? statusFromRoom(r.status), claudeSessionId: r.sessionId })) }] });
+  }
+  return [...projects.values()];
+}
+
+/** Resolve a (workspace, room) pair from the phone into something we can read/type into. */
+export function roomChannel(ws: string, room: string): ReplyChannel | null {
+  if (ws === "tmux") return /^%\d+$/.test(room) ? { kind: "tmux", pane: room, label: room } : null;
+  if (!/^[0-9a-f-]{36}$/i.test(ws) || !/^[0-9a-f-]{36}$/i.test(room)) return null;
+  return { kind: "superset", workspaceId: ws, terminalId: room, label: room };
+}
+
+
+// ── Chat view: the full conversation, like Claude Code itself ─────────────
+// Every user message, every assistant reply, every tool call (with its result) and every sub-agent.
+// Transcripts are huge (100 MB+), so each file is parsed once and then only the appended bytes.
+
+export interface ChatTool { name: string; summary: string; input: string; output: string | null; error: boolean }
+export interface ChatItem { i: number; role: "user" | "assistant" | "tool" | "agent" | "system"; ts: string | null; text?: string; tool?: ChatTool; images?: string[] }
+
+const IMG_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+/** Pasted images live base64-encoded inside transcripts; write each once to disk and hand the phone a URL. */
+export function transcriptImage(b64: string, mediaType: string, dir = join(UPLOAD_DIR, "img")): string | null {
+  const ext = IMG_EXT[mediaType]; if (!ext || !b64) return null;
+  const name = createHash("sha1").update(b64).digest("hex").slice(0, 20) + "." + ext;
+  const f = join(dir, name);
+  if (!existsSync(f)) { mkdirSync(dir, { recursive: true }); writeFileSync(f, Buffer.from(b64, "base64")); }
+  return `/mobile/img/${name}`;
+}
+const imageOf = (b: any): string | null =>
+  b?.type === "image" && b.source?.type === "base64" ? transcriptImage(b.source.data, b.source.media_type)
+  : b?.type === "input_image" && typeof b.image_url === "string" ? (m => m ? transcriptImage(m[2], m[1]) : null)(/^data:([^;]+);base64,(.+)$/s.exec(b.image_url))
+  : null;
+
+const OUT_MAX = 6000, IN_MAX = 4000;
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + `\n… (ตัด ${s.length - n} ตัวอักษร)` : s);
+
+function toolView(name: string, inp: any): { summary: string; input: string } {
+  const i = inp ?? {};
+  switch (name) {
+    case "Bash": case "Monitor": case "PowerShell":
+      return { summary: i.description || String(i.command ?? "").split("\n")[0], input: String(i.command ?? "") };
+    case "Read": return { summary: i.file_path ?? "", input: i.file_path ?? "" };
+    case "Write": return { summary: i.file_path ?? "", input: cut(String(i.content ?? ""), IN_MAX) };
+    case "Edit": return { summary: i.file_path ?? "", input: cut(`- ${String(i.old_string ?? "").replace(/\n/g, "\n- ")}\n+ ${String(i.new_string ?? "").replace(/\n/g, "\n+ ")}`, IN_MAX) };
+    case "Grep": case "Glob": return { summary: `${i.pattern ?? ""}${i.path ? "  in " + i.path : ""}`, input: JSON.stringify(i, null, 1) };
+    case "WebFetch": return { summary: i.url ?? "", input: i.prompt ?? "" };
+    case "WebSearch": return { summary: i.query ?? "", input: i.query ?? "" };
+    case "Skill": return { summary: i.skill ?? "", input: i.args ?? "" };
+    case "Agent": case "Task": return { summary: `${i.subagent_type ?? "agent"} · ${i.description ?? ""}`, input: cut(String(i.prompt ?? ""), IN_MAX) };
+    default: return { summary: Object.values(i).filter(v => typeof v === "string").map(v => String(v).split("\n")[0]).join(" · ").slice(0, 160), input: cut(JSON.stringify(i, null, 1), IN_MAX) };
+  }
+}
+
+function resultText(c: any): string {
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.map(b => (b.type === "text" ? b.text : b.type === "image" ? "[รูปภาพ]" : "")).join("\n");
+  return "";
+}
+
+/** User strings that are harness plumbing, not something the person typed. */
+function userMessage(raw: string): { role: "user" | "system"; text: string } | null {
+  const t = raw.trim();
+  if (!t) return null;
+  if (/^<(local-command-stdout|local-command-caveat|system-reminder|local-command-stderr)>/.test(t)) return null;
+  const cmd = t.match(/<command-name>([^<]*)<\/command-name>[\s\S]*?(?:<command-args>([\s\S]*?)<\/command-args>)?/);
+  if (cmd) return { role: "user", text: `${cmd[1].trim()} ${(cmd[2] ?? "").trim()}`.trim() };
+  if (t.startsWith("<task-notification>")) {
+    const sum = t.match(/<summary>([\s\S]*?)<\/summary>/)?.[1] ?? "งานเบื้องหลังจบแล้ว";
+    return { role: "system", text: "🔔 " + sum.trim() };
+  }
+  if (/^\[Request interrupted by user/.test(t)) return { role: "system", text: "⏹ หยุดงานกลางคัน" };
+  const text = raw.replace(/<\/?pasted_content[^>]*>/g, "").replace(/\[Image: source: [^\]\n]+\]/g, "").trim();
+  return text ? { role: "user", text } : null;
+}
+
+interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem> }
+const transcripts = new Map<string, ParseState>();
+
+export function parseTranscriptLines(st: ParseState, lines: string[]): void {
+  const push = (it: Omit<ChatItem, "i">) => { const x = { ...it, i: st.items.length } as ChatItem; st.items.push(x); return x; };
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let e: any; try { e = JSON.parse(line); } catch { continue; }
+    if (e.isSidechain) continue;
+    const ts = e.timestamp ?? null, c = e.message?.content;
+    if (e.type === "attachment" && e.attachment?.type === "queued_command") {
+      // Messages typed while the agent was busy are stored as attachments, not as user turns.
+      const pr = e.attachment.prompt;
+      const raw = typeof pr === "string" ? pr : Array.isArray(pr) ? pr.map((b: any) => b.text ?? "").join("\n") : "";
+      const images = Array.isArray(pr) ? pr.map(imageOf).filter(Boolean) as string[] : [];
+      const m = userMessage(raw) ?? (images.length ? { role: "user" as const, text: "" } : null);
+      if (m) push({ role: m.role, ts: e.attachment.timestamp ?? ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
+      continue;
+    }
+    if (e.type === "user") {
+      if (e.isMeta) continue;
+      const parts = typeof c === "string" ? [{ type: "text", text: c }] : Array.isArray(c) ? c : [];
+      // one bubble per turn: "[Image #7] ผิดแชท" + the pasted picture(s)
+      const images = parts.map(imageOf).filter(Boolean) as string[];
+      let owner: ChatItem | null = null;
+      for (const b of parts) {
+        if (b.type === "text") { const m = userMessage(String(b.text ?? "")); if (m) { const it = push({ role: m.role, ts, text: m.text }); if (m.role === "user" && !owner) owner = it; } }
+        if (b.type === "tool_result") {
+          const t = st.tools.get(b.tool_use_id);
+          if (t?.tool) { t.tool.output = cut(resultText(b.content), OUT_MAX); t.tool.error = !!b.is_error; }
+        }
+      }
+      if (images.length && !parts.some((b: any) => b.type === "tool_result")) (owner ?? push({ role: "user", ts, text: "" })).images = images;
+    } else if (e.type === "assistant" && Array.isArray(c)) {
+      for (const b of c) {
+        if (b.type === "text" && String(b.text ?? "").trim()) push({ role: "assistant", ts, text: b.text });
+        if (b.type === "tool_use") {
+          const v = toolView(b.name, b.input);
+          const item = push({ role: b.name === "Agent" || b.name === "Task" ? "agent" : "tool", ts, tool: { name: b.name, ...v, output: null, error: false } });
+          st.tools.set(b.id, item);
+        }
+      }
+    }
+  }
+}
+
+function transcriptFile(sessionId: string, root = join(homedir(), ".claude", "projects")): string | null {
+  try {
+    for (const d of readdirSync(root)) { const f = join(root, d, `${sessionId}.jsonl`); if (existsSync(f)) return f; }
+  } catch { /* no projects dir */ }
+  return null;
+}
+
+type LineParser = (st: ParseState, lines: string[]) => void;
+
+/** Parse a growing JSONL transcript once, then only the bytes appended since the last call. */
+function readIncremental(file: string, parse: LineParser): ChatItem[] {
+  const size = statSync(file).size;
+  let st = transcripts.get(file);
+  if (!st || size < st.size) { st = { size: 0, partial: "", items: [], tools: new Map() }; transcripts.set(file, st); }
+  if (size > st.size) {
+    const fd = openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(size - st.size);
+      readSync(fd, buf, 0, buf.length, st.size);
+      const lines = (st.partial + buf.toString("utf-8")).split("\n");
+      st.partial = lines.pop() ?? "";
+      parse(st, lines);
+      st.size = size;
+    } finally { closeSync(fd); }
+  }
+  return st.items;
+}
+
+/** Full conversation for a Claude session. */
+export function claudeTranscript(sessionId: string, root?: string): ChatItem[] | null {
+  const file = transcriptFile(sessionId, root);
+  return file ? readIncremental(file, parseTranscriptLines) : null;
+}
+
+// ── Codex (~/.codex/sessions/**/rollout-*.jsonl) ──
+
+/** Codex user turns also carry injected context (AGENTS.md, environment) — only keep what the person typed. */
+function codexUserText(raw: string): { role: "user" | "system"; text: string } | null {
+  const t = raw.trim();
+  if (!t || /^(<environment_context>|<user_instructions>|<permissions|# AGENTS\.md|<INSTRUCTIONS>|<turn_aborted>)/.test(t)) return null;
+  const text = t.replace(/<image\b[^>]*>(?:<\/image>)?/g, "").replace(/\[Image: source: [^\]\n]+\]/g, "").trim();
+  return text ? { role: "user", text } : null;
+}
+
+function codexOutput(o: any): { text: string; error: boolean } {
+  let text = typeof o === "string" ? o : Array.isArray(o) ? o.map((b: any) => b.text ?? "").join("\n") : JSON.stringify(o ?? "");
+  const code = text.match(/Process exited with code (\d+)/)?.[1];
+  text = text.replace(/^Chunk ID:[\s\S]*?\nOutput:\n/, "");
+  return { text: cut(text, OUT_MAX), error: !!code && code !== "0" };
+}
+
+export function parseCodexLines(st: ParseState, lines: string[]): void {
+  const push = (it: Omit<ChatItem, "i">) => { const x = { ...it, i: st.items.length } as ChatItem; st.items.push(x); return x; };
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let e: any; try { e = JSON.parse(line); } catch { continue; }
+    const p = e.payload ?? {}, ts = e.timestamp ?? null;
+    if (e.type === "event_msg" && p.type === "turn_aborted") { push({ role: "system", ts, text: "⏹ หยุดงานกลางคัน" }); continue; }
+    if (e.type !== "response_item") continue;
+    if (p.type === "message") {
+      const text = (p.content ?? []).map((c: any) => c.text ?? "").join("\n");
+      if (p.role === "user") {
+        const images = (p.content ?? []).map(imageOf).filter(Boolean) as string[];
+        const m = codexUserText(text) ?? (images.length ? { role: "user" as const, text: "" } : null);
+        if (m) push({ role: m.role, ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
+      }
+      else if (p.role === "assistant" && text.trim()) push({ role: "assistant", ts, text });
+    } else if (p.type === "function_call" || p.type === "custom_tool_call") {
+      let args: any = p.arguments ?? p.input ?? "";
+      try { if (typeof args === "string" && args.startsWith("{")) args = JSON.parse(args); } catch { /* raw */ }
+      const cmd = typeof args === "string" ? args : args.cmd ?? args.command ?? "";
+      const isShell = p.name === "exec_command" || p.name === "shell" || p.name === "exec";
+      const summary = isShell ? String(Array.isArray(cmd) ? cmd.join(" ") : cmd).split("\n")[0]
+        : p.name === "apply_patch" ? (String(args).match(/\*\*\* (?:Update|Add|Delete) File: (.+)/)?.[1] ?? "แก้ไฟล์")
+        : typeof args === "string" ? args.split("\n")[0] : Object.values(args).filter(v => typeof v === "string").join(" · ");
+      const item = push({ role: "tool", ts, tool: {
+        name: isShell ? "Bash" : p.name === "apply_patch" ? "Edit" : p.name,
+        summary: String(summary).slice(0, 200),
+        input: cut(typeof args === "string" ? args : isShell ? String(Array.isArray(cmd) ? cmd.join(" ") : cmd) : JSON.stringify(args, null, 1), IN_MAX),
+        output: null, error: false } });
+      st.tools.set(p.call_id, item);
+    } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
+      const t = st.tools.get(p.call_id);
+      if (t?.tool) { const o = codexOutput(p.output); t.tool.output = o.text; t.tool.error = o.error; }
+    } else if (p.type === "agent_message") {
+      // Sub-agent traffic: the payload itself is encrypted, show who talked to whom and the visible header.
+      const head = (p.content ?? []).filter((c: any) => c.type === "input_text").map((c: any) => c.text).join("\n");
+      const task = head.match(/Task name: (\S+)/)?.[1] ?? p.recipient ?? "";
+      push({ role: "agent", ts, tool: { name: "Agent", summary: `${String(task).split("/").pop()} · ${p.author ?? ""} → ${p.recipient ?? ""}`, input: head.trim(), output: "(ข้อความระหว่าง agent ถูกเข้ารหัส)", error: false } });
+    }
+  }
+}
+
+/** First line of a rollout is session_meta; sub-agent threads say source.subagent. */
+export function isSubagentRollout(file: string): boolean {
+  try {
+    const fd = openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(64 * 1024);
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      const first = buf.subarray(0, n).toString("utf-8").split("\n")[0];
+      const src = JSON.parse(first)?.payload?.source;
+      return typeof src === "object" && src !== null && "subagent" in src;
+    } finally { closeSync(fd); }
+  } catch { return false; }
+}
+
+let codexFiles: { at: number; map: Map<string, string> } = { at: 0, map: new Map() };
+/** Superset terminal id → the rollout file its running codex process has open. */
+export function codexFileFor(terminalId: string): string | null {
+  if (Date.now() - codexFiles.at > 15_000) {
+    const map = new Map<string, string>();
+    try {
+      const pids = execFileSync("pgrep", ["-x", "codex"], { encoding: "utf-8", timeout: 2000 }).split("\n").filter(Boolean);
+      for (const pid of pids) {
+        const tid = envOf(+pid).SUPERSET_TERMINAL_ID;
+        if (!tid) continue;
+        const files = execFileSync("/usr/sbin/lsof", ["-p", pid, "-Fn"], { encoding: "utf-8", timeout: 3000 });
+        const open = [...files.matchAll(/^n(\/.*\/rollout-[^\n]*\.jsonl)$/gm)].map(m => m[1]);
+        // A codex process keeps its sub-agents' rollouts open too — pick the thread the person talks to.
+        const main = open.find(f => !isSubagentRollout(f)) ?? open[0];
+        if (main) map.set(tid, main);
+      }
+    } catch { /* no codex running */ }
+    codexFiles = { at: Date.now(), map };
+  }
+  return codexFiles.map.get(terminalId) ?? null;
+}
+
+export function codexTranscript(file: string): ChatItem[] {
+  return readIncremental(file, parseCodexLines);
+}
+
+
+// ── Attachments from the phone: stored on this Mac, the room gets the path in the message ──
+
+export const UPLOAD_DIR = join(homedir(), ".maw", "uploads");
+const UPLOAD_MAX = 25 * 1024 * 1024;
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic",
+  pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8", csv: "text/csv; charset=utf-8", json: "application/json" };
+
+/** Keep letters (any script), digits, dot, dash, underscore — never a path. */
+export function safeName(name: string): string {
+  const base = String(name || "file").split(/[\\/]/).pop()!.normalize("NFC");
+  const clean = base.replace(/[^\p{L}\p{M}\p{N}._-]+/gu, "_").replace(/^\.+/, "").slice(-120);
+  return clean || "file";
+}
+
+export function saveUpload(name: string, data: Uint8Array, dir = UPLOAD_DIR): string {
+  const day = new Date().toISOString().slice(0, 10);
+  const folder = join(dir, day);
+  mkdirSync(folder, { recursive: true });
+  const file = join(folder, `${randomBytes(4).toString("hex")}-${safeName(name)}`);
+  writeFileSync(file, data, { mode: 0o600 });
+  return file;
+}
+
+
+// ── Workspace explorer (read-only): folders, files, git — like Superset's sidebar ──
+
+let wsPaths: { at: number; map: Map<string, string> } = { at: 0, map: new Map() };
+// ── Slash commands & skills for the "/" picker ───────────────────
+
+export interface SlashCmd { name: string; insert: string; desc: string; source: "builtin" | "user" | "project" | "plugin" | "prompt" | "skill" }
+
+const CLAUDE_BUILTIN: [string, string][] = [
+  ["clear", "ล้างบทสนทนา เริ่มใหม่"], ["compact", "ย่อบทสนทนาให้สั้นลง"], ["context", "ดูการใช้ context"], ["cost", "ดูค่าใช้จ่าย session นี้"],
+  ["model", "เปลี่ยนโมเดล"], ["resume", "กลับไปคุย session เก่า"], ["rewind", "ย้อนกลับไปข้อความก่อนหน้า"], ["status", "สถานะ Claude Code"],
+  ["memory", "แก้ไฟล์ความจำ CLAUDE.md"], ["agents", "จัดการ subagent"], ["mcp", "จัดการ MCP server"], ["hooks", "ดู/แก้ hooks"],
+  ["permissions", "สิทธิ์ของ tool"], ["review", "รีวิว PR"], ["init", "สร้าง CLAUDE.md ให้โปรเจค"], ["usage", "ดูโควต้าการใช้งาน"],
+  ["todos", "ดูรายการงาน"], ["export", "ส่งออกบทสนทนา"], ["add-dir", "เพิ่มโฟลเดอร์ที่ทำงานได้"], ["doctor", "ตรวจการติดตั้ง"],
+  ["plugin", "จัดการ plugin"], ["config", "ตั้งค่า"], ["help", "วิธีใช้"],
+];
+const CODEX_BUILTIN: [string, string][] = [
+  ["model", "เปลี่ยนโมเดล/ระดับการคิด"], ["approvals", "ระดับการขออนุญาต"], ["new", "เริ่มบทสนทนาใหม่"], ["compact", "ย่อบทสนทนา"],
+  ["diff", "ดู git diff"], ["status", "สถานะ session"], ["review", "รีวิวงานที่แก้"], ["init", "สร้าง AGENTS.md"], ["mention", "อ้างถึงไฟล์"], ["undo", "ย้อนการแก้ล่าสุด"],
+];
+
+/** name/description from a SKILL.md or command .md front matter (handles quoted and folded values). */
+export function frontMatter(text: string): Record<string, string> {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  const out: Record<string, string> = {};
+  if (!m) { const first = text.split("\n").find(l => l.trim() && !l.startsWith("#")); if (first) out.description = first.trim(); return out; }
+  const lines = m[1].split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const kv = /^([\w-]+):\s*(.*)$/.exec(lines[i]); if (!kv) continue;
+    let v = kv[2].trim();
+    if (v === ">" || v === "|" || v === ">-" || v === "|-") { const buf = []; while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) buf.push(lines[++i].trim()); v = buf.join(" "); }
+    out[kv[1]] = v.replace(/^(['"])([\s\S]*)\1$/, "$2");
+  }
+  return out;
+}
+const tidyDesc = (d = "") => d.replace(/^\[[^\]]*\]\s*v[\w.\-]+\s*[\w-]*\s*\|\s*/, "").replace(/\s+/g, " ").trim().slice(0, 160);
+
+function readSkills(dir: string, source: SlashCmd["source"], prefix = "", insert = (n: string) => "/" + n): SlashCmd[] {
+  let ents: any[] = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  const out: SlashCmd[] = [];
+  for (const d of ents) {
+    const f = join(dir, d.name, "SKILL.md");
+    if (!existsSync(f)) continue;
+    let fm: Record<string, string> = {}; try { fm = frontMatter(readFileSync(f, "utf-8").slice(0, 6000)); } catch { /* unreadable */ }
+    if (fm["user-invocable"] === "false") continue;
+    const name = prefix + (fm.name || d.name);
+    out.push({ name, insert: insert(name), desc: tidyDesc(fm.description), source });
+  }
+  return out;
+}
+function readCommands(dir: string, source: SlashCmd["source"], prefix = "", sub = ""): SlashCmd[] {
+  let ents: any[] = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  const out: SlashCmd[] = [];
+  for (const d of ents) {
+    if (d.isDirectory()) { out.push(...readCommands(join(dir, d.name), source, prefix, sub + d.name + ":")); continue; }
+    if (!d.name.endsWith(".md")) continue;
+    let fm: Record<string, string> = {}; try { fm = frontMatter(readFileSync(join(dir, d.name), "utf-8").slice(0, 6000)); } catch { /* unreadable */ }
+    const name = prefix + sub + d.name.replace(/\.md$/, "");
+    out.push({ name, insert: "/" + name, desc: tidyDesc(fm.description), source });
+  }
+  return out;
+}
+function enabledPlugins(): { name: string; path: string }[] {
+  try {
+    const on = JSON.parse(readFileSync(join(homedir(), ".claude/settings.json"), "utf-8")).enabledPlugins ?? {};
+    const inst = JSON.parse(readFileSync(join(homedir(), ".claude/plugins/installed_plugins.json"), "utf-8")).plugins ?? {};
+    return Object.keys(on).filter(k => on[k] && inst[k]?.[0]?.installPath).map(k => ({ name: k.split("@")[0], path: inst[k][0].installPath }));
+  } catch { return []; }
+}
+
+const cmdCache = new Map<string, { at: number; list: SlashCmd[] }>();
+/** Everything the "/" picker can offer for one agent + working folder (deduped, cached 30 s). */
+export function slashCommands(agent: string, cwd: string | null, home = homedir()): SlashCmd[] {
+  const key = agent + "|" + (cwd ?? "");
+  const c = cmdCache.get(key); if (c && Date.now() - c.at < 30_000) return c.list;
+  let list: SlashCmd[] = [];
+  if (agent === "codex") {
+    list.push(...CODEX_BUILTIN.map(([n, d]) => ({ name: n, insert: "/" + n, desc: d, source: "builtin" as const })));
+    list.push(...readCommands(join(home, ".codex/prompts"), "prompt", "prompts:"));
+    list.push(...readSkills(join(home, ".codex/skills"), "skill", "", n => "$" + n));
+  } else {
+    list.push(...CLAUDE_BUILTIN.map(([n, d]) => ({ name: n, insert: "/" + n, desc: d, source: "builtin" as const })));
+    if (cwd) { list.push(...readSkills(join(cwd, ".claude/skills"), "project")); list.push(...readCommands(join(cwd, ".claude/commands"), "project")); }
+    list.push(...readSkills(join(home, ".claude/skills"), "user"));
+    list.push(...readCommands(join(home, ".claude/commands"), "user"));
+    for (const p of enabledPlugins()) { list.push(...readSkills(join(p.path, "skills"), "plugin", p.name + ":")); list.push(...readCommands(join(p.path, "commands"), "plugin", p.name + ":")); }
+  }
+  const seen = new Set<string>(); list = list.filter(x => !seen.has(x.insert) && seen.add(x.insert));
+  cmdCache.set(key, { at: Date.now(), list });
+  return list;
+}
+
+export function workspacePath(wsId: string): string | null {
+  if (wsId === "tmux") return null;
+  if (Date.now() - wsPaths.at > 30_000) {
+    const map = new Map<string, string>();
+    try {
+      const list = JSON.parse(ss(["workspaces", "list", "--local", "--json"]));
+      for (const w of Array.isArray(list) ? list : list.workspaces ?? []) if (w.worktreePath && w.worktreeExists !== false) map.set(w.id, w.worktreePath);
+    } catch { /* Superset not running */ }
+    wsPaths = { at: Date.now(), map };
+  }
+  return wsPaths.map.get(wsId) ?? null;
+}
+
+/** Resolve a path inside the workspace; refuses anything that escapes it (../, symlinks out). */
+export function insideWorkspace(root: string, rel: string): string | null {
+  const rootReal = realpathSync(root);
+  const full = resolve(rootReal, "." + "/" + String(rel ?? "").replace(/^\/+/, ""));
+  let real: string;
+  try { real = realpathSync(full); } catch { real = full; }
+  return real === rootReal || real.startsWith(rootReal + "/") ? real : null;
+}
+
+const HIDE = new Set([".git", ".DS_Store"]);
+export function listDir(root: string, rel: string) {
+  const dir = insideWorkspace(root, rel);
+  if (!dir) return null;
+  const items = readdirSync(dir, { withFileTypes: true }).filter(d => !HIDE.has(d.name)).map(d => {
+    const isDir = d.isDirectory() || (d.isSymbolicLink() && (() => { try { return statSync(join(dir, d.name)).isDirectory(); } catch { return false; } })());
+    let size = 0; if (!isDir) { try { size = statSync(join(dir, d.name)).size; } catch { /* broken link */ } }
+    return { name: d.name, dir: isDir, size };
+  });
+  items.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+  return { path: dir.slice(realpathSync(root).length).replace(/^\//, ""), items };
+}
+
+const git = (cwd: string, args: string[], max = 4_000_000, timeout = 10_000) =>
+  execFileSync("git", ["-C", cwd, "-c", "core.quotepath=false", ...args], { encoding: "utf-8", timeout, maxBuffer: max, stdio: ["ignore", "pipe", "pipe"] });
+
+/** Names in `dirAbs` that .gitignore hides (VS Code dims them). */
+export function ignoredNames(dirAbs: string, names: string[]): Set<string> {
+  if (!names.length) return new Set();
+  try {
+    const out = execFileSync("git", ["-C", dirAbs, "check-ignore", "--stdin", "-z"], { input: names.join("\0") + "\0", encoding: "utf-8", timeout: 5_000, stdio: ["pipe", "pipe", "pipe"] });
+    return new Set(out.split("\0").filter(Boolean));
+  } catch { return new Set(); } // exit 1 = nothing ignored, or not a repo
+}
+
+/** Repo that contains `dir` (nested repos win), or null. */
+export function repoRoot(dir: string): string | null {
+  try { return realpathSync(git(dir, ["rev-parse", "--show-toplevel"]).trim()); } catch { return null; }
+}
+
+export interface GitEntry { path: string; x: string; y: string }
+const statusCache = new Map<string, { at: number; entries: GitEntry[] }>();
+/** `git status --porcelain` for a repo, cached for 3 s (the tree asks once per folder it shows). */
+export function gitStatus(repo: string): GitEntry[] {
+  const c = statusCache.get(repo);
+  if (c && Date.now() - c.at < 3_000) return c.entries;
+  const entries = git(repo, ["status", "--porcelain=v1", "-uall", "-z"]).split("\0").filter(Boolean).reduce((acc: GitEntry[], rec, i, arr) => {
+    if ((arr as any)._skip === i) return acc;
+    const x = rec[0], y = rec[1]; const path = rec.slice(3);
+    if (x === "R" || x === "C") (arr as any)._skip = i + 1; // renamed: next record is the old path
+    acc.push({ path, x, y }); return acc;
+  }, []);
+  statusCache.set(repo, { at: Date.now(), entries });
+  return entries;
+}
+
+/** VS Code-style letter for a file: U untracked · A added · M modified · D deleted · R renamed · ! conflict. */
+export function decoLetter(e: GitEntry): string {
+  if (e.x === "?" ) return "U";
+  if (e.x === "U" || e.y === "U" || (e.x === "A" && e.y === "A") || (e.x === "D" && e.y === "D")) return "!";
+  if (e.x === "D" || e.y === "D") return "D";
+  if (e.x === "R") return "R";
+  if (e.x === "A") return "A";
+  return "M";
+}
+const RANK: Record<string, number> = { "!": 5, D: 4, M: 3, R: 3, A: 2, U: 1 };
+
+/** Status letters for the entries of one folder (folders get the strongest letter of their contents + a count). */
+export function decorateDir(dirAbs: string): Map<string, { letter: string; count: number }> {
+  const out = new Map<string, { letter: string; count: number }>();
+  const repo = repoRoot(dirAbs);
+  if (!repo) return out;
+  const rel = dirAbs === repo ? "" : dirAbs.slice(repo.length + 1) + "/";
+  for (const e of gitStatus(repo)) {
+    if (!e.path.startsWith(rel)) continue;
+    const rest = e.path.slice(rel.length);
+    const name = rest.split("/")[0];
+    const isDir = rest.includes("/");
+    const l = decoLetter(e), prev = out.get(name);
+    if (!prev) out.set(name, { letter: l, count: 1 });
+    else { prev.count++; if (isDir && RANK[l] > RANK[prev.letter]) prev.letter = l; }
+  }
+  return out;
+}
+
+export const forgetGitStatus = (repo: string) => statusCache.delete(repo);
+
+/** Summary for a nested repo folder: strongest letter + number of changed files, or null when clean. */
+export function nestedDeco(repo: string): { letter: string; count: number } | null {
+  let entries: GitEntry[] = []; try { entries = gitStatus(repo); } catch { return null; }
+  if (!entries.length) return null;
+  const letter = entries.map(decoLetter).reduce((a, b) => (RANK[b] > RANK[a] ? b : a));
+  return { letter, count: entries.length };
+}
+
+/** Git repos inside a workspace (the workspace itself + nested ones up to 3 levels down). */
+export function findRepos(root: string): string[] {
+  const rootReal = realpathSync(root), repos: string[] = [];
+  if (repoRoot(rootReal) === rootReal) repos.push("");
+  const walk = (dir: string, depth: number) => {
+    if (depth > 3) return;
+    let ents: any[] = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of ents) {
+      if (!d.isDirectory() || d.name === ".git" || d.name === "node_modules" || d.name.startsWith(".")) continue;
+      const sub = join(dir, d.name);
+      if (existsSync(join(sub, ".git"))) repos.push(sub.slice(rootReal.length + 1));
+      walk(sub, depth + 1);
+    }
+  };
+  walk(rootReal, 1);
+  return repos;
+}
+
+export function repoBranch(repo: string): string {
+  try { return git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return "?"; }
+}
+
+/** Commit graph rows: HEAD (+ its upstream) in topo order, with parents and ref names. */
+export function gitGraph(repo: string, limit = 60) {
+  let up = false; try { git(repo, ["rev-parse", "--verify", "-q", "@{upstream}"]); up = true; } catch { /* none */ }
+  const remotes = git(repo, ["remote"]).split("\n").filter(Boolean);
+  // VS Code style: one badge per branch; a branch that also exists on a remote gets the cloud mark
+  const refsOf = (raw: string) => {
+    const out: { name: string; kind: "head" | "branch" | "remote" | "tag"; synced?: boolean }[] = [];
+    for (let r of raw ? raw.split(", ") : []) {
+      if (r === "HEAD" || r.endsWith("/HEAD")) continue;
+      if (r.startsWith("tag: ")) { out.push({ name: r.slice(5), kind: "tag" }); continue; }
+      const head = r.startsWith("HEAD -> "); if (head) r = r.slice(8);
+      const rem = remotes.find(x => r.startsWith(x + "/"));
+      if (rem) {
+        const local = out.find(o => (o.kind === "branch" || o.kind === "head") && o.name === r.slice(rem.length + 1));
+        if (local) local.synced = true; else out.push({ name: r, kind: "remote" });
+      } else {
+        const remote = out.findIndex(o => o.kind === "remote" && o.name.replace(/^[^/]+\//, "") === r);
+        if (remote >= 0) out.splice(remote, 1);
+        out.push({ name: r, kind: head ? "head" : "branch", synced: remote >= 0 });
+      }
+    }
+    return out;
+  };
+  return git(repo, ["log", "--topo-order", `-${limit}`, "--date=iso-strict", "--format=%h%x1f%p%x1f%s%x1f%an%x1f%ad%x1f%D", "HEAD", ...(up ? ["@{upstream}"] : [])])
+    .split("\n").filter(Boolean).map(l => {
+      const [sha, parents, subject, author, date, refs] = l.split("\x1f");
+      return { sha, parents: parents ? parents.split(" ") : [], subject, author, date, refs: refsOf(refs) };
+    });
+}
+
+/** Write actions from the phone's Source Control view. No force, no history rewrite. */
+export function gitAction(root: string, repoRel: string, action: string, body: { paths?: string[]; message?: string; all?: boolean }) {
+  const repo = insideWorkspace(root, repoRel);
+  if (!repo || repoRoot(repo) !== repo) throw new Error("ไม่ใช่ git repo");
+  const paths = (body.paths ?? []).map(String);
+  for (const p of paths) if (p.startsWith("-") || !insideWorkspace(repo, p)) throw new Error("bad path: " + p);
+  statusCache.delete(repo);
+  switch (action) {
+    case "stage": return git(repo, ["add", "-A", "--", ...(paths.length ? paths : ["."])]);
+    case "unstage": return paths.length ? git(repo, ["restore", "--staged", "--", ...paths]) : git(repo, ["reset", "-q"]);
+    case "discard": {
+      // tracked files only — untracked files are never deleted from the phone
+      if (!paths.length) throw new Error("ต้องระบุไฟล์");
+      const tracked = paths.filter(p => { try { git(repo, ["ls-files", "--error-unmatch", "--", p]); return true; } catch { return false; } });
+      if (tracked.length !== paths.length) throw new Error("ไฟล์ใหม่ (U) ทิ้งจากมือถือไม่ได้ — ลบเองที่เครื่อง");
+      return git(repo, ["restore", "--worktree", "--", ...paths]);
+    }
+    case "commit": {
+      const msg = String(body.message ?? "").trim();
+      if (!msg) throw new Error("ใส่ข้อความ commit ก่อน");
+      if (body.all) git(repo, ["add", "-A"]);
+      return git(repo, ["commit", "-m", msg]);
+    }
+    case "pull": return git(repo, ["pull", "--ff-only"], 4_000_000, 60_000);
+    case "push": return git(repo, ["push"], 4_000_000, 60_000);
+    case "fetch": return git(repo, ["fetch", "--prune"], 4_000_000, 60_000);
+    default: throw new Error("unknown action");
+  }
+}
+
+export function gitInfo(root: string, repoRel = "") {
+  const repo = insideWorkspace(root, repoRel);
+  if (!repo) throw new Error("bad path");
+  const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  let ahead = 0, behind = 0;
+  try { [behind, ahead] = git(repo, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]).trim().split(/\s+/).map(Number); } catch { /* no upstream */ }
+  const all = gitStatus(repo);
+  const staged = all.filter(e => e.x !== " " && e.x !== "?").map(e => ({ path: e.path, letter: e.x === "R" ? "R" : e.x === "D" ? "D" : e.x === "A" ? "A" : "M" }));
+  const changes = all.filter(e => e.y !== " " || e.x === "?").map(e => ({ path: e.path, letter: e.x === "?" ? "U" : e.y === "D" ? "D" : "M" }));
+  const log = git(repo, ["log", "-30", "--date=iso-strict", "--pretty=format:%h%x1f%s%x1f%an%x1f%ad"]).split("\n").filter(Boolean)
+    .map(l => { const [sha, subject, author, date] = l.split("\x1f"); return { sha, subject, author, date }; });
+  return { repo: repoRel, branch, ahead, behind, staged, changes, log, graph: gitGraph(repo), repos: findRepos(root).map(p => ({ path: p, branch: repoBranch(insideWorkspace(root, p)!) })) };
+}
+
+export function gitFileDiff(root: string, repoRel: string, rel: string, staged = false): string {
+  const repo = insideWorkspace(root, repoRel);
+  const full = repo && insideWorkspace(repo, rel);
+  if (!repo || !full) throw new Error("bad path");
+  const tracked = (() => { try { git(repo, ["ls-files", "--error-unmatch", "--", rel]); return true; } catch { return false; } })();
+  if (!tracked) {
+    const body = existsSync(full) ? readFileSync(full, "utf-8").slice(0, 200_000) : "";
+    const lines = body.replace(/\n$/, "").split("\n");
+    return `new file\n@@ -0,0 +1,${lines.length} @@\n` + lines.map(l => "+" + l).join("\n");
+  }
+  return git(repo, ["diff", ...(staged ? ["--cached"] : []), "--", rel]).slice(0, 400_000) || "(ไม่มีความต่าง)";
+}
+
+// ── Routes ───────────────────────────────────────────────────────
+
+const MAX_DIFF = 200_000;
+
+/** Keys the phone may send (label → tmux key name). */
+export const QUICK_KEYS: Record<string, string> = {
+  enter: "Enter", esc: "Escape", up: "Up", down: "Down", tab: "Tab", ctrlc: "C-c",
+  "1": "1", "2": "2", "3": "3", y: "y", n: "n",
+};
+/** Same labels in Superset CLI key names. */
+export const SUPERSET_KEYS: Record<string, string> = {
+  enter: "enter", esc: "esc", up: "up", down: "down", tab: "tab", ctrlc: "ctrl+c",
+  "1": "1", "2": "2", "3": "3", y: "y", n: "n",
+};
+
+export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
+  return new Elysia({ prefix: "/mobile" })
+    // Local hook receiver — guarded by its own token, never by Tailscale identity.
+    .post("/hook", ({ body, headers, set }) => {
+      if (!sameSecret(headers["x-mobile-hook-token"], cfg.hookToken)) { set.status = 401; return { ok: false }; }
+      const b = body as Record<string, any>;
+      const status = statusFromHook(String(b.hook_event_name ?? ""));
+      if (!b.session_id || !status) return { ok: true, ignored: true };
+      hookStates.set(String(b.session_id), { status, event: b.hook_event_name, message: clip(b.message, 200) ?? undefined, at: Date.now() });
+      return { ok: true };
+    })
+    .onBeforeHandle(({ request, path, set }) => {
+      if (path.endsWith("/hook")) return;
+      if (!isAuthorized(request.headers, cfg)) { set.status = 401; return { ok: false, error: "unauthorized" }; }
+    })
+    .get("/health", () => ({ ok: true, hooks: hookStates.size }))
+    .get("/agents", async () => ({ agents: await listAgents() }))
+    .get("/agents/:id/screen", async ({ params, query, set }) => {
+      const x = await findRoom(params.id);
+      if (!x) { set.status = 404; return { ok: false, error: "not found" }; }
+      const ch = x.room?.channel;
+      if (!ch || x.agent.status === "ended") return { ok: true, live: false, content: x.agent.lastAssistant ?? "" };
+      try { return { ok: true, live: true, content: await readScreen(ch, Math.min(+(query.lines || 120), 400)) }; }
+      catch { return { ok: true, live: false, content: x.agent.lastAssistant ?? "" }; }
+    }, { query: t.Object({ lines: t.Optional(t.String()) }) })
+    .post("/agents/:id/reply", async ({ params, body, set }) => {
+      const x = await findRoom(params.id);
+      if (!x) { set.status = 404; return { ok: false, error: "not found" }; }
+      const ch = x.room?.channel;
+      if (!ch || !x.agent.canReply) { set.status = 409; return { ok: false, error: "this room cannot be typed into" }; }
+      await typeInto(ch, body.text);
+      return { ok: true, via: ch.kind };
+    }, { body: t.Object({ text: t.String({ minLength: 1, maxLength: 8000 }) }) })
+    // Quick keys for permission prompts / menus — whitelist only, never raw tmux key names from the client.
+    .post("/agents/:id/keys", async ({ params, body, set }) => {
+      if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
+      const x = await findRoom(params.id);
+      if (!x) { set.status = 404; return { ok: false, error: "not found" }; }
+      const ch = x.room?.channel;
+      if (!ch || !x.agent.canReply) { set.status = 409; return { ok: false, error: "this room cannot be typed into" }; }
+      await pressKey(ch, body.key);
+      return { ok: true };
+    }, { body: t.Object({ key: t.String() }) })
+    // ── projects / rooms ──
+    .get("/projects", () => ({ projects: buildProjects(supersetSnapshot(), readLiveRooms()) }))
+    .get("/rooms/:ws/:room/commands", async ({ params, query }) => {
+      // working folder: Superset workspace path, or the tmux pane's current folder
+      let cwd: string | null = null;
+      if (params.ws === "tmux") { try { cwd = execFileSync("tmux", ["display", "-p", "-t", params.room, "#{pane_current_path}"], { encoding: "utf-8", timeout: 3_000 }).trim() || null; } catch { /* gone */ } }
+      else cwd = workspacePath(params.ws);
+      return { ok: true, cwd, commands: slashCommands(String(query.agent ?? "claude"), cwd) };
+    }, { query: t.Object({ agent: t.Optional(t.String()) }) })
+    .get("/agent-presets", () => {
+      try {
+        const d = JSON.parse(ss(["agents", "list", "--local", "--json"]));
+        const list = Array.isArray(d) ? d : d.agents ?? [];
+        return { presets: list.map((a: any) => ({ id: a.presetId ?? a.id, label: a.label ?? a.presetId })) };
+      } catch { return { presets: [] }; }
+    })
+    // ── explorer ──
+    .get("/workspaces/:ws/tree", ({ params, query, set }) => {
+      const root = workspacePath(params.ws);
+      if (!root) { set.status = 404; return { ok: false, error: "ไม่พบโฟลเดอร์ของ workspace นี้" }; }
+      const r = listDir(root, String(query.path ?? ""));
+      if (!r) { set.status = 400; return { ok: false, error: "bad path" }; }
+      const abs = join(realpathSync(root), r.path);
+      const deco = decorateDir(abs), ign = ignoredNames(abs, r.items.map(it => it.name));
+      return { ok: true, root, ...r, items: r.items.map(it => {
+        // a folder that is its own repo: show ITS changes + branch, not the parent's "untracked" (matches what you see inside)
+        const nested = it.dir && existsSync(join(abs, it.name, ".git")) ? join(abs, it.name) : null;
+        if (nested) return { ...it, git: nestedDeco(nested), repo: repoBranch(nested), ignored: ign.has(it.name) };
+        return { ...it, git: deco.get(it.name) ?? null, ignored: ign.has(it.name) };
+      }) };
+    }, { query: t.Object({ path: t.Optional(t.String()) }) })
+    .get("/workspaces/:ws/file", ({ params, query, set }) => {
+      const root = workspacePath(params.ws);
+      const f = root && insideWorkspace(root, String(query.path ?? ""));
+      if (!f || !existsSync(f) || statSync(f).isDirectory()) { set.status = 404; return { ok: false, error: "not found" }; }
+      const ext = f.split(".").pop()!.toLowerCase();
+      if (query.raw === "1") return new Response(Bun.file(f), { headers: { "content-type": MIME[ext] ?? "application/octet-stream" } });
+      const size = statSync(f).size;
+      if (/^(png|jpe?g|gif|webp|svg|heic)$/.test(ext)) return { ok: true, kind: "image", size };
+      const head = readFileSync(f).subarray(0, Math.min(size, 512 * 1024));
+      if (head.includes(0)) return { ok: true, kind: "binary", size };
+      return { ok: true, kind: "text", size, truncated: size > head.length, text: head.toString("utf-8") };
+    }, { query: t.Object({ path: t.Optional(t.String()), raw: t.Optional(t.String()) }) })
+    .get("/workspaces/:ws/git", ({ params, query, set }) => {
+      const root = workspacePath(params.ws);
+      if (!root) { set.status = 404; return { ok: false, error: "ไม่พบโฟลเดอร์ของ workspace นี้" }; }
+      try { return { ok: true, root, ...gitInfo(root, String(query.repo ?? "")) }; } catch { return { ok: false, error: "โฟลเดอร์นี้ไม่ใช่ git repo" }; }
+    }, { query: t.Object({ repo: t.Optional(t.String()) }) })
+    .get("/workspaces/:ws/git/diff", ({ params, query, set }) => {
+      const root = workspacePath(params.ws);
+      if (!root) { set.status = 404; return { ok: false, error: "not found" }; }
+      try { return { ok: true, diff: gitFileDiff(root, String(query.repo ?? ""), String(query.path ?? ""), query.staged === "1") }; }
+      catch (e: any) { set.status = 400; return { ok: false, error: String(e.message) }; }
+    }, { query: t.Object({ path: t.Optional(t.String()), repo: t.Optional(t.String()), staged: t.Optional(t.String()) }) })
+    .post("/workspaces/:ws/git/:action", ({ params, body, set }) => {
+      const root = workspacePath(params.ws);
+      if (!root) { set.status = 404; return { ok: false, error: "ไม่พบโฟลเดอร์ของ workspace นี้" }; }
+      try { return { ok: true, output: gitAction(root, String(body.repo ?? ""), params.action, body).slice(0, 20_000) }; }
+      catch (e: any) { set.status = 400; return { ok: false, error: String(e.stderr || e.stdout || e.message).trim().slice(0, 4000) }; }
+    }, { body: t.Object({ repo: t.Optional(t.String()), paths: t.Optional(t.Array(t.String())), message: t.Optional(t.String()), all: t.Optional(t.Boolean()) }) })
+    .get("/workspaces/:ws/git/commit/:sha", ({ params, query, set }) => {
+      const root0 = workspacePath(params.ws);
+      const root = root0 && insideWorkspace(root0, String(query.repo ?? ""));
+      if (!root || !/^[0-9a-f]{4,40}$/i.test(params.sha)) { set.status = 400; return { ok: false, error: "bad request" }; }
+      try { return { ok: true, show: git(root, ["show", "--stat", "--patch", "--format=%H%n%an · %ad%n%n%B", "--date=iso", params.sha]).slice(0, 400_000) }; }
+      catch { set.status = 404; return { ok: false, error: "ไม่พบ commit" }; }
+    }, { query: t.Object({ repo: t.Optional(t.String()) }) })
+    .post("/upload", async ({ request, query, set }) => {
+      const buf = new Uint8Array(await request.arrayBuffer());
+      if (!buf.length) { set.status = 400; return { ok: false, error: "empty file" }; }
+      if (buf.length > UPLOAD_MAX) { set.status = 413; return { ok: false, error: "ไฟล์ใหญ่เกิน 25 MB" }; }
+      const path = saveUpload(String(query.name ?? "file"), buf);
+      return { ok: true, path, url: "/mobile/uploads/" + path.slice(UPLOAD_DIR.length + 1) };
+    }, { parse: "none" })
+    .get("/img/:file", ({ params, set }) => {
+      if (!/^[0-9a-f]{20}\.(png|jpg|gif|webp)$/.test(params.file)) { set.status = 400; return "bad path"; }
+      const f = join(UPLOAD_DIR, "img", params.file);
+      if (!existsSync(f)) { set.status = 404; return "not found"; }
+      set.headers["cache-control"] = "private, max-age=31536000, immutable";
+      return Bun.file(f);
+    })
+    .get("/uploads/:day/:file", ({ params, set }) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(params.day) || params.file !== safeName(params.file)) { set.status = 400; return "bad path"; }
+      const f = join(UPLOAD_DIR, params.day, params.file);
+      if (!existsSync(f)) { set.status = 404; return "not found"; }
+      const ext = params.file.split(".").pop()!.toLowerCase();
+      return new Response(Bun.file(f), { headers: { "content-type": MIME[ext] ?? "application/octet-stream", "cache-control": "private, max-age=86400" } });
+    })
+    .get("/rooms/:ws/:room/chat", async ({ params, query, set }) => {
+      const ch = roomChannel(params.ws, params.room);
+      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
+      const live = [...readLiveRooms().values()].find(r => r.channel && (
+        (r.channel.kind === "tmux" && ch.kind === "tmux" && r.channel.pane === ch.pane) ||
+        (r.channel.kind === "superset" && ch.kind === "superset" && r.channel.terminalId === ch.terminalId)));
+      const codex = !live && ch.kind === "superset" ? codexFileFor(ch.terminalId) : null;
+      const items = live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
+      if (items) {
+        // Page from the end: newest `limit` messages, or the ones before `before`.
+        const limit = Math.min(+(query.limit || 150), 500);
+        const end = query.before ? Math.max(0, Math.min(+query.before, items.length)) : items.length;
+        const start = Math.max(0, end - limit);
+        return { ok: true, kind: "messages", total: items.length, start, items: items.slice(start, end) };
+      }
+      if (ch.kind === "superset") {
+        try {
+          const out = JSON.parse(ss(["agents", "read", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--json"]));
+          if (out.text?.trim()) return { ok: true, kind: "text", text: String(out.text) };
+        } catch { /* not an agent terminal */ }
+      }
+      return { ok: true, kind: "none" };
+    }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()) }) })
+    .get("/rooms/:ws/:room/screen", async ({ params, query, set }) => {
+      const ch = roomChannel(params.ws, params.room);
+      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
+      try { return { ok: true, content: await readScreen(ch, Math.min(+(query.lines || 150), 400)) }; }
+      catch { set.status = 502; return { ok: false, error: "cannot read this room" }; }
+    }, { query: t.Object({ lines: t.Optional(t.String()) }) })
+    .get("/rooms/:ws/:room/suggestion", async ({ params, set }) => {
+      const ch = roomChannel(params.ws, params.room);
+      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
+      try { const scr = await readScreen(ch, 40); return { ok: true, suggestion: promptSuggestion(scr), spinner: agentSpinner(scr) }; }
+      catch { return { ok: true, suggestion: null, spinner: null }; }
+    })
+    .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
+      const ch = roomChannel(params.ws, params.room);
+      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
+      if (body.key) {
+        if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
+        await pressKey(ch, body.key);
+      } else if (body.text) {
+        await typeInto(ch, body.text);
+      } else { set.status = 400; return { ok: false, error: "text or key required" }; }
+      snapCache.at = 0;
+      return { ok: true };
+    }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()) }) })
+    // Open a new room in a Superset workspace: an agent with a first prompt, or a plain shell.
+    .post("/workspaces/:ws/rooms", ({ params, body, set }) => {
+      if (!/^[0-9a-f-]{36}$/i.test(params.ws)) { set.status = 400; return { ok: false, error: "bad workspace" }; }
+      try {
+        const out = body.agent === "shell"
+          ? ss(["terminals", "create", "--local", "--workspace", params.ws, "--json"])
+          : ss(["agents", "create", "--local", "--workspace", params.ws, "--agent", body.agent, "--prompt", body.prompt || "", "--json"]);
+        snapCache.at = 0;
+        return { ok: true, result: JSON.parse(out) };
+      } catch (e: any) { set.status = 502; return { ok: false, error: String(e?.stderr || e?.message || e).slice(0, 300) }; }
+    }, { body: t.Object({ agent: t.String({ pattern: "^[a-z0-9-]{1,40}$" }), prompt: t.Optional(t.String({ maxLength: 8000 })) }) })
+    .get("/agents/:id/diff", async ({ params, set }) => {
+      const a = (await findRoom(params.id))?.agent;
+      if (!a) { set.status = 404; return { ok: false, error: "not found" }; }
+      try {
+        const git = (...args: string[]) => execFileSync("git", ["-C", a.projectPath, ...args], { encoding: "utf-8", timeout: 5000, maxBuffer: 8 * MAX_DIFF });
+        const stat = git("diff", "--stat", "HEAD");
+        const diff = git("diff", "HEAD");
+        return { ok: true, stat, diff: diff.slice(0, MAX_DIFF), truncated: diff.length > MAX_DIFF };
+      } catch (e: any) {
+        return { ok: false, error: "not a git repo or git failed" };
+      }
+    });
+}

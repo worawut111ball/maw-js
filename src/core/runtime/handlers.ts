@@ -1,3 +1,4 @@
+import { execFileSync } from "child_process";
 import { sendKeys, selectWindow, hostExec, getPaneCommand } from "../transport/ssh";
 import { tmux } from "../transport/tmux";
 import { buildCommand } from "../../config";
@@ -29,12 +30,37 @@ const select: Handler = (_ws, data) => {
   selectWindow(data.target).catch(() => { /* expected: window may not exist */ });
 };
 
+/**
+ * tmux reports the pane's foreground command, which can be the shell (`zsh`)
+ * even while Claude Code runs as its child — that made every send to such a
+ * pane fail with "no active Claude session". Look at the pane's process tree too.
+ */
+function paneHasAgentChild(target: string): boolean {
+  try {
+    const panePid = execFileSync("tmux", ["display-message", "-p", "-t", target, "#{pane_pid}"], { encoding: "utf-8", timeout: 1000 }).trim();
+    const tree = execFileSync("ps", ["-A", "-o", "pid=,ppid=,comm="], { encoding: "utf-8", timeout: 2000 });
+    const kids = new Map<string, { pid: string; comm: string }[]>();
+    for (const line of tree.split("\n")) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+      if (m) kids.set(m[2], [...(kids.get(m[2]) ?? []), { pid: m[1], comm: m[3] }]);
+    }
+    const queue = [panePid];
+    for (let i = 0; i < queue.length && i < 200; i++) {
+      for (const c of kids.get(queue[i]) ?? []) {
+        if (/claude|codex/i.test(c.comm)) return true;
+        queue.push(c.pid);
+      }
+    }
+  } catch { /* tmux/ps unavailable — fall back to the foreground check */ }
+  return false;
+}
+
 const send: Handler = async (ws, data, engine) => {
   // Check for active Claude session before sending (#17)
   if (!data.force) {
     try {
       const cmd = await getPaneCommand(data.target);
-      if (!/claude|codex|node/i.test(cmd)) {
+      if (!/claude|codex|node/i.test(cmd) && !paneHasAgentChild(data.target)) {
         ws.send(JSON.stringify({ type: "error", error: `no active Claude session in ${data.target} (running: ${cmd})` }));
         return;
       }

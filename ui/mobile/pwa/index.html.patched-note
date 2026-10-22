@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>/* phone: the desktop UI cannot run on the tailscale hostname → send phones/installed app to the mobile page */ var wantDesktop; try { wantDesktop = localStorage.getItem("maw-desktop-ui") === "1"; } catch (e) {} if (!wantDesktop && !/[?&]host=/.test(location.search) && (location.hostname.endsWith(".ts.net") || matchMedia("(display-mode: standalone)").matches)) location.replace("/m.html");</script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#020208" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>ARRA Office</title>
+  <script type="module" crossorigin src="/assets/main-CwFHZv5Q.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  <link rel="modulepreload" crossorigin href="/assets/api-CqccAasC.js">
+  <link rel="modulepreload" crossorigin href="/assets/useWebSocket-B67MwVL7.js">
+  <link rel="modulepreload" crossorigin href="/assets/constants-BfZ4dxwo.js">
+  <link rel="modulepreload" crossorigin href="/assets/react-DojUHHrr.js">
+  <link rel="modulepreload" crossorigin href="/assets/PinLock-B9KscegO.js">
+  <link rel="modulepreload" crossorigin href="/assets/three.module-CRdPeOSn.js">
+  <link rel="modulepreload" crossorigin href="/assets/AgentAvatar-DKZNWE4G.js">
+  <link rel="modulepreload" crossorigin href="/assets/RoomGrid-mgasoA5z.js">
+  <link rel="modulepreload" crossorigin href="/assets/useDevice-Cw-uOsFx.js">
+  <link rel="modulepreload" crossorigin href="/assets/useFileAttach-dkxc5-ni.js">
+  <link rel="modulepreload" crossorigin href="/assets/TeamPanel-DBn73dk4.js">
+  <link rel="modulepreload" crossorigin href="/assets/FpsCounter-tmXGSEUQ.js">
+  <link rel="modulepreload" crossorigin href="/assets/MissionControl-I-FNAGSg.js">
+  <link rel="modulepreload" crossorigin href="/assets/FleetGrid-BNAucpN_.js">
+  <link rel="modulepreload" crossorigin href="/assets/OverviewGrid-BC8vxxZa.js">
+  <link rel="modulepreload" crossorigin href="/assets/ConfigView-DpA1Y5it.js">
+  <link rel="modulepreload" crossorigin href="/assets/QuickCommandBar-1W1pcLw7.js">
+  <link rel="modulepreload" crossorigin href="/assets/TerminalView-CZk0CXr3.js">
+  <link rel="modulepreload" crossorigin href="/assets/ChatBubble-CKxY8LXj.js">
+  <link rel="modulepreload" crossorigin href="/assets/ChatView-CbGd0v87.js">
+  <link rel="stylesheet" crossorigin href="/assets/api-Df-PIqFR.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});</script>
+    <script>/* phone: floating button back to the mobile page (only on the tailscale hostname) */
+  if (location.hostname.endsWith(".ts.net")) addEventListener("DOMContentLoaded", function () {
+    var b = document.createElement("button"); b.textContent = "← หน้ามือถือ";
+    b.style.cssText = "position:fixed;right:12px;bottom:calc(96px + env(safe-area-inset-bottom));z-index:99999;padding:10px 14px;border-radius:999px;border:0;background:#60a5fa;color:#031022;font:600 14px sans-serif;box-shadow:0 4px 16px #0008";
+    b.onclick = function () { try { localStorage.removeItem("maw-desktop-ui"); } catch (e) {} location.href = "/m.html"; };
+    document.body.appendChild(b);
+  });</script>
+  </body>
+</html>

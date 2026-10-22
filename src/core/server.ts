@@ -7,6 +7,9 @@ import { join } from "path";
 import { homedir } from "os";
 import { serveStatic } from "hono/bun";
 import { api } from "../api";
+import { createMobileApi } from "../mobile/api";
+
+const mobileApi = createMobileApi();
 import { feedBuffer, feedListeners } from "../api/feed";
 import { mountViews } from "../views/index";
 import { setupTriggerListener } from "./runtime/trigger-listener";
@@ -174,6 +177,10 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     if (url.pathname === "/ws") {
       if (server.upgrade(req, { data: { target: null, previewTargets: new Set() } as WSData })) return;
       return new Response("WebSocket upgrade failed", { status: 400 });
+    }
+    // Phone app surface (separate prefix so tailscale serve can expose only /mobile)
+    if (url.pathname.startsWith("/mobile")) {
+      return mobileApi.handle(req);
     }
     // Elysia handles all /api/* routes
     if (url.pathname.startsWith("/api")) {

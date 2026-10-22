@@ -54,6 +54,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.184.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "material-icon-theme": "5.39.0",
     "tailwindcss": "^4.2.1",
     "vite": "^6.0.0"
   },
