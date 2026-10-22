@@ -1,0 +1,36 @@
+import { describe, expect, test } from "bun:test";
+import { createTravel, parseSleepDisabled, parseSpeedLimit, safetyReason } from "../src/mobile/features/travel";
+
+describe("travel mode (close the lid, keep working)", () => {
+  test("parsers", () => {
+    expect(parseSleepDisabled(" SleepDisabled\t\t1\n sleep 1")).toBe(true);
+    expect(parseSleepDisabled(" sleep 1 (sleep prevented by caffeinate)")).toBe(false);
+    expect(parseSpeedLimit("Note: No thermal warning level has been recorded")).toBeNull();
+    expect(parseSpeedLimit("CPU_Scheduler_Limit \t= 100\nCPU_Speed_Limit \t= 62")).toBe(62);
+  });
+  test("safety: low battery unplugged, throttling, timer — but not when charging", () => {
+    expect(safetyReason({ battery: { pct: 12, ac: false } }, null, null)).toContain("12%");
+    expect(safetyReason({ battery: { pct: 12, ac: true } }, null, null)).toBeNull();
+    expect(safetyReason({ battery: { pct: 80, ac: false } }, 55, null)).toContain("55%");
+    expect(safetyReason({ battery: null }, 100, 1000, 2000)).toBe("ครบเวลาที่ตั้งไว้");
+    expect(safetyReason({ battery: { pct: 80, ac: false } }, 100, Date.now() + 1e6)).toBeNull();
+  });
+  test("runs exactly `sudo -n pmset -a disablesleep 1|0`, and explains when sudo isn't set up", async () => {
+    const calls: string[] = []; let sleepOff = false, sudoOk = false;
+    const run = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args].join(" "));
+      if (cmd.endsWith("pmset") && args[0] === "-g") return { ok: true, out: sleepOff ? "SleepDisabled 1" : "sleep 1" };
+      if (args[0] === "-n" && args[1] === "-l") return { ok: sudoOk, out: "" };
+      if (args[0] === "-n") { if (!sudoOk) return { ok: false, out: "sudo: a password is required" }; sleepOff = args.at(-1) === "1"; return { ok: true, out: "" }; }
+      return { ok: true, out: "" };
+    };
+    const t = createTravel(run);
+    await expect(t.turn(true)).rejects.toThrow(/ตั้งสิทธิ์/);
+    sudoOk = true;
+    const s = await t.turn(true, 2);
+    expect(s.on).toBe(true); expect(s.sudoReady).toBe(true); expect(s.until! - Date.now()).toBeGreaterThan(7_100_000);
+    expect(calls).toContain("/usr/bin/sudo -n /usr/bin/pmset -a disablesleep 1");
+    expect((await t.turn(false)).on).toBe(false);
+    expect(calls).toContain("/usr/bin/sudo -n /usr/bin/pmset -a disablesleep 0");
+  });
+});

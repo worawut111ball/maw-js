@@ -22,3 +22,21 @@ self.addEventListener("fetch", e => {
     return Response.redirect(`/m.html?shared=${n}`, 303);
   })());
 });
+
+// Push from the Mac (agent waiting / done) → system notification; tap opens that room.
+self.addEventListener("push", e => {
+  let d = {}; try { d = e.data.json(); } catch { d = { title: "maw", body: e.data?.text() || "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "maw", {
+    body: d.body || "", tag: d.tag || "maw", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: d.url || "/m.html" },
+  }));
+});
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  const url = e.notification.data?.url || "/m.html";
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const w = wins.find(c => new URL(c.url).pathname === "/m.html");
+    if (w) { await w.focus(); w.postMessage({ type: "open", url }); return; }
+    await self.clients.openWindow(url);
+  })());
+});

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, nestedDeco, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -384,4 +384,121 @@ describe("queued messages (typed while the agent is busy)", () => {
     expect(promptSuggestion(raw)).toBeNull();
     expect(queuedMessages("● done\n❯ old\n")).toEqual([]);
   });
+});
+
+describe("push notifications", () => {
+  test("only waiting / done buzz, and nothing from the conversation is included", () => {
+    expect(pushFor("Notification", "team2-oracle", "Claude needs your permission to use Bash")).toEqual({ title: "🟡 รอคำตอบ · team2-oracle", body: "ขออนุญาตใช้ tool — แตะเพื่อตอบ" });
+    expect(pushFor("Stop", "facwms")?.title).toBe("✅ เสร็จแล้ว · facwms");
+    expect(pushFor("UserPromptSubmit", "x")).toBeNull();
+    expect(pushFor("PreToolUse", "x")).toBeNull();
+  });
+  test("VAPID keys created once and kept private", () => {
+    const f = join(mkdtempSync(join(tmpdir(), "push-")), "push.json");
+    const a = loadPush(f), b = loadPush(f);
+    expect(a.vapid.publicKey).toBe(b.vapid.publicKey);
+    expect(require("fs").statSync(f).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("messages typed while Claude is busy keep their place", () => {
+  test("shown at enqueue time in order, pending until removed, attachment not duplicated", () => {
+    const root = mkdtempSync(join(tmpdir(), "q-")), dir = join(root, "proj");
+    require("fs").mkdirSync(dir);
+    const f = join(dir, "s2.jsonl");
+    const rows: any[] = [
+      { type: "user", timestamp: "t1", message: { content: "แก้ปุ่มให้หน่อย" } },
+      { type: "queue-operation", operation: "enqueue", timestamp: "t2", content: "อันแรก" },
+      { type: "queue-operation", operation: "enqueue", timestamp: "t3", content: "อันที่สอง" },
+      { type: "assistant", timestamp: "t4", message: { content: [{ type: "text", text: "กำลังแก้" }] } },
+    ];
+    writeFileSync(f, rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+    let items = claudeTranscript("s2", root)!;
+    expect(items.map(x => [x.role, x.text, !!x.queued])).toEqual([["user", "แก้ปุ่มให้หน่อย", false], ["user", "อันแรก", true], ["user", "อันที่สอง", true], ["assistant", "กำลังแก้", false]]);
+    const more = [
+      { type: "queue-operation", operation: "remove", timestamp: "t5", content: "อันแรก" },
+      { type: "queue-operation", operation: "remove", timestamp: "t5", content: "อันที่สอง" },
+      { type: "attachment", attachment: { type: "queued_command", prompt: "อันแรก" } },
+      { type: "attachment", attachment: { type: "queued_command", prompt: "อันที่สอง" } },
+    ];
+    require("fs").appendFileSync(f, more.map(r => JSON.stringify(r)).join("\n") + "\n");
+    items = claudeTranscript("s2", root)!;
+    expect(items.map(x => [x.text, !!x.queued])).toEqual([["แก้ปุ่มให้หน่อย", false], ["อันแรก", false], ["อันที่สอง", false], ["กำลังแก้", false]]);
+  });
+});
+
+test("queued then dequeued (agent became free) → one bubble, not two", () => {
+  const root = mkdtempSync(join(tmpdir(), "q2-")), dir = join(root, "p"); require("fs").mkdirSync(dir);
+  const rows = [
+    { type: "queue-operation", operation: "enqueue", timestamp: "t1", content: "เทสด้วยตัวเองเลย" },
+    { type: "assistant", message: { content: [{ type: "text", text: "เสร็จแล้ว" }] } },
+    { type: "queue-operation", operation: "dequeue", timestamp: "t2" },
+    { type: "user", timestamp: "t3", message: { content: "เทสด้วยตัวเองเลย" } },
+  ];
+  writeFileSync(join(dir, "s3.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  expect(claudeTranscript("s3", root)!.map(x => [x.text, !!x.queued])).toEqual([["เทสด้วยตัวเองเลย", false], ["เสร็จแล้ว", false]]);
+});
+
+test("background agent card stays running until its task-notification arrives", () => {
+  const root = mkdtempSync(join(tmpdir(), "bg-")), dir = join(root, "p"); require("fs").mkdirSync(dir);
+  const f = join(dir, "s4.jsonl");
+  const rows: any[] = [
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "tA", name: "Agent", input: { description: "P1 permission prompts pack", prompt: "x", run_in_background: true } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tA", content: [{ type: "text", text: "Async agent launched successfully. (internal)" }] }] } },
+  ];
+  writeFileSync(f, rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  let a = claudeTranscript("s4", root)!.find(x => x.tool)!;
+  expect(a.tool).toMatchObject({ bg: "running", output: null });
+  require("fs").appendFileSync(f, JSON.stringify({ type: "user", message: { content: "<task-notification>\n<task-id>x</task-id>\n<tool-use-id>tA</tool-use-id>\n<status>completed</status>\n<summary>Agent \"P1\" completed</summary>\n<result>Routes added: /prompt</result>\n</task-notification>" } }) + "\n");
+  a = claudeTranscript("s4", root)!.find(x => x.tool)!;
+  expect(a.tool).toMatchObject({ bg: "done", error: false });
+  expect(a.tool!.output).toContain("Routes added");
+});
+
+test("queued message deleted on the Mac → shown as cancelled, not sent", () => {
+  const root = mkdtempSync(join(tmpdir(), "qc-")), dir = join(root, "p"); require("fs").mkdirSync(dir);
+  const rows = [
+    { type: "queue-operation", operation: "enqueue", timestamp: "t1", content: "ส่งผิดห้อง" },
+    { type: "queue-operation", operation: "enqueue", timestamp: "t2", content: "อันนี้ส่งจริง" },
+    { type: "queue-operation", operation: "remove", timestamp: "t3", content: "ส่งผิดห้อง" },
+    { type: "assistant", message: { content: [{ type: "text", text: "ทำต่อ" }] } },
+    { type: "queue-operation", operation: "remove", timestamp: "t4", content: "อันนี้ส่งจริง" },
+    { type: "attachment", attachment: { type: "queued_command", prompt: "อันนี้ส่งจริง" } },
+    { type: "assistant", message: { content: [{ type: "text", text: "รับแล้ว" }] } },
+  ];
+  writeFileSync(join(dir, "s5.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  expect(claudeTranscript("s5", root)!.filter(x => x.role === "user").map(x => [x.text, !!x.canceled, !!x.queued])).toEqual([["ส่งผิดห้อง", true, false], ["อันนี้ส่งจริง", false, false]]);
+});
+
+test("Mac input draft: real typed text yes, grey suggestion no", () => {
+  const rule = "─".repeat(10);
+  expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0\x1b[38;5;231mหดเหอกหอหอห\x1b[0m\n${rule}`)).toEqual({ text: "หดเหอกหอหอห", sure: true });
+  expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0\x1b[2mไปต่อเลย\x1b[0m\n${rule}`)).toBeNull();
+  expect(inputDraft(`${rule}\n❯\u00a0พิมพ์ค้าง\n${rule}`)).toEqual({ text: "พิมพ์ค้าง", sure: false });
+});
+
+test("message sent while a tool runs: tool_result between remove and queued_command is not a cancel", () => {
+  const root = mkdtempSync(join(tmpdir(), "qt-")), dir = join(root, "p"); require("fs").mkdirSync(dir);
+  const rows = [
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] } },
+    { type: "queue-operation", operation: "enqueue", content: "ตอบไทย" },
+    { type: "queue-operation", operation: "remove", content: "ตอบไทย" },
+    { type: "attachment", attachment: { type: "hook_non_blocking_error" } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
+    { type: "attachment", attachment: { type: "queued_command", prompt: "ตอบไทย" } },
+    { type: "assistant", message: { content: [{ type: "text", text: "ครับ" }] } },
+  ];
+  writeFileSync(join(dir, "s6.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  const u = claudeTranscript("s6", root)!.filter(x => x.role === "user");
+  expect(u.map(x => [x.text, !!x.canceled])).toEqual([["ตอบไทย", false]]);
+});
+
+test("visible replies stored as plain-text thinking blocks are shown; empty (hidden) thinking is not", () => {
+  const root = mkdtempSync(join(tmpdir(), "th-")), dir = join(root, "p"); require("fs").mkdirSync(dir);
+  const rows = [
+    { type: "assistant", message: { content: [{ type: "thinking", thinking: "", signature: "x" }] } },
+    { type: "assistant", message: { content: [{ type: "thinking", thinking: "ผมจะปรับแพ็ก P3", signature: "y" }] } },
+  ];
+  writeFileSync(join(dir, "s7.jsonl"), rows.map(r => JSON.stringify(r)).join("\n") + "\n");
+  expect(claudeTranscript("s7", root)!.map(x => [x.role, x.text])).toEqual([["assistant", "ผมจะปรับแพ็ก P3"]]);
 });

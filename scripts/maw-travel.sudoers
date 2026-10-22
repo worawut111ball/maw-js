@@ -1,0 +1,3 @@
+# maw travel mode: let maw switch lid-close sleep on/off — this exact command only, nothing else.
+# Install once:  sudo install -m 0440 -o root -g wheel scripts/maw-travel.sudoers /etc/sudoers.d/maw-travel && sudo visudo -c
+ball ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0

@@ -13,6 +13,8 @@
  * Plan: ~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/PLAN-maw-mobile.md
  */
 import { Elysia, t } from "elysia";
+import webpush from "web-push";
+import { mountFeatures } from "./features";
 import { execFileSync } from "child_process";
 import { closeSync, realpathSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
@@ -234,6 +236,25 @@ async function findRoom(id: string) {
  * recognised by its dim style; Superset's reader returns plain text, so there it may also be a
  * half-typed draft on the Mac (`sure: false`).
  */
+/**
+ * What is typed in the Mac's input box right now (not Claude's grey suggestion).
+ * tmux keeps colours, so ghost text (dim) is excluded; Superset is plain text → `sure: false`.
+ */
+export function inputDraft(raw: string): { text: string; sure: boolean } | null {
+  const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n");
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
+    const plain = lines[i].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+    if (!/^❯\u00a0/.test(plain)) continue;
+    const text = plain.slice(2).trim();
+    if (!text || /^(Try "|Press up to edit queued messages)/.test(text)) return null;
+    if (!/\x1b\[/.test(lines[i])) return { text, sure: false };
+    const after = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^\u00a0/, "");
+    const sgr = (after.match(/^(?:\x1b\[[0-9;]*m)+/) ?? [""])[0];
+    return /\x1b\[(?:[0-9;]*;)?2(?:;[0-9;]*)?m/.test(sgr) ? null : { text, sure: true };
+  }
+  return null;
+}
+
 export function promptSuggestion(raw: string): { text: string; sure: boolean } | null {
   const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n");
   const plainOf = (l: string) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
@@ -288,15 +309,15 @@ export function agentSpinner(raw: string): { verb: string; detail: string } | nu
   return null;
 }
 
-const ss = (args: string[]) => execFileSync(SUPERSET_BIN, args, { encoding: "utf-8", timeout: 15_000 });
+export const ss = (args: string[]) => execFileSync(SUPERSET_BIN, args, { encoding: "utf-8", timeout: 15_000 });
 
-async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
+export async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
   if (ch.kind === "tmux") return capture(ch.pane, lines);
   const out = JSON.parse(ss(["terminals", "read", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--max-lines", String(lines), "--json"]));
   return String(out.text ?? "");
 }
 
-async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
+export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   if (ch.kind === "tmux") {
     const tmux = new Tmux();
     await tmux.sendKeysLiteral(ch.pane, text);
@@ -306,7 +327,7 @@ async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
 }
 
-async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
+export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
   if (ch.kind === "tmux") return new Tmux().sendKeys(ch.pane, QUICK_KEYS[label]);
   ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--keys", SUPERSET_KEYS[label]]);
 }
@@ -332,7 +353,7 @@ export function statusFromSuperset(state: string | null | undefined, hasAgent: b
 const cleanTitle = (t: string | null | undefined) => String(t ?? "").replace(/^[◐◑◒◓●○◌✳✻·*\s]+/, "").trim();
 
 let snapCache: { at: number; data: any } = { at: 0, data: null };
-function supersetSnapshot(): any {
+export function supersetSnapshot(): any {
   if (Date.now() - snapCache.at < 2_000 && snapCache.data) return snapCache.data;
   let data: any = { workspaces: [] };
   try { data = JSON.parse(ss(["snapshot", "--json"])); } catch { /* Superset not running */ }
@@ -407,8 +428,8 @@ export function roomChannel(ws: string, room: string): ReplyChannel | null {
 // Every user message, every assistant reply, every tool call (with its result) and every sub-agent.
 // Transcripts are huge (100 MB+), so each file is parsed once and then only the appended bytes.
 
-export interface ChatTool { name: string; summary: string; input: string; output: string | null; error: boolean }
-export interface ChatItem { i: number; role: "user" | "assistant" | "tool" | "agent" | "system"; ts: string | null; text?: string; tool?: ChatTool; images?: string[] }
+export interface ChatTool { name: string; summary: string; input: string; output: string | null; error: boolean; bg?: "running" | "done" }
+export interface ChatItem { i: number; role: "user" | "assistant" | "tool" | "agent" | "system"; ts: string | null; text?: string; tool?: ChatTool; images?: string[]; queued?: boolean; canceled?: boolean }
 
 const IMG_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 /** Pasted images live base64-encoded inside transcripts; write each once to disk and hand the phone a URL. */
@@ -466,8 +487,21 @@ function userMessage(raw: string): { role: "user" | "system"; text: string } | n
   return text ? { role: "user", text } : null;
 }
 
-interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem> }
+interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[] }
 const transcripts = new Map<string, ParseState>();
+const BOOT_ID = Date.now().toString(36);
+
+/** "<task-notification>…<tool-use-id>X</tool-use-id><status>completed</status><summary>…" closes the background card X. */
+function finishBackground(st: ParseState, raw: string) {
+  const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(raw)?.[1]?.trim();
+  const it = id ? st.tools.get(id) : undefined;
+  if (!it?.tool) return;
+  const status = /<status>([^<]+)<\/status>/.exec(raw)?.[1]?.trim() ?? "completed";
+  const summary = /<summary>([\s\S]*?)<\/summary>/.exec(raw)?.[1]?.trim() ?? "";
+  const result = /<result>([\s\S]*?)<\/result>/.exec(raw)?.[1]?.trim() ?? "";
+  it.tool.bg = "done"; it.tool.error = status !== "completed";
+  it.tool.output = cut([summary, result].filter(Boolean).join("\n\n") || status, OUT_MAX);
+}
 
 export function parseTranscriptLines(st: ParseState, lines: string[]): void {
   const push = (it: Omit<ChatItem, "i">) => { const x = { ...it, i: st.items.length } as ChatItem; st.items.push(x); return x; };
@@ -476,12 +510,34 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
     let e: any; try { e = JSON.parse(line); } catch { continue; }
     if (e.isSidechain) continue;
     const ts = e.timestamp ?? null, c = e.message?.content;
+    // Typed while the agent is busy: "enqueue" is written the moment it's sent → show it there (in order),
+    // marked queued until "remove" (Claude took it). The later queued_command attachment is then a duplicate.
+    if (e.type === "queue-operation") {
+      const text = typeof e.content === "string" ? e.content : "";
+      // "remove" names the message; "dequeue" (agent became free) has no text and takes the oldest one —
+      // it then arrives as a normal user turn, which must not be shown twice
+      const pending = st.items.filter(x => x.queued && (e.operation === "dequeue" || x.text === (userMessage(text)?.text ?? text)));
+      if (e.operation === "enqueue") { const m = userMessage(text); if (m?.role === "user") push({ role: "user", ts, text: m.text, queued: true }); }
+      else if (e.operation === "dequeue" && pending[0]) { pending[0].queued = false; (st.sentQ ??= []).push(pending[0]); }
+      // "remove" = either Claude took it mid-turn (a queued_command follows right away) or the user deleted it on the Mac
+      else if (e.operation === "remove" && pending[0]) { pending[0].queued = false; (st.sentQ ??= []).push(pending[0]); (st.removedQ ??= []).push(pending[0]); }
+      continue;
+    }
+    // a tool_result can sit between "remove" and the queued_command (message sent while a tool was running) —
+    // only a real reply or a new typed turn proves the removed message was deleted instead
+    const realTurn = e.type === "assistant" || (e.type === "user" && !(Array.isArray(c) && c.every((b: any) => b?.type === "tool_result")));
+    if (st.removedQ?.length && realTurn) {
+      for (const it of st.removedQ) { it.canceled = true; st.sentQ = st.sentQ?.filter(x => x !== it); }
+      st.removedQ = [];
+    }
     if (e.type === "attachment" && e.attachment?.type === "queued_command") {
       // Messages typed while the agent was busy are stored as attachments, not as user turns.
       const pr = e.attachment.prompt;
       const raw = typeof pr === "string" ? pr : Array.isArray(pr) ? pr.map((b: any) => b.text ?? "").join("\n") : "";
       const images = Array.isArray(pr) ? pr.map(imageOf).filter(Boolean) as string[] : [];
       const m = userMessage(raw) ?? (images.length ? { role: "user" as const, text: "" } : null);
+      const seen = st.sentQ?.findIndex(x => x.text === m?.text) ?? -1;
+      if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; st.removedQ = st.removedQ?.filter(x => x !== it); if (images.length) it.images = images; continue; } // already shown at enqueue time
       if (m) push({ role: m.role, ts: e.attachment.timestamp ?? ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
       continue;
     }
@@ -492,16 +548,31 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
       const images = parts.map(imageOf).filter(Boolean) as string[];
       let owner: ChatItem | null = null;
       for (const b of parts) {
-        if (b.type === "text") { const m = userMessage(String(b.text ?? "")); if (m) { const it = push({ role: m.role, ts, text: m.text }); if (m.role === "user" && !owner) owner = it; } }
+        if (b.type === "text") {
+          const raw = String(b.text ?? "");
+          if (raw.trimStart().startsWith("<task-notification>")) finishBackground(st, raw);
+          const m = userMessage(raw); if (!m) continue;
+          const seen = m.role === "user" ? st.sentQ?.findIndex(x => x.text === m.text) ?? -1 : -1;
+          if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; if (!owner) owner = it; continue; } // shown when it was queued
+          const it = push({ role: m.role, ts, text: m.text }); if (m.role === "user" && !owner) owner = it;
+        }
         if (b.type === "tool_result") {
           const t = st.tools.get(b.tool_use_id);
-          if (t?.tool) { t.tool.output = cut(resultText(b.content), OUT_MAX); t.tool.error = !!b.is_error; }
+          if (t?.tool) {
+            const out = resultText(b.content);
+            // background agent / shell: the result comes later in a <task-notification>, until then it is still running
+            if (/^(Async agent launched|Command running in background)/.test(out.trim())) { t.tool.bg = "running"; t.tool.output = null; }
+            else { t.tool.output = cut(out, OUT_MAX); t.tool.error = !!b.is_error; }
+          }
         }
       }
       if (images.length && !parts.some((b: any) => b.type === "tool_result")) (owner ?? push({ role: "user", ts, text: "" })).images = images;
     } else if (e.type === "assistant" && Array.isArray(c)) {
       for (const b of c) {
         if (b.type === "text" && String(b.text ?? "").trim()) push({ role: "assistant", ts, text: b.text });
+        // Claude Code sometimes records a visible reply as a thinking block with plain text (shown on the Mac with
+        // an orange marker); hidden/encrypted thinking has empty text and stays hidden
+        if (b.type === "thinking" && /[\p{L}\p{N}]/u.test(String(b.thinking ?? ""))) push({ role: "assistant", ts, text: b.thinking }); // "…" / blank = hidden
         if (b.type === "tool_use") {
           const v = toolView(b.name, b.input);
           const item = push({ role: b.name === "Agent" || b.name === "Task" ? "agent" : "tool", ts, tool: { name: b.name, ...v, output: null, error: false } });
@@ -673,6 +744,44 @@ export function saveUpload(name: string, data: Uint8Array, dir = UPLOAD_DIR): st
 // ── Workspace explorer (read-only): folders, files, git — like Superset's sidebar ──
 
 let wsPaths: { at: number; map: Map<string, string> } = { at: 0, map: new Map() };
+// ── Push notifications (Web Push into the installed PWA) ───────────
+
+const PUSH_FILE = join(homedir(), ".maw", "push.json"); // VAPID keys + phone subscriptions, mode 600
+interface PushStore { vapid: { publicKey: string; privateKey: string }; subs: any[] }
+export function loadPush(file = PUSH_FILE): PushStore {
+  try { const d = JSON.parse(readFileSync(file, "utf-8")); if (d.vapid?.publicKey) return { vapid: d.vapid, subs: d.subs ?? [] }; } catch { /* first run */ }
+  const d: PushStore = { vapid: webpush.generateVAPIDKeys(), subs: [] };
+  mkdirSync(join(file, ".."), { recursive: true });
+  writeFileSync(file, JSON.stringify(d, null, 2), { mode: 0o600 });
+  return d;
+}
+const savePush = (d: PushStore, file = PUSH_FILE) => writeFileSync(file, JSON.stringify(d, null, 2), { mode: 0o600 });
+
+/** What a hook event should say on the phone, or null (only "waiting" and "done" are worth a buzz). No work content is sent. */
+export function pushFor(event: string, room: string, message?: string): { title: string; body: string } | null {
+  if (event === "Notification" || event === "PermissionRequest")
+    return { title: `🟡 รอคำตอบ · ${room}`, body: /permission/i.test(message ?? "") || event === "PermissionRequest" ? "ขออนุญาตใช้ tool — แตะเพื่อตอบ" : "รอพี่ตอบอยู่ — แตะเพื่อเปิดห้อง" };
+  if (event === "Stop") return { title: `✅ เสร็จแล้ว · ${room}`, body: "ทำงานรอบนี้เสร็จ — แตะเพื่อดูผล" };
+  return null;
+}
+const lastPush = new Map<string, number>();
+/** Send to every subscribed phone; drop subscriptions the push service says are gone. Same session + kind at most once a minute. */
+export async function notifyPhones(sid: string, kind: string, msg: { title: string; body: string }) {
+  const key = sid + kind, now = Date.now();
+  if (now - (lastPush.get(key) ?? 0) < 60_000) return 0;
+  lastPush.set(key, now);
+  const d = loadPush(); if (!d.subs.length) return 0;
+  webpush.setVapidDetails("mailto:maw-mobile@localhost", d.vapid.publicKey, d.vapid.privateKey);
+  const payload = JSON.stringify({ ...msg, tag: sid, url: `/m.html?open=${encodeURIComponent(sid)}` });
+  let sent = 0; const keep: any[] = [];
+  for (const sub of d.subs) {
+    try { await webpush.sendNotification(sub, payload, { TTL: 600, urgency: "high" }); sent++; keep.push(sub); }
+    catch (e: any) { if (e?.statusCode !== 404 && e?.statusCode !== 410) keep.push(sub); }
+  }
+  if (keep.length !== d.subs.length) savePush({ ...d, subs: keep });
+  return sent;
+}
+
 // ── Context, plan limits and Mac health for the phone header ───────
 
 const STATUS_DIR = join(homedir(), ".maw", "status"); // written by ~/.claude/statusline.sh on every redraw
@@ -1080,16 +1189,18 @@ const MAX_DIFF = 200_000;
 /** Keys the phone may send (label → tmux key name). */
 export const QUICK_KEYS: Record<string, string> = {
   enter: "Enter", esc: "Escape", up: "Up", down: "Down", tab: "Tab", ctrlc: "C-c",
-  "1": "1", "2": "2", "3": "3", y: "y", n: "n",
+  btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u",
+  "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
 };
 /** Same labels in Superset CLI key names. */
 export const SUPERSET_KEYS: Record<string, string> = {
   enter: "enter", esc: "esc", up: "up", down: "down", tab: "tab", ctrlc: "ctrl+c",
-  "1": "1", "2": "2", "3": "3", y: "y", n: "n",
+  btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u",
+  "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
 };
 
 export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
-  return new Elysia({ prefix: "/mobile" })
+  const app = new Elysia({ prefix: "/mobile" })
     // Local hook receiver — guarded by its own token, never by Tailscale identity.
     .post("/hook", ({ body, headers, set }) => {
       if (!sameSecret(headers["x-mobile-hook-token"], cfg.hookToken)) { set.status = 401; return { ok: false }; }
@@ -1097,6 +1208,9 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       const status = statusFromHook(String(b.hook_event_name ?? ""));
       if (!b.session_id || !status) return { ok: true, ignored: true };
       hookStates.set(String(b.session_id), { status, event: b.hook_event_name, message: clip(b.message, 200) ?? undefined, at: Date.now() });
+      const room = readLiveRooms().get(String(b.session_id))?.name || String(b.cwd ?? "").split("/").filter(Boolean).pop() || "Claude";
+      const msg = pushFor(String(b.hook_event_name), room, b.message);
+      if (msg) notifyPhones(String(b.session_id), status, msg).catch(() => {});
       return { ok: true };
     })
     .onBeforeHandle(({ request, path, set }) => {
@@ -1232,7 +1346,14 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         const limit = Math.min(+(query.limit || 150), 500);
         const end = query.before ? Math.max(0, Math.min(+query.before, items.length)) : items.length;
         const start = Math.max(0, end - limit);
-        return { ok: true, kind: "messages", total: items.length, start, items: items.slice(start, end) };
+        // epoch changes when maw restarts (numbering may differ after a re-parse) → the phone drops its cached items
+        let page = items.slice(start, end);
+        // Esc on the Mac before Claude answered pulls the message back into the input box and writes nothing more:
+        // a trailing user turn while the session is idle never reached Claude
+        const last = items.at(-1);
+        if (live?.status === "idle" && end === items.length && last?.role === "user" && !last.queued && last.ts && Date.now() - Date.parse(last.ts) > 8000)
+          page = page.map(x => (x === last ? { ...x, canceled: true } : x));
+        return { ok: true, kind: "messages", epoch: BOOT_ID, total: items.length, start, items: page };
       }
       if (ch.kind === "superset") {
         try {
@@ -1245,16 +1366,25 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     .get("/rooms/:ws/:room/screen", async ({ params, query, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
-      try { return { ok: true, content: await readScreen(ch, Math.min(+(query.lines || 150), 400)) }; }
+      try { return { ok: true, content: await readScreen(ch, Math.min(+(query.lines || 150), 1500)) }; }
       catch { set.status = 502; return { ok: false, error: "cannot read this room" }; }
     }, { query: t.Object({ lines: t.Optional(t.String()) }) })
     .get("/rooms/:ws/:room/suggestion", async ({ params, query, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
       const usage = query.agent === "codex" ? (f => f ? codexUsage(f) : null)(codexFileFor(params.room)) : query.sid ? claudeUsage(String(query.sid)) : null;
-      try { const scr = await readScreen(ch, 60); return { ok: true, suggestion: promptSuggestion(scr), spinner: agentSpinner(scr), queued: queuedMessages(scr), usage }; }
+      try { const scr = await readScreen(ch, 60); return { ok: true, suggestion: promptSuggestion(scr), draft: inputDraft(scr), spinner: agentSpinner(scr), queued: queuedMessages(scr), usage }; }
       catch { return { ok: true, suggestion: null, spinner: null, queued: [], usage }; }
     }, { query: t.Object({ agent: t.Optional(t.String()), sid: t.Optional(t.String()) }) })
+    .get("/push/key", () => ({ ok: true, key: loadPush().vapid.publicKey }))
+    .post("/push/subscribe", ({ body }) => {
+      const sub = (body as any).subscription;
+      if (!sub?.endpoint || !/^https:\/\//.test(sub.endpoint)) return { ok: false, error: "bad subscription" };
+      const d = loadPush(); d.subs = [...d.subs.filter(x => x.endpoint !== sub.endpoint), sub]; savePush(d);
+      return { ok: true, count: d.subs.length };
+    })
+    .post("/push/unsubscribe", ({ body }) => { const d = loadPush(); d.subs = d.subs.filter(x => x.endpoint !== (body as any).endpoint); savePush(d); return { ok: true }; })
+    .post("/push/test", async () => { lastPush.delete("test" + "test"); return { ok: true, sent: await notifyPhones("test", "test", { title: "🔔 maw แจ้งเตือนได้แล้ว", body: "จะเด้งเมื่อ agent รอคำตอบ หรือทำงานเสร็จ" }) }; })
     .get("/system", async () => ({ ok: true, mac: await macHealth(), limits: { claude: claudeLimits(), codex: codexLimits() } }))
     .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
       const ch = roomChannel(params.ws, params.room);
@@ -1291,4 +1421,7 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         return { ok: false, error: "not a git repo or git failed" };
       }
     });
+  // feature packs (src/mobile/features/*) add their routes after the auth guard above
+  mountFeatures(app);
+  return app;
 }
