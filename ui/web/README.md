@@ -1,3 +1,7 @@
+> **ใน repo นี้ (worawut111ball/maw-js):** โฟลเดอร์นี้คือ `Soul-Brews-Studio/maw-ui` ที่รวมเข้ามาพร้อมประวัติด้วย `git subtree` (22 ต.ค. 69)
+> build: `bun run build:ui` ที่ root (ได้ `ui/web/dist` + แอปมือถือ `ui/mobile` ในที่เดียว) · maw เสิร์ฟผ่าน symlink `~/.maw/ui/dist → ui/web/dist`
+> ดึงของใหม่จากต้นทาง: `git subtree pull --prefix=ui/web https://github.com/Soul-Brews-Studio/maw-ui main`
+
 # maw-ui
 
 The living lens of the oracle mesh. Federation visualization + fleet dashboard for [maw-js](https://github.com/Soul-Brews-Studio/maw-js).

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "postbuild": "f=\"$HOME/my-project/maw-js/ui/mobile/deploy.sh\"; [ -f \"$f\" ] && bash \"$f\" || true",
+    "postbuild": "MAW_UI_DIR=dist bash ../mobile/deploy.sh",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
