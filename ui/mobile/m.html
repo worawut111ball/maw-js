@@ -525,7 +525,7 @@ function renderProject() {
   const room = w?.rooms.find(r => r.id === state.room);
   const canType = !!room && room.status !== "ended";
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
-  const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"]] : null;
+  const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
   const seg = segTabs ? `<div class="seg">${segTabs.map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
   if (state.pview !== "rooms" && segTabs) {
     $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}<span style="color:var(--dim);font-size:12.5px;flex:none">⎇ ${esc(w?.branch || "")}</span>${p.source === "folder" ? `<button class="iconbtn" data-unpin="${esc(p.path)}" title="เลิกปัก">📌</button>` : ""}</header>
@@ -1284,12 +1284,20 @@ function travelHtml() {
     <div class="k" style="margin-top:4px">ต้องตั้งสิทธิ์บน Mac หนึ่งครั้ง (ใส่รหัสเครื่อง) — ดูคำสั่งในแชท/README ของ maw mobile</div></div>`;
   return `<div class="trav ${t.on ? "on" : ""}"><div style="flex:1;min-width:0"><b>🧳 โหมดเดินทาง</b>
       <div class="k">${t.on ? `เปิดอยู่ · พับจอได้ · ปิดเองใน <b class="trav-cd" data-until="${t.until || 0}">${cdText(t.until)}</b>` : t.lastReason ? `ปิดเองแล้ว: ${esc(t.lastReason)}` : "ปิดอยู่ · พับจอแล้ว Mac จะหลับ"}</div></div>
+    ${t.on ? `<button data-travel-add="1">+1 ชม.</button><button data-travel-add="3">+3 ชม.</button>` : ""}
     <button data-travel="${t.on ? "off" : "on"}">${t.on ? "ปิด" : "เปิด 8 ชม."}</button></div>`;
 }
+// extend while on: adds time without turning sleep back on (safe with the lid shut), max 24 h ahead
+document.addEventListener("click", async e => {
+  const b = e.target.closest && e.target.closest("[data-travel-add]"); if (!b) return;
+  e.stopPropagation(); b.disabled = true;
+  try { const r = await api("/system/travel", { method: "POST", body: JSON.stringify({ add: +b.dataset.travelAdd }) }); state.travel = r; toast(`ต่อเวลาแล้ว · เหลือ ${cdText(r.until)}`); refreshRc(); }
+  catch (err) { toast(err.message); b.disabled = false; }
+}, true);
 document.addEventListener("click", async e => {
   const b = e.target.closest && e.target.closest("[data-travel]"); if (!b) return;
   e.stopPropagation();
-  if (b.dataset.travel === "on" && !b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้งเพื่อเปิด"; return; }
+  if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = b.dataset.travel === "on" ? "แตะอีกครั้งเพื่อเปิด" : "แตะอีกครั้ง (ถ้าพับจออยู่ Mac จะหลับทันที)"; return; }
   try { const r = await api("/system/travel", { method: "POST", body: JSON.stringify({ on: b.dataset.travel === "on", hours: 8 }) }); state.travel = r; toast(r.on ? "เปิดโหมดเดินทางแล้ว — พับจอได้" : "ปิดโหมดเดินทางแล้ว"); refreshRc(); }
   catch (err) { toast(err.message); }
 }, true);
@@ -1835,6 +1843,9 @@ start();
 <script src="/m-ext/resume.js" defer></script>
 <script src="/m-ext/context.js" defer></script>
 <script src="/m-ext/superset.js" defer></script>
+<script src="/m-ext/retro.js" defer></script>
+<script src="/m-ext/ports.js" defer></script>
+<script src="/m-ext/prs.js" defer></script>
 
 </body>
 </html>

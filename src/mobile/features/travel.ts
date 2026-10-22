@@ -69,13 +69,24 @@ export function createTravel(run: Run = realRun, file: string | null = STATE_FIL
       if (on) watch(); else if (timer) { clearInterval(timer); timer = null; }
       return this.status();
     },
+    /** Add time while on — never switches sleep back on in between (with the lid shut the Mac would sleep at once). */
+    async extend(hours: number) {
+      if (!(await isOn())) throw new Error("โหมดเดินทางปิดอยู่ — เปิดก่อน");
+      const add = Math.min(Math.max(hours, 0.5), 12) * 3600_000, now = Date.now();
+      until = Math.min(Math.max(until ?? now, now) + add, now + 24 * 3600_000);
+      lastReason = null; save(); watch();
+      return this.status();
+    },
   };
 }
 
 export function mount(app: any, travel = createTravel()): void {
   app.get("/system/travel", async () => ({ ok: true, ...(await travel.status()) }));
   app.post("/system/travel", async ({ body, set }: any) => {
-    try { return { ok: true, ...(await travel.turn(!!body?.on, Number(body?.hours) || DEFAULT_HOURS)) }; }
+    try {
+      if (body?.add) return { ok: true, ...(await travel.extend(Number(body.add))) };
+      return { ok: true, ...(await travel.turn(!!body?.on, Number(body?.hours) || DEFAULT_HOURS)) };
+    }
     catch (e: any) { set.status = 409; return { ok: false, error: e.message }; }
   });
 }

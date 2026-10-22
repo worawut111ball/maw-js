@@ -43,3 +43,16 @@ test("auto-off time is kept across a restart", async () => {
   const b = await createTravel(run, f).status();   // "maw restarted"
   expect(b.until).toBe(a.until);
 });
+
+test("extend adds time without ever switching sleep back on", async () => {
+  let off = false; const calls: string[] = [];
+  const run = async (cmd: string, args: string[]) => { calls.push(args.join(" ")); return args[0] === "-g" ? { ok: true, out: off ? "SleepDisabled 1" : "" } : (args[0] === "-n" && args[1] !== "-l" && (off = args.at(-1) === "1"), { ok: true, out: "" }); };
+  const t = createTravel(run, null);
+  await expect(t.extend(1)).rejects.toThrow(/ปิดอยู่/);
+  const a = await t.turn(true, 1);
+  calls.length = 0;
+  const b = await t.extend(3);
+  expect(b.until! - a.until!).toBeGreaterThan(3 * 3600_000 - 2_000);
+  expect(calls.some(c => c.endsWith("disablesleep 0"))).toBe(false);
+  expect((await t.extend(12)).until! - Date.now()).toBeLessThanOrEqual(24 * 3600_000);
+});
