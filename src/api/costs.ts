@@ -1,5 +1,5 @@
 import { Elysia} from "elysia";
-import { readdirSync, readFileSync, statSync } from "fs";
+import { closeSync, openSync, readdirSync, readSync, statSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 
@@ -42,40 +42,60 @@ interface SessionUsage {
   lastTimestamp: string;
 }
 
-function scanSession(filePath: string): SessionUsage | null {
+// Transcripts grow to hundreds of MB, and this used to re-read every one of them in full, synchronously, on each
+// request — freezing the whole server (WebSockets, the phone app) for ~8 s. Now each file is read once, in chunks
+// that yield to the event loop, and afterwards only the bytes appended since the last call.
+interface ScanState { offset: number; rest: Buffer; u: SessionUsage; busy: Promise<void> | null }
+const scanCache = new Map<string, ScanState>();
+const SCAN_CHUNK = 8 << 20;
+const emptyUsage = (): SessionUsage => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreateTokens: 0, turns: 0, model: "", lastTimestamp: "" });
+
+function addLine(u: SessionUsage, line: string): void {
+  if (!line.includes('"usage"') || !line.includes('"assistant"')) return;   // cheap filter before JSON.parse
+  let obj: any;
+  try { obj = JSON.parse(line); } catch { return; }
+  if (obj.type !== "assistant" || !obj.message?.usage) return;
+  const m = obj.message.usage;
+  u.inputTokens += m.input_tokens || 0;
+  u.outputTokens += m.output_tokens || 0;
+  u.cacheReadTokens += m.cache_read_input_tokens || 0;
+  u.cacheCreateTokens += m.cache_creation_input_tokens || 0;
+  u.turns++;
+  if (obj.message.model && !u.model) u.model = obj.message.model;
+  if (obj.timestamp) u.lastTimestamp = obj.timestamp;
+}
+
+async function readNew(filePath: string, st: ScanState, size: number): Promise<void> {
+  const fd = openSync(filePath, "r");
   try {
-    const content = readFileSync(filePath, "utf-8");
-    const lines = content.split("\n").filter(Boolean);
-
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let cacheReadTokens = 0;
-    let cacheCreateTokens = 0;
-    let turns = 0;
-    let model = "";
-    let lastTimestamp = "";
-
-    for (const line of lines) {
-      let obj: any;
-      try { obj = JSON.parse(line); } catch { continue; }
-      if (obj.type !== "assistant" || !obj.message?.usage) continue;
-
-      const u = obj.message.usage;
-      inputTokens += u.input_tokens || 0;
-      outputTokens += u.output_tokens || 0;
-      cacheReadTokens += u.cache_read_input_tokens || 0;
-      cacheCreateTokens += u.cache_creation_input_tokens || 0;
-      turns++;
-
-      if (obj.message.model && !model) model = obj.message.model;
-      if (obj.timestamp) lastTimestamp = obj.timestamp;
+    const buf = Buffer.alloc(Math.min(SCAN_CHUNK, size - st.offset));
+    while (st.offset < size) {
+      const n = readSync(fd, buf, 0, Math.min(buf.length, size - st.offset), st.offset);
+      if (n <= 0) break;
+      st.offset += n;
+      const data = st.rest.length ? Buffer.concat([st.rest, buf.subarray(0, n)]) : buf.subarray(0, n);
+      const cut = data.lastIndexOf(10);                       // whole lines only — never split a UTF-8 char
+      if (cut < 0) { st.rest = Buffer.from(data); continue; }
+      for (const line of data.subarray(0, cut).toString("utf-8").split("\n")) if (line) addLine(st.u, line);
+      st.rest = Buffer.from(data.subarray(cut + 1));
+      await new Promise(r => setImmediate(r));               // let WebSockets and other requests run
     }
+  } finally { closeSync(fd); }
+}
 
-    if (turns === 0) return null;
-    return { inputTokens, outputTokens, cacheReadTokens, cacheCreateTokens, turns, model, lastTimestamp };
-  } catch {
-    return null;
+async function scanSession(filePath: string): Promise<SessionUsage | null> {
+  let size: number;
+  try { size = statSync(filePath).size; } catch { return null; }
+  let st = scanCache.get(filePath);
+  if (st?.busy) await st.busy;
+  st = scanCache.get(filePath);
+  if (!st || size < st.offset) { st = { offset: 0, rest: Buffer.alloc(0), u: emptyUsage(), busy: null }; scanCache.set(filePath, st); }
+  if (size > st.offset) {
+    const s = st;
+    s.busy = readNew(filePath, s, size).catch(() => {}).finally(() => { s.busy = null; });
+    await s.busy;
   }
+  return st.u.turns ? { ...st.u } : null;
 }
 
 function estimateCost(usage: SessionUsage): number {
@@ -112,7 +132,7 @@ function makeBuckets(n: number): string[] {
   });
 }
 
-costsApi.get("/costs/daily", ({ query, set }) => {
+costsApi.get("/costs/daily", async ({ query, set }) => {
   const days = Number(query.days ?? 7);
   if (isNaN(days) || days < 1 || days > 365) {
     set.status = 400;
@@ -156,7 +176,7 @@ costsApi.get("/costs/daily", ({ query, set }) => {
     const entry = agentDailyMap.get(agentName)!;
 
     for (const file of files) {
-      const usage = scanSession(join(dirPath, file));
+      const usage = await scanSession(join(dirPath, file));
       if (!usage || !usage.lastTimestamp) continue;
 
       const dateStr = localDateStr(usage.lastTimestamp);
@@ -182,7 +202,7 @@ costsApi.get("/costs/daily", ({ query, set }) => {
   return { window: days, buckets, agents, total: { cost: totalCost, agents: agents.length } };
 });
 
-costsApi.get("/costs", ({ set }) => {
+costsApi.get("/costs", async ({ set }) => {
   const projectsDir = join(homedir(), ".claude", "projects");
   let dirs: string[];
   try {
@@ -234,7 +254,7 @@ costsApi.get("/costs", ({ set }) => {
     }
 
     for (const file of files) {
-      const usage = scanSession(join(dirPath, file));
+      const usage = await scanSession(join(dirPath, file));
       if (!usage) continue;
 
       const a = agents[agentName];
