@@ -199,7 +199,8 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
       return new Response("WebSocket upgrade failed", { status: 400 });
     }
     // Phone app surface (separate prefix so tailscale serve can expose only /mobile)
-    if (url.pathname.startsWith("/mobile")) {
+    // exact segment — "/mobile-fixture.html" etc. are static pages, not the API
+    if (url.pathname === "/mobile" || url.pathname.startsWith("/mobile/")) {
       return gzipped(req, mobileApi.handle(req));
     }
     // Elysia handles all /api/* routes

@@ -6,7 +6,10 @@ test.describe("PWA metadata", () => {
     const res = await request.get("/manifest.json");
     expect(res.ok()).toBeTruthy();
     const manifest = await res.json();
-    expect(manifest.name).toBe("ARRA Office — maw-ui");
+    // one manifest for the whole origin: the phone app's (ui/mobile/pwa) — deploy.sh
+    // copies it over ui/web/public/manifest.json, and installed phones depend on its id
+    expect(manifest.name).toBe("maw — agents");
+    expect(manifest.id).toBe("/m.html");
     expect(manifest.short_name).toBe("maw");
     expect(manifest.display).toBe("standalone");
 
