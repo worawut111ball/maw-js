@@ -206,6 +206,103 @@ describe("Codex rollouts", () => {
     const done = cx(at(2), "event_msg", { type: "task_complete", turn_id: "t1", last_agent_message: "เสร็จ" });
     expect(parseCodexActivity([call, custom, done], T0 + 3 * 60_000).running).toEqual([]);
   });
+
+  // ── shapes as Codex writes them (field names real, values synthetic) ──
+  const fc = (min: number, call_id: string, name: string, args: unknown) => cx(at(min), "response_item", { type: "function_call", name, call_id, arguments: J(args) });
+  const fco = (min: number, call_id: string, output: string) => cx(at(min), "response_item", { type: "function_call_output", call_id, output });
+  const ctc = (min: number, call_id: string, input: string) => cx(at(min), "response_item", { type: "custom_tool_call", name: "exec", call_id, input });
+  const ctco = (min: number, call_id: string, text: string) => cx(at(min), "response_item", { type: "custom_tool_call_output", call_id, output: [{ type: "input_text", text }] });
+  const cmdDone = (min: number, pid: string, exit = 0) => cx(at(min), "event_msg", { type: "item_completed", thread_id: "th-main", turn_id: "t1",
+    item: { type: "CommandExecution", id: "item_1", process_id: pid, command: ["/bin/zsh", "-lc", "x"], source: "unified_exec_startup", status: exit ? "failed" : "completed", exit_code: exit },
+    started_at_ms: T0, completed_at_ms: T0 + min * 60_000 });
+  const subAgent = (min: number, kind: string, path: string, thread: string) => cx(at(min), "event_msg", { type: "item_completed", thread_id: "th-main", turn_id: "t1",
+    item: { type: "SubAgentActivity", id: "item_s", kind, agent_thread_id: thread, agent_path: path }, started_at_ms: T0 + min * 60_000, completed_at_ms: T0 + min * 60_000 });
+  const taskDone = (min: number) => cx(at(min), "event_msg", { type: "task_complete", turn_id: "t1", last_agent_message: "x" });
+
+  test("exec_command that yields is a running session until item_completed for its process id — across task_complete", () => {
+    const lines = [
+      fc(0, "call_dev", "exec_command", { cmd: "bun run dev --port 3456 " + "x".repeat(120), yield_time_ms: 1000 }),
+      fco(0, "call_dev", "Chunk ID: ab12cd\nWall time: 1.0012 seconds\nProcess running with session ID 51234\nOriginal token count: 9\nOutput:\nready\n"),
+      taskDone(1),
+    ];
+    const a = parseCodexActivity(lines, T0 + 2 * 60_000);
+    expect(a.running).toHaveLength(1);
+    expect(a.running[0]).toMatchObject({ kind: "shell", id: "51234", since: at(0) });
+    expect(a.running[0].label.startsWith("bun run dev --port 3456")).toBe(true);
+    expect(a.running[0].label.length).toBeLessThanOrEqual(80);
+    // a poll that still sees it running keeps the original label; the real end closes it
+    const poll = [fc(2, "call_p", "write_stdin", { session_id: 51234, chars: "", yield_time_ms: 5000 }),
+      fco(2, "call_p", "Chunk ID: ef\nWall time: 5.0 seconds\nProcess running with session ID 51234\nOutput:\n")];
+    expect(parseCodexActivity([...lines, ...poll], T0 + 3 * 60_000).running.map(r => r.label)).toEqual([a.running[0].label]);
+    expect(parseCodexActivity([...lines, ...poll, cmdDone(4, "51234")], T0 + 5 * 60_000).running).toEqual([]);
+  });
+
+  test("write_stdin that sees the process exit closes the session; a finished process is never reopened", () => {
+    const start = [fc(0, "call_s", "exec_command", { cmd: "npm test" }), fco(0, "call_s", "Process running with session ID 777\nOutput:\n")];
+    const exit = [fc(1, "call_w", "write_stdin", { session_id: 777, chars: "" }), fco(1, "call_w", "Chunk ID: 1\nWall time: 3 seconds\nProcess exited with code 0\nOutput:\nok\n")];
+    expect(parseCodexActivity([...start, ...exit], T0 + 2 * 60_000).running).toEqual([]);
+    // item_completed written before the result that names the session (code-mode race)
+    const race = [ctc(0, "call_c", 'const r = await tools.exec_command({cmd:"sleep 2", yield_time_ms: 500}); text(JSON.stringify(r));'),
+      cmdDone(0, "888"), ctco(0, "call_c", '{"chunk_id":"a","wall_time_seconds":0.5,"session_id":888,"original_token_count":0,"output":""}')];
+    expect(parseCodexActivity(race, T0 + 60_000).running).toEqual([]);
+  });
+
+  test("code-mode exec: session_id in the script result opens a session named after its cmd; polling-only scripts don't rename it", () => {
+    const lines = [
+      ctc(0, "call_a", 'const r = await tools.exec_command({cmd:"python3 -m http.server 8000", workdir:"/x", yield_time_ms: 1000});\ntext(JSON.stringify(r));'),
+      ctco(0, "call_a", '{"chunk_id":"a1","wall_time_seconds":1.0,"session_id":4242,"original_token_count":3,"output":"Serving"}'),
+      ctc(1, "call_b", "const r = await tools.write_stdin({session_id: 4242, chars: \"\"});\ntext(JSON.stringify(r));"),
+      ctco(1, "call_b", '{"chunk_id":"b1","wall_time_seconds":5.0,"session_id":4242,"original_token_count":0,"output":""}'),
+    ];
+    const a = parseCodexActivity(lines, T0 + 2 * 60_000);
+    expect(a.running).toEqual([{ kind: "shell", label: "python3 -m http.server 8000", since: at(0), id: "4242" }]);
+    // only a poll seen (start was before the tail): generic label, not the script text
+    expect(parseCodexActivity(lines.slice(2), T0 + 2 * 60_000).running.map(r => r.label)).toEqual(["session 4242"]);
+    // exit_code result = finished, nothing opened
+    const fin = [ctc(0, "call_f", 'text(JSON.stringify(await tools.exec_command({cmd:"ls"})));'), ctco(0, "call_f", '{"chunk_id":"c","wall_time_seconds":0.1,"exit_code":0,"original_token_count":1,"output":"a"}')];
+    expect(parseCodexActivity(fin, T0 + 60_000).running).toEqual([]);
+  });
+
+  test("code-mode cell still running until a wait on it stops saying so", () => {
+    const lines = [ctc(0, "call_x", 'await tools.exec_command({cmd:"bun test", yield_time_ms: 60000});'), ctco(0, "call_x", "Script running with cell ID 7f3\n")];
+    expect(parseCodexActivity(lines, T0 + 60_000).running).toEqual([{ kind: "shell", label: "bun test", since: at(0), id: "7f3" }]);
+    const still = [fc(1, "call_w1", "wait", { cell_id: "7f3", yield_time_ms: 30000, max_tokens: 1000 }), fco(1, "call_w1", "Script running with cell ID 7f3\n")];
+    expect(parseCodexActivity([...lines, ...still], T0 + 2 * 60_000).running.map(r => r.id)).toEqual(["7f3"]);
+    const done = [fc(2, "call_w2", "wait", { cell_id: "7f3", yield_time_ms: 30000, max_tokens: 1000 }), fco(2, "call_w2", "Script completed\nWall time 70.1 seconds\n")];
+    expect(parseCodexActivity([...lines, ...still, ...done], T0 + 3 * 60_000).running).toEqual([]);
+  });
+
+  test("sub-agents: spawn_agent + SubAgentActivity started → running (child thread id), completed ends, followup_task restarts, interrupt stops", () => {
+    const spawn = [
+      fc(0, "call_sp", "spawn_agent", { task_name: "oee_map", message: "อ่านโค้ด…" }),
+      fco(0, "call_sp", J({ task_name: "/root/oee_map" })),
+      subAgent(0, "started", "/root/oee_map", "019a0000-aaaa-7000-8000-000000000001"),
+      fc(0, "call_sp2", "spawn_agent", { task_name: "care_check", message: "ตรวจ…" }),
+      fco(0, "call_sp2", J({ task_name: "/root/care_check" })),
+      taskDone(1),                                                   // parent turn ends — agents keep working
+    ];
+    const a = parseCodexActivity(spawn, T0 + 2 * 60_000);
+    expect(a.running).toEqual([
+      { kind: "agent", label: "oee_map", since: at(0), id: "019a0000-aaaa-7000-8000-000000000001" },
+      { kind: "agent", label: "care_check", since: at(0), id: "/root/care_check" },
+    ]);
+    const end = [subAgent(3, "interacted", "/root/oee_map", "019a0000-aaaa-7000-8000-000000000001"), subAgent(4, "completed", "/root/oee_map", "019a0000-aaaa-7000-8000-000000000001"),
+      fc(4, "call_i", "interrupt_agent", { target: "care_check" }), fco(4, "call_i", J({ previous_status: "running" }))];
+    expect(parseCodexActivity([...spawn, ...end], T0 + 5 * 60_000).running).toEqual([]);
+    const again = [fc(6, "call_fu", "followup_task", { target: "oee_map", message: "ต่อ" }), fco(6, "call_fu", "")];
+    expect(parseCodexActivity([...spawn, ...end, ...again], T0 + 7 * 60_000).running)
+      .toEqual([{ kind: "agent", label: "oee_map", since: at(6), id: "019a0000-aaaa-7000-8000-000000000001" }]);
+  });
+
+  test("a failed spawn shows nothing; incremental feeding matches one pass", () => {
+    expect(parseCodexActivity([fc(0, "c", "spawn_agent", { task_name: "x", message: "y" }), fco(0, "c", "collab spawn failed: agent thread limit reached")], T0 + 60_000).running).toEqual([]);
+    const all = [fc(0, "call_dev", "exec_command", { cmd: "bun run dev" }), fco(0, "call_dev", "Process running with session ID 1\n"),
+      fc(0, "call_sp", "spawn_agent", { task_name: "a", message: "m" }), subAgent(0, "started", "/root/a", "th-a"), fco(0, "call_sp", J({ task_name: "/root/a" })), taskDone(1)];
+    const inc = new CodexActivity();
+    for (const l of all) inc.feed([l]);
+    expect(inc.snapshot(T0 + 2 * 60_000)).toEqual(parseCodexActivity(all, T0 + 2 * 60_000));
+    expect(inc.snapshot(T0 + 2 * 60_000).running.map(r => r.kind)).toEqual(["agent", "shell"]);
+  });
 });
 
 describe("file reading", () => {

@@ -2,7 +2,7 @@
 //   GET /mobile/rooms/:ws/:room/activity?sid=&agent=  →  { ok, todos, running }
 // Claude: TodoWrite (latest list) or TaskCreate/TaskUpdate (task list) · background Bash / Monitor / Agent
 //         are "running" from launch until a <task-notification> with a <status> (or TaskStop) closes them.
-// Codex:  update_plan steps · exec/exec_command calls with no output yet.
+// Codex:  update_plan steps · exec calls with no output yet · exec sessions still running · sub-agents (see CodexActivity).
 // Transcripts reach 100 MB+: the first look scans only the tail (pre-filtered before JSON.parse),
 // after that only the bytes appended since — state is kept per (file, size).
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "fs";
@@ -202,47 +202,139 @@ export function parseClaudeActivity(lines: string[], now = Date.now()): Activity
 
 // ── Codex rollout lines ───────────────────────────────────────────
 
-function codexCmd(p: any): string {
+function codexCmd(p: any, n = 90): string {
   if (p.type === "function_call") {
-    try { const a = JSON.parse(p.arguments ?? "{}"); const c = a.cmd ?? a.command; return clip(Array.isArray(c) ? c.join(" ") : c); } catch { return ""; }
+    try { const a = JSON.parse(p.arguments ?? "{}"); const c = a.cmd ?? a.command; return clip(Array.isArray(c) ? c.join(" ") : c, n); } catch { return ""; }
   }
   const src = String(p.input ?? "");
   const m = src.match(/cmd\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  return clip(m ? m[1].replace(/\\(.)/g, "$1") : src);
+  return clip(m ? m[1].replace(/\\(.)/g, "$1") : src, n);
 }
 
+const msIso = (ms: unknown) => (typeof ms === "number" && ms > 0 ? new Date(ms).toISOString() : null);
+const outText = (o: unknown): string =>
+  typeof o === "string" ? o : Array.isArray(o) ? o.map((b: any) => (typeof b?.text === "string" ? b.text : "")).join("\n") : "";
+const argsOf = (p: any): any => { try { return JSON.parse(p.arguments ?? "{}") ?? {}; } catch { return {}; } };
+const agentName = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop() ?? "";
+
+/** Codex rollout → activity, as a reducer (same shape as ClaudeActivity).
+ *  in flight  : exec / exec_command / shell call with no output yet (≥ 5 s) — a turn ending clears these.
+ *  sessions   : an exec that yielded and keeps running — "Process running with session ID N" (function call) or
+ *               `"session_id":N` in a code-mode `exec` result; closed by event_msg item_completed CommandExecution
+ *               with process_id N (Codex writes one when the process really ends), or a write_stdin that saw it exit.
+ *  cells      : code-mode script still running ("Script running with cell ID X") until a `wait` on it stops saying so.
+ *  sub-agents : item_completed SubAgentActivity kind started → running, completed / interrupted → done;
+ *               spawn_agent result { task_name } is the fallback start, followup_task restarts, interrupt_agent stops.
+ *  Sessions and sub-agents outlive the turn (task_complete) — only their own end closes them (or MAX_AGE). */
 export class CodexActivity {
   private todos: Todo[] = [];
   private todosAt: string | null = null;
-  private pending = new Map<string, Running>();
+  private pending = new Map<string, Running>();                       // call_id → exec in flight
+  private calls = new Map<string, { name: string; label: string; since: string | null; args: any }>(); // call_id → call, until its output
+  private sessions = new Map<string, Running>();                      // exec session / process id → still running
+  private ended = new Set<string>();                                  // process ids already finished (a result can arrive after the end)
+  private cells = new Map<string, Running>();                         // code-mode cell id → still running
+  private agents = new Map<string, Running>();                        // agent path (/root/x) → sub-agent working
+  private child = new Map<string, string>();                          // agent path → its own thread id (= child rollout id)
+
+  private relevant(line: string): boolean {
+    if (/"(function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_complete|turn_aborted)"/.test(line)) return true;
+    return line.includes('"item_completed"') && /"type":"(CommandExecution|SubAgentActivity)"/.test(line);
+  }
 
   feed(lines: string[]): this {
     for (const line of lines) {
-      if (!line || line[0] !== "{" || !/"(function_call|custom_tool_call|function_call_output|custom_tool_call_output|task_complete|turn_aborted)"/.test(line)) continue;
+      if (!line || line[0] !== "{" || !this.relevant(line)) continue;
       let d: any;
       try { d = JSON.parse(line); } catch { continue; }
-      const p = d.payload ?? {};
-      const ts: string | null = typeof d.timestamp === "string" ? d.timestamp : null;
-      if (p.type === "function_call" && p.name === "update_plan") {
-        try {
-          const a = JSON.parse(p.arguments ?? "{}");
-          this.todos = (Array.isArray(a.plan) ? a.plan : []).map((s: any) => ({ content: String(s?.step ?? ""), status: status(s?.status) ?? "pending" })).filter((t: Todo) => t.content);
-          this.todosAt = ts;
-        } catch { /* half-written */ }
-      } else if ((p.type === "function_call" || p.type === "custom_tool_call") && /^(exec|exec_command|shell|local_shell)$/.test(String(p.name)) && p.call_id) {
-        this.pending.set(String(p.call_id), { kind: "shell", label: codexCmd(p) || String(p.name), since: ts, id: String(p.call_id) });
-      } else if ((p.type === "function_call_output" || p.type === "custom_tool_call_output") && p.call_id) {
-        this.pending.delete(String(p.call_id));
-      } else if (d.type === "event_msg" && (p.type === "task_complete" || p.type === "turn_aborted")) {
-        this.pending.clear();
-      }
+      this.line(d);
     }
     return this;
   }
 
+  private endSession(id: string) {
+    this.sessions.delete(id);
+    this.ended.add(id);
+    if (this.ended.size > 4000) this.ended.delete(this.ended.values().next().value!);
+  }
+  private openSession(id: string, label: string, since: string | null) {
+    if (this.ended.has(id) || this.sessions.has(id)) return;          // keep the first label / start time
+    this.sessions.set(id, { kind: "shell", label: label || `session ${id}`, since, id });
+  }
+  private startAgent(path: string, since: string | null, child?: string) {
+    const name = agentName(path);
+    if (!name) return;
+    if (child) this.child.set(path, child);
+    const cur = this.agents.get(path);
+    if (cur) { if (child) cur.id = child; return; }
+    this.agents.set(path, { kind: "agent", label: name, since, id: this.child.get(path) ?? path });
+  }
+
+  private line(d: any) {
+    const p = d.payload ?? {};
+    const ts: string | null = typeof d.timestamp === "string" ? d.timestamp : null;
+    if (d.type === "event_msg") {
+      if (p.type === "task_complete" || p.type === "turn_aborted") { this.pending.clear(); this.cells.clear(); return; }
+      if (p.type !== "item_completed") return;
+      const it = p.item ?? {};
+      if (it.type === "CommandExecution" && it.process_id != null) {
+        this.endSession(String(it.process_id));
+      } else if (it.type === "SubAgentActivity" && it.agent_path) {
+        const path = String(it.agent_path);
+        if (it.kind === "started") this.startAgent(path, msIso(p.started_at_ms) ?? ts, it.agent_thread_id ? String(it.agent_thread_id) : undefined);
+        else if (it.kind === "completed" || it.kind === "interrupted") this.agents.delete(path);
+      }
+      return;
+    }
+    if (p.type === "function_call" && p.name === "update_plan") {
+      const a = argsOf(p);
+      if (Array.isArray(a.plan)) {
+        this.todos = a.plan.map((s: any) => ({ content: String(s?.step ?? ""), status: status(s?.status) ?? "pending" })).filter((t: Todo) => t.content);
+        this.todosAt = ts;
+      }
+      return;
+    }
+    if ((p.type === "function_call" || p.type === "custom_tool_call") && p.call_id) {
+      const id = String(p.call_id), name = String(p.name);
+      const args = p.type === "function_call" ? argsOf(p) : {};
+      const isExec = /^(exec|exec_command|shell|local_shell)$/.test(name);
+      const label = isExec ? codexCmd(p, 80) : "";
+      // a code-mode script that only polls (write_stdin) has no command of its own — don't name a session after its code
+      const cmd = p.type === "custom_tool_call" && !/\bcmd\s*:/.test(String(p.input ?? "")) ? "" : label;
+      this.calls.set(id, { name, label: cmd, since: ts, args });
+      if (this.calls.size > 2000) this.calls.delete(this.calls.keys().next().value!);
+      if (isExec) this.pending.set(id, { kind: "shell", label: label || name, since: ts, id });
+      if (name === "interrupt_agent") { const t = String(args.target ?? ""); for (const k of this.agents.keys()) if (k === t || agentName(k) === agentName(t)) this.agents.delete(k); }
+      if (name === "followup_task") { const t = String(args.target ?? ""); if (t) this.startAgent(t.startsWith("/") ? t : `/root/${t}`, ts); }
+      return;
+    }
+    if ((p.type === "function_call_output" || p.type === "custom_tool_call_output") && p.call_id) {
+      const id = String(p.call_id);
+      this.pending.delete(id);
+      const c = this.calls.get(id);
+      this.calls.delete(id);
+      const text = outText(p.output);
+      const since = c?.since ?? ts;
+      // exec that yielded: still running under a session id
+      for (const m of text.matchAll(/Process running with session ID (\d+)/g))
+        this.openSession(m[1], c?.name === "write_stdin" ? "" : c?.label ?? "", since);
+      if (c?.name === "exec") for (const m of text.matchAll(/"session_id"\s*:\s*(\d+)/g)) this.openSession(m[1], c.label, since);
+      if (c?.name === "write_stdin" && /Process exited with code/.test(text) && c.args?.session_id != null) this.endSession(String(c.args.session_id));
+      // code-mode script still running in the background
+      const cells = [...text.matchAll(/Script running with cell ID ([\w-]+)/g)].map(m => m[1]);
+      for (const cell of cells) if (!this.cells.has(cell)) this.cells.set(cell, { kind: "shell", label: c?.name === "exec" ? c.label || "exec" : `cell ${cell}`, since, id: cell });
+      if (c?.name === "wait" && c.args?.cell_id != null && !cells.includes(String(c.args.cell_id))) this.cells.delete(String(c.args.cell_id));
+      // sub-agent spawned: { task_name: "/root/x" } (older Codex has no SubAgentActivity)
+      if (c?.name === "spawn_agent") {
+        try { const r = JSON.parse(text); if (typeof r?.task_name === "string") this.startAgent(r.task_name, since); } catch { /* "collab spawn failed: …" */ }
+      }
+    }
+  }
+
   snapshot(now = Date.now()): Activity {
     // a command that has run < 5 s is just "working", not background work worth a chip
-    const running = [...this.pending.values()].filter(r => { const t = tms(r.since); return !Number.isFinite(t) || now - t >= 5_000; }).map(r => ({ ...r }));
+    const inflight = [...this.pending.values()].filter(r => { const t = tms(r.since); return !Number.isFinite(t) || now - t >= 5_000; });
+    const running = [...this.agents.values(), ...this.sessions.values(), ...this.cells.values(), ...inflight].map(r => ({ ...r }));
     return finalize(this.todos.map(t => ({ ...t })), this.todosAt, running, now);
   }
 }

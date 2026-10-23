@@ -1066,6 +1066,14 @@ export function codexLimits(root = join(homedir(), ".codex", "sessions")) {
 const sh = async (cmd: string[]) => { const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" }); const out = await new Response(p.stdout).text(); await p.exited; return out; };
 let macCache: { at: number; v: any } | null = null;
 const THERMAL_BIN = join(homedir(), ".maw", "bin", "thermal");
+const TEMPS_BIN = join(homedir(), ".maw", "bin", "temps");   // scripts/temps.swift — chip / battery / SSD °C without sudo
+/** temps JSON → { cpu, cpuMax, gpu, battery, ssd } in °C (1 decimal), or null */
+export function parseTemps(out: string): { cpu: number | null; cpuMax: number | null; gpu: number | null; battery: number | null; ssd: number | null } | null {
+  let j: any; try { j = JSON.parse(out); } catch { return null; }
+  const r = (x: any) => (typeof x === "number" && x > 0 && x < 130 ? Math.round(x * 10) / 10 : null);
+  const v = { cpu: r(j?.cpu?.avg), cpuMax: r(j?.cpu?.max), gpu: r(j?.gpu?.avg), battery: r(j?.battery), ssd: r(j?.ssd) };
+  return Object.values(v).some(x => x != null) ? v : null;
+}
 /** CPU % (of one core, like Activity Monitor) and RAM of maw itself and of all Claude / Codex agents. */
 export function processUsage(psOut: string, selfPid: number) {
   const out = { maw: { cpu: 0, ramMB: 0 }, claude: { cpu: 0, ramMB: 0, n: 0 }, codex: { cpu: 0, ramMB: 0, n: 0 } };
@@ -1088,9 +1096,10 @@ export async function macHealth() {
     sh(["/usr/sbin/sysctl", "-n", "hw.memsize"]), sh(["/bin/df", "-k", "/System/Volumes/Data"]),
   ].map(p => p.catch(() => "")));
   // heat: macOS thermal state via scripts/thermal.swift (0 ปกติ · 1 อุ่น · 2 ร้อน · 3 ร้อนจัด); and who uses the machine
-  const [therm, procs] = await Promise.all([
+  const [therm, procs, temps] = await Promise.all([
     existsSync(THERMAL_BIN) ? sh([THERMAL_BIN]).catch(() => "") : Promise.resolve(""),
     sh(["/bin/ps", "-axo", "pid,pcpu,rss,comm"]).catch(() => ""),
+    existsSync(TEMPS_BIN) ? sh([TEMPS_BIN]).catch(() => "") : Promise.resolve(""),
   ]);
   const b = /(\d+)%;\s*([\w ]+?);\s*(?:(\d+:\d+) remaining)?/.exec(batt);
   const cpuL = [...top.matchAll(/CPU usage:.*?([\d.]+)% idle/g)].pop();
@@ -1102,6 +1111,7 @@ export async function macHealth() {
     cpu: cpuL ? Math.round(100 - Number(cpuL[1])) : null,
     ram: memTotal && !isNaN(freePct) ? { pct: 100 - freePct, totalGB: +(memTotal / 2 ** 30).toFixed(0), usedGB: +((memTotal / 2 ** 30) * (100 - freePct) / 100).toFixed(1) } : null,
     heat: /^[0-3]$/.test(therm.trim()) ? +therm.trim() : null,
+    temps: parseTemps(temps),
     usage: processUsage(procs, process.pid),
     disk: dfl.length > 3 ? { totalGB: Math.round(+dfl[1] / 2 ** 20), freeGB: Math.round(+dfl[3] / 2 ** 20), pct: Math.round(100 - (+dfl[3] / +dfl[1]) * 100) } : null,
   };

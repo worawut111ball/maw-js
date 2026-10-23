@@ -204,6 +204,7 @@
   .ctxrow .bar { flex: 0 0 70px; margin: 0; } .ctxrow b { color: var(--text); }
   /* ── RunCat-style header widget ── */
   .rc { display: flex; align-items: center; gap: 5px; height: 36px; padding: 0 9px; border-radius: 12px; background: var(--card2); flex: none; font: 600 12.5px var(--font); font-variant-numeric: tabular-nums; color: var(--text); }
+  .heat .tc { display: block; color: var(--dim); font-size: 10.5px; font-weight: 500; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rc .cat-box { display: block; width: 30px; height: 19px; contain: strict; } .rc .cat { width: 30px; height: 19px; display: block; color: #e6e8f2; } .rc.hot .cat { color: #fbbf24; } .rc.burn .cat { color: #f87171; }
   .rc .bt { color: var(--dim); font-weight: 500; } .rc .bt.low { color: #f87171; }
   #rcpanel { position: fixed; left: 10px; right: 10px; top: calc(env(safe-area-inset-top, 0px) + 66px); z-index: 60; box-shadow: 0 12px 40px #000c; animation: rcin .14s ease-out; }
@@ -500,13 +501,13 @@ const roomsOf = p => p.workspaces.flatMap(w => w.rooms.map(r => ({ ...r, ws: w.i
 
 // ── menu pages (PR, สรุปงาน …): tiles on home, each opens a full screen ──
 function tilesHtml() {
-  return mawExt.pages.map(pg => {
+  return mawExt.pages.filter(pg => pg.tile !== false).map(pg => {
     let sm = {}; try { sm = pg.summary?.() || {}; } catch { /* pack not ready */ }
     return `<button class="mtile ${esc(sm.tone || "")}" data-page="${esc(pg.key)}"><span class="ti">${esc(pg.icon || "•")}</span>
       <span class="tt"><b>${esc(pg.title)}</b><small>${esc(sm.text || "…")}</small></span>${sm.badge ? `<span class="tb">${esc(sm.badge)}</span>` : ""}</button>`;
   }).join("");
 }
-mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.hidden = !mawExt.pages.length; t.innerHTML = tilesHtml(); wireTiles(t); } };
+mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.hidden = !mawExt.pages.some(pg => pg.tile !== false); t.innerHTML = tilesHtml(); wireTiles(t); } };
 // packs load deferred — on a cold start home is drawn before they register their pages
 window.addEventListener("load", () => mawExt.refreshTiles());
 function wireTiles(root) { root.querySelectorAll("[data-page]").forEach(b => b.onclick = () => { history.pushState({ v: "pg" }, ""); renderPage(b.dataset.page); }); }
@@ -530,7 +531,7 @@ function renderHome() {
       <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
     <main>
       <button class="openproj" id="openproj">➕ เปิดโปรเจค · repo ในเครื่อง · โฟลเดอร์</button>
-      <div class="tiles" id="tiles" ${mawExt.pages.length ? "" : "hidden"}>${tilesHtml()}</div>
+      <div class="tiles" id="tiles" ${mawExt.pages.some(pg => pg.tile !== false) ? "" : "hidden"}>${tilesHtml()}</div>
       <div id="ext-home"></div>
       ${waiting.length ? `<div class="section">🟡 รอคำตอบ</div>${waiting.map(r => `
         <button class="card waitcard" data-go="${esc(r.project)}|${esc(r.ws)}|${esc(r.id)}">
@@ -1379,7 +1380,9 @@ function heatHtml(m) {
   const h = HEAT[m.heat] || null, u = m.usage;
   const gb = mb => mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB";
   const cell = (k, x, extra = "") => x ? `<div class="use"><span class="k">${k}${extra}</span><b>CPU ${x.cpu}%</b><span>${gb(x.ramMB)}</span></div>` : "";
-  return `<div class="heatrow">${h ? `<div class="heat" style="--hc:${h[1]}"><span class="k">ความร้อน</span><b>${h[2]} ${h[0]}</b></div>` : ""}
+  const t = m.temps, deg = x => x == null ? "" : Math.round(x) + "°";
+  const tline = t ? [t.cpu != null && `ชิป ${deg(t.cpu)}${t.cpuMax != null && t.cpuMax - t.cpu >= 5 ? ` (สูงสุด ${deg(t.cpuMax)})` : ""}`, t.battery != null && `แบต ${deg(t.battery)}`, t.ssd != null && `SSD ${deg(t.ssd)}`].filter(Boolean).join(" · ") : "";
+  return `<div class="heatrow">${h ? `<div class="heat" style="--hc:${h[1]}"><span class="k">ความร้อน</span><b>${h[2]} ${h[0]}</b>${tline ? `<small class="tc">${tline}</small>` : ""}</div>` : ""}
     ${cell("maw", u?.maw)}${cell("Claude", u?.claude, u?.claude?.n ? ` ×${u.claude.n}` : "")}${cell("Codex", u?.codex, u?.codex?.n ? ` ×${u.codex.n}` : "")}</div>`;
 }
 function travelHtml() {
@@ -1638,6 +1641,7 @@ function openMoreMenu() {
   bg.innerHTML = `<div class="sheet more-menu">
     <button id="mm-snd"><span class="i">${soundOn() ? "🔊" : "🔈"}</span><span class="t">เสียงในแอป<small>${soundOn() ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
     <button id="mm-bell"><span class="i">${pushOn ? "🔔" : "🔕"}</span><span class="t">แจ้งเตือน<small>${pushOn ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
+    ${mawExt.pages.filter(pg => pg.tile === false).map(pg => `<button data-mpage="${esc(pg.key)}"><span class="i">${esc(pg.icon || "•")}</span><span class="t">${esc(pg.title)}<small>${esc(pg.hint || "")}</small></span></button>`).join("")}
     <button id="mm-web"><span class="i">🖥</span><span class="t">หน้าเว็บเดิม<small>maw-ui แบบเต็ม</small></span></button>
     <button class="ghost" id="mm-x">ปิด</button></div>`;
   document.body.appendChild(bg);
@@ -1646,6 +1650,7 @@ function openMoreMenu() {
   bg.querySelector("#mm-x").onclick = close;
   bg.querySelector("#mm-snd").onclick = e => { toggleSound(e.currentTarget.querySelector(".i")); close(); };
   bg.querySelector("#mm-bell").onclick = e => { togglePush(e.currentTarget.querySelector(".i")); close(); };
+  bg.querySelectorAll("[data-mpage]").forEach(b => b.onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage(b.dataset.mpage); });
   bg.querySelector("#mm-web").onclick = () => { store.set("maw-desktop-ui", "1"); location.href = "/?host=" + encodeURIComponent(location.origin) + "#fleet"; };
 }
 function toggleSound(btn) {
@@ -1971,6 +1976,7 @@ start();
 <script src="/m-ext/ports.js" defer></script>
 <script src="/m-ext/prs.js" defer></script>
 <script src="/m-ext/mind.js" defer></script>
+<script src="/m-ext/autostart.js" defer></script>
 
 </body>
 </html>

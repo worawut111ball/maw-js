@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { parseTemps, safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -594,4 +594,12 @@ describe("new folder / git clone from the phone", () => {
     expect((await post("/mobile/local/mkdir", { parent: (await import("os")).homedir(), name: ".hidden" })).status).toBe(400);
     expect((await post("/mobile/local/clone", { parent: (await import("os")).homedir(), url: "file:///etc/passwd" })).status).toBe(400);
   });
+});
+
+test("temperatures from scripts/temps.swift", () => {
+  expect(parseTemps('{"battery":38.200000000000003,"cpu":{"avg":44.100000000000001,"max":45.5,"n":24},"sensors":43,"ssd":43}'))
+    .toEqual({ cpu: 44.1, cpuMax: 45.5, gpu: null, battery: 38.2, ssd: 43 });
+  expect(parseTemps("{}")).toBeNull();
+  expect(parseTemps("not json")).toBeNull();
+  expect(parseTemps('{"cpu":{"avg":-1}}')).toBeNull();
 });
