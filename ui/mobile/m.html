@@ -1591,8 +1591,13 @@ navigator.serviceWorker?.addEventListener("message", e => {
 let actx = null;
 const soundOn = () => store.get("maw-sound") !== "off";
 function unlockAudio() { // browsers allow audio only after a tap
-  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); } catch { /* no audio */ }
+  // create (and allow) the context on a tap, then let it nap — playSound resumes it for each sound
+  try { if (!actx) { actx = new (window.AudioContext || window.webkitAudioContext)(); } sleepAudioSoon(); } catch { /* no audio */ }
 }
+// a running AudioContext keeps the phone's audio output open (MediaTek audio service ~30% CPU, all the time) —
+// close it again 2 s after the last sound; playSound wakes it up
+let audioNap = 0;
+function sleepAudioSoon() { clearTimeout(audioNap); audioNap = setTimeout(() => { try { actx?.state === "running" && actx.suspend(); } catch {} }, 2000); }
 document.addEventListener("pointerdown", unlockAudio, { passive: true });
 // [Hz, start s, length s, wave]
 const TUNES = {
@@ -1602,7 +1607,8 @@ const TUNES = {
 };
 TUNES.dialog = TUNES.waiting; TUNES.test = TUNES.done;
 function playSound(kind) {
-  if (!soundOn() || !actx || actx.state !== "running") return;
+  if (!soundOn() || !actx) return;
+  if (actx.state !== "running") { actx.resume().then(() => playSound(kind)).catch(() => {}); return; }   // napping between sounds
   const t0 = actx.currentTime + .02;
   for (const [f, at, len, type] of TUNES[kind] || TUNES.done) {
     const o = actx.createOscillator(), g = actx.createGain();
@@ -1610,6 +1616,7 @@ function playSound(kind) {
     g.gain.setValueAtTime(.0001, t0 + at); g.gain.exponentialRampToValueAtTime(type ? .12 : .3, t0 + at + .015); g.gain.exponentialRampToValueAtTime(.0001, t0 + at + len);
     o.connect(g).connect(actx.destination); o.start(t0 + at); o.stop(t0 + at + len + .05);
   }
+  sleepAudioSoon();
 }
 // without push the app still hears a room turn done / start waiting (with push, the service worker hands it over)
 let lastStatus = null;
