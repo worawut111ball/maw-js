@@ -93,6 +93,7 @@ const SESSION_COLORS = [
 // ===== STATE =====
 let scene, camera, renderer, controls;
 let frustumSize = 30;
+const PORTRAIT_WIDTH = 32;
 // Phone (≤640px) frame budget: ≤20 fps, nothing while hidden; reduced motion ≤10 fps
 const IS_PHONE = window.matchMedia('(max-width: 640px)').matches;
 const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -210,13 +211,43 @@ function init() {
   scene.add(logoRing);
 
   buildOffice();
+  fitPortrait();
 
   window.addEventListener('resize', onResize);
 }
 
-// Portrait phone: fit the floor to the screen WIDTH (was: height → desks cut off at the sides)
+// Portrait phone: frame every piece of furniture / agent (the office is not centred on the
+// origin from this camera angle — a symmetric frustum cut off the right-most desks)
 function viewSize(aspect) {
-  return aspect < 1 ? frustumSize / Math.max(aspect, 0.45) * 0.8 : frustumSize;
+  return aspect < 1 ? PORTRAIT_WIDTH / aspect : frustumSize;
+}
+
+function fitPortrait() {
+  const aspect = window.innerWidth / window.innerHeight;
+  if (aspect >= 1 || !camera || !scene) return false;
+  camera.updateMatrixWorld();
+  const inv = camera.matrixWorldInverse;
+  const p = new THREE.Vector3();
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  scene.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    if (o.geometry.boundingSphere.radius > 6) return; // floor, grid, walls
+    o.getWorldPosition(p).applyMatrix4(inv);
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  });
+  if (!isFinite(minX)) return false;
+  const pad = 1.5;
+  const w = (maxX - minX) + pad * 2;
+  const h = Math.max(w / aspect, (maxY - minY) + pad * 2);
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  camera.left = cx - (h * aspect) / 2;
+  camera.right = cx + (h * aspect) / 2;
+  camera.top = cy + h / 2;
+  camera.bottom = cy - h / 2;
+  camera.updateProjectionMatrix();
+  return true;
 }
 
 function onResize() {
@@ -226,6 +257,7 @@ function onResize() {
   camera.right = fs * aspect / 2;
   camera.top = fs / 2;
   camera.bottom = -fs / 2;
+  fitPortrait();
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
@@ -695,6 +727,7 @@ function updateAgent(data) {
     const agentObj = createAgentModel(data.name, data.status, sessionIndex);
     agent = { ...agentObj, data };
     agents.set(key, agent);
+    if (IS_PHONE) { clearTimeout(window.__fitT); window.__fitT = setTimeout(fitPortrait, 2500); } // re-frame once it walked to its zone
   }
 
   agent.data = data;

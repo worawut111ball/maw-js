@@ -390,8 +390,9 @@ export const HoverPreviewCard = memo(function HoverPreviewCard({
       <div className="relative flex-1 min-h-0" style={{ background: "#08080c" }}>
         <div
           ref={termRef}
-          className="absolute inset-0 overflow-y-auto overflow-x-auto whitespace-pre px-3 py-2 font-mono text-[10px] leading-[1.45] text-[#cdd6f4] sm:text-[11px]"
-          style={{ fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace", wordBreak: "normal", overflowWrap: "normal" }}
+          // Phone (<640px): wrap long terminal lines inside the box (was: one wide line → sideways scroll)
+          className="absolute inset-0 overflow-y-auto overflow-x-hidden sm:overflow-x-auto whitespace-pre-wrap sm:whitespace-pre px-3 py-2 font-mono text-[11px] leading-[1.45] text-[#cdd6f4]"
+          style={{ fontFamily: "Monaco, 'Cascadia Code', 'Fira Code', 'Noto Sans Thai', Sarabun, 'IBM Plex Sans Thai Looped', monospace", wordBreak: "normal", overflowWrap: isMobile ? "anywhere" : "normal" }}
           dangerouslySetInnerHTML={{ __html: ansiToHtml(processCapture(content)) }}
         />
         {pinned && send && (

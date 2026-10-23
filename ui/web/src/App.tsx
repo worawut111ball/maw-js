@@ -203,7 +203,7 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
   const { isMobile } = useDevice();
   const wrapperClass = fullHeight
     ? "relative flex flex-col h-[100dvh] overflow-hidden pt-[52px] pb-[70px] sm:h-screen sm:pt-0 sm:pb-0"
-    : "relative min-h-screen pt-[52px] pb-[78px] sm:pt-0 sm:pb-0";
+    : "relative min-h-screen pt-[52px] pb-[72px] sm:pt-0 sm:pb-0"; // = AppShell: 52px MobileHeader + 72px bottom nav (78 made #mission scroll 6px)
 
   return (
     <div className={wrapperClass} style={{ background: "#020208" }}>
