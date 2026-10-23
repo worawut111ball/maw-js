@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createTravel, parseSleepDisabled, parseSpeedLimit, safetyReason } from "../src/mobile/features/travel";
+import { createTravel, deskCheck, parseLidClosed, parseSleepDisabled, parseSpeedLimit, safetyReason } from "../src/mobile/features/travel";
 
 describe("travel mode (close the lid, keep working)", () => {
   test("parsers", () => {
@@ -55,4 +55,22 @@ test("extend adds time without ever switching sleep back on", async () => {
   expect(b.until! - a.until!).toBeGreaterThan(3 * 3600_000 - 2_000);
   expect(calls.some(c => c.endsWith("disablesleep 0"))).toBe(false);
   expect((await t.extend(12)).until! - Date.now()).toBeLessThanOrEqual(24 * 3600_000);
+});
+
+test("back at the desk: lid closed once, then open + charging 15 min → off; never before a real trip", () => {
+  expect(parseLidClosed('    "AppleClamshellState" = Yes')).toBe(true);
+  expect(parseLidClosed('    "AppleClamshellState" = No')).toBe(false);
+  expect(parseLidClosed("")).toBeNull();
+  const m = 60_000;
+  let t = { wasClosed: false, deskSince: null as number | null };
+  let r = deskCheck(t, false, true, 0);                 // turned on at the desk, lid open, charging
+  expect(r.reason).toBeNull(); expect(r.t.deskSince).toBeNull();
+  r = deskCheck(r.t, true, false, 10 * m);               // lid closed — on the road
+  r = deskCheck(r.t, false, true, 60 * m);               // home: lid open, plugged in
+  expect(r.reason).toBeNull();
+  r = deskCheck(r.t, false, false, 70 * m);              // unplugged for a moment → timer restarts
+  expect(r.t.deskSince).toBeNull();
+  r = deskCheck(r.t, false, true, 71 * m);
+  expect(deskCheck(r.t, false, true, 85 * m).reason).toBeNull();
+  expect(deskCheck(r.t, false, true, 86 * m).reason).toContain("กลับมาที่โต๊ะ");
 });

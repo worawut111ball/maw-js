@@ -31,12 +31,30 @@ export function safetyReason(h: { battery?: { pct: number; ac: boolean } | null 
   return null;
 }
 
+/** `ioreg -r -k AppleClamshellState -d 1` → lid closed? (null = no lid / unreadable) */
+export function parseLidClosed(ioreg: string): boolean | null {
+  const m = /"AppleClamshellState"\s*=\s*(Yes|No)/.exec(ioreg); return m ? m[1] === "Yes" : null;
+}
+export const DESK_MINUTES = 15;
+export interface DeskTrack { wasClosed: boolean; deskSince: number | null }
+/**
+ * Back at the desk = the lid was closed at some point since travel mode went on (a real trip), and now the lid
+ * is open with the charger plugged in for DESK_MINUTES in a row. Turning it on at the desk before leaving never trips it.
+ */
+export function deskCheck(t: DeskTrack, lidClosed: boolean | null, ac: boolean | undefined, now = Date.now()): { t: DeskTrack; reason: string | null } {
+  if (lidClosed) return { t: { wasClosed: true, deskSince: null }, reason: null };
+  if (!t.wasClosed || lidClosed == null || !ac) return { t: { ...t, deskSince: null }, reason: null };
+  const since = t.deskSince ?? now;
+  return { t: { ...t, deskSince: since }, reason: now - since >= DESK_MINUTES * 60_000 ? `กลับมาที่โต๊ะแล้ว (เปิดจอ + เสียบสายชาร์จ ${DESK_MINUTES} นาที)` : null };
+}
+
 // the auto-off time survives a maw restart (otherwise a restart mid-trip would leave sleep disabled forever)
 const STATE_FILE = join(homedir(), ".maw", "travel.json");
 export function createTravel(run: Run = realRun, file: string | null = STATE_FILE) {
   const load = () => { try { return JSON.parse(readFileSync(file!, "utf-8")).until ?? null; } catch { return null; } };
   const save = () => { if (file) try { writeFileSync(file, JSON.stringify({ until }), { mode: 0o600 }); } catch { /* best effort */ } };
   let until: number | null = file ? load() : null, lastReason: string | null = null, timer: ReturnType<typeof setInterval> | null = null;
+  let desk: DeskTrack = { wasClosed: false, deskSince: null };
   const sudoReady = async () => (await run(SUDO, ["-n", "-l", PMSET, "-a", "disablesleep", "1"])).ok;
   const isOn = async () => parseSleepDisabled((await run(PMSET, ["-g"])).out);
   const set = async (on: boolean) => {
@@ -47,7 +65,10 @@ export function createTravel(run: Run = realRun, file: string | null = STATE_FIL
     if (timer) return;
     timer = setInterval(async () => {
       if (!(await isOn())) { clearInterval(timer!); timer = null; until = null; return; }
-      const reason = safetyReason(await macHealth(), parseSpeedLimit((await run(PMSET, ["-g", "therm"])).out), until);
+      const h = await macHealth();
+      const d = deskCheck(desk, parseLidClosed((await run("/usr/sbin/ioreg", ["-r", "-k", "AppleClamshellState", "-d", "1"])).out), h.battery?.ac);
+      desk = d.t;
+      const reason = safetyReason(h, parseSpeedLimit((await run(PMSET, ["-g", "therm"])).out), until) ?? d.reason;
       if (!reason) return;
       lastReason = reason;
       await notifyPhones("travel", "off", { title: "🧳 ปิดโหมดเดินทางแล้ว", body: `${reason} — Mac จะหลับเมื่อพับจอ` }).catch(() => 0);
@@ -65,6 +86,7 @@ export function createTravel(run: Run = realRun, file: string | null = STATE_FIL
     async turn(on: boolean, hours = DEFAULT_HOURS) {
       await set(on);
       until = on ? Date.now() + Math.min(Math.max(hours, 0.5), 24) * 3600_000 : null;
+      desk = { wasClosed: false, deskSince: null };   // a new trip starts now
       lastReason = null; save();
       if (on) watch(); else if (timer) { clearInterval(timer); timer = null; }
       return this.status();

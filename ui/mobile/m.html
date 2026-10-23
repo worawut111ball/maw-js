@@ -39,7 +39,7 @@
   .sub { color: var(--dim); font-size: 12.5px; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
   .count { display: inline-flex; align-items: center; gap: 4px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
-  .s-working { background: var(--working); box-shadow: 0 0 8px var(--working); animation: pulse 1.4s infinite; }
+  .s-working { background: var(--working); box-shadow: 0 0 8px var(--working); }   /* no pulse: an endless animation keeps the phone redrawing at 60 fps */
   .s-waiting { background: var(--waiting); box-shadow: 0 0 8px var(--waiting); }
   .s-done { background: var(--done); } .s-idle { background: var(--idle); } .s-ended { background: var(--ended); }
   @keyframes pulse { 50% { opacity: .35 } }
@@ -144,13 +144,13 @@
   .cprog .bar { height: 6px; margin-top: 5px; } .cprog .bar > i { background: linear-gradient(90deg, #22d3ee, #a78bfa); transition: width 2s linear; }
   .cprog .hint { color: var(--dim); font-size: 11px; margin-top: 3px; }
   .spin { display: flex; align-items: baseline; gap: 8px; margin: 6px 14px 0; font: 600 14px var(--mono); flex: none; white-space: nowrap; overflow: hidden; }
-  .spin .gl { color: #d97757; width: 1em; text-align: center; animation: spinc 2.4s linear infinite; }
-  .spin .vb { background: linear-gradient(90deg, #d97757, #f472b6, #c084fc, #f472b6, #d97757); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
+  .spin .gl { color: #d97757; width: 1em; text-align: center; display: inline-block; contain: layout paint; }
+  .spin .vb { background: linear-gradient(90deg, #d97757, #f472b6, #c084fc, #f472b6, #d97757); background-size: 100% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;  }
   .spin .dt { color: var(--dim); font-weight: 400; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
   @keyframes shimmer { from { background-position: 0% 0; } to { background-position: 300% 0; } }
   /* newest reply while the agent still works: its icon spins like the terminal's "✻ Thinking…" */
 .msg.ai .who .gl { display: inline-block; width: 1em; text-align: center; }
-.msg.ai.live .who .gl { animation: spinc 1.2s linear infinite; }
+.msg.ai.live .who .gl { color: #f472b6; contain: layout paint; }
 @keyframes spinc { 0%,100% { color: #d97757; } 33% { color: #f472b6; } 66% { color: #c084fc; } }
   .sugg[hidden] { display: none; }
   .sugg { display: flex; align-items: center; gap: 8px; margin: 6px 12px 0; padding: 4px 4px 4px 12px; border: 1px dashed #3b4266; border-radius: 12px; background: #0d1020; flex: none; }
@@ -204,7 +204,7 @@
   .ctxrow .bar { flex: 0 0 70px; margin: 0; } .ctxrow b { color: var(--text); }
   /* ── RunCat-style header widget ── */
   .rc { display: flex; align-items: center; gap: 5px; height: 36px; padding: 0 9px; border-radius: 12px; background: var(--card2); flex: none; font: 600 12.5px var(--font); font-variant-numeric: tabular-nums; color: var(--text); }
-  .rc .cat { width: 30px; height: 19px; display: block; color: #e6e8f2; } .rc.hot .cat { color: #fbbf24; } .rc.burn .cat { color: #f87171; }
+  .rc .cat-box { display: block; width: 30px; height: 19px; contain: strict; } .rc .cat { width: 30px; height: 19px; display: block; color: #e6e8f2; } .rc.hot .cat { color: #fbbf24; } .rc.burn .cat { color: #f87171; }
   .rc .bt { color: var(--dim); font-weight: 500; } .rc .bt.low { color: #f87171; }
   #rcpanel { position: fixed; left: 10px; right: 10px; top: calc(env(safe-area-inset-top, 0px) + 66px); z-index: 60; box-shadow: 0 12px 40px #000c; animation: rcin .14s ease-out; }
   @keyframes rcin { from { opacity: 0; transform: translateY(-6px); } }
@@ -979,9 +979,10 @@ function markLive() {
     last.classList.add("live"); const g = last.querySelector(".gl"); if (g) g.dataset.g = g.textContent;
   }
   if (!markLive.iv) markLive.iv = setInterval(() => {
+    if (document.hidden) return;
     const g = document.querySelector("#screen .msg.ai.live .gl"); if (!g) return;
     markLive.k = ((markLive.k || 0) + 1) % LIVE_G.length; g.textContent = LIVE_G[markLive.k];
-  }, 140);
+  }, 220);
 }
 function showNewPill(scr) {
   const wrap = scr.parentElement; if (wrap.querySelector(".newpill")) return;
@@ -1032,7 +1033,7 @@ async function loadSuggestion() {
     if (spin) {
       if (r.spinner) {
         spin.hidden = false; spin.querySelector(".vb").textContent = r.spinner.verb; spin.querySelector(".dt").textContent = r.spinner.detail ? `(${r.spinner.detail})` : "";
-        if (!spin._iv) { const G = "·✢✳✶✻✽✻✶✳✢"; let k = 0; spin._iv = setInterval(() => { if (!spin.isConnected) return clearInterval(spin._iv); spin.querySelector(".gl").textContent = G[k++ % G.length]; }, 120); }
+        if (!spin._iv) { const G = "·✢✳✶✻✽✻✶✳✢"; let k = 0; spin._iv = setInterval(() => { if (!spin.isConnected) return clearInterval(spin._iv); if (!document.hidden) spin.querySelector(".gl").textContent = G[k++ % G.length]; }, 200); }
       } else spin.hidden = true;
     }
     // what's sitting typed in the Mac's input box (tmux knows for sure; Superset can't tell it from a suggestion)
@@ -1428,10 +1429,11 @@ function catSvg(i) {
 }
 let catFrame = 0;
 (function runCat() {
-  catFrame++;
-  document.querySelectorAll(".rc .cat-box").forEach(el => el.innerHTML = catSvg(catFrame));
+  const boxes = document.hidden ? [] : document.querySelectorAll(".rc .cat-box");
+  if (boxes.length) { catFrame++; const svg = catSvg(catFrame); boxes.forEach(el => el.innerHTML = svg); }
   const cpu = state.sys?.mac?.cpu ?? 10;
-  setTimeout(runCat, Math.max(45, 220 - cpu * 1.75)); // idle ≈ 4 fps, 100% CPU ≈ 22 fps
+  // a redraw is a layout + paint on the phone: idle ≈ 2.5 fps, 100% CPU ≈ 6 fps (was up to 22 fps → phone ran hot)
+  setTimeout(runCat, document.hidden ? 1000 : Math.max(160, 400 - cpu * 2.4));
 })();
 function rcHtml() {
   const m = state.sys?.mac, cpu = m?.cpu, b = m?.battery;
