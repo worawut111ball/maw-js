@@ -231,6 +231,19 @@ export async function listPrs(fresh = false, d: PrsDeps = deps): Promise<PrList>
   inflight = (async () => {
     const cfg = loadConfig(d.configFile);
     const repos = allRepos(cfg, d.localRepos());
+    // repos never cloned on this Mac still have PRs: ask GitHub per owner (org / user) which repos have open ones
+    const owners = [...new Set(repos.map(r => r.repo.split("/")[0]))];
+    const seen = new Set(repos.map(r => r.repo.toLowerCase()));
+    await mapLimit(owners, CONCURRENCY, async o => {
+      try {
+        const res = await d.gh(["search", "prs", "--owner", o, "--state", "open", "--limit", "200", "--json", "repository"]);
+        if (res.code !== 0) return;
+        for (const x of JSON.parse(res.stdout || "[]")) {
+          const slug = x?.repository?.nameWithOwner;
+          if (typeof slug === "string" && SLUG_RE.test(slug) && !seen.has(slug.toLowerCase())) { seen.add(slug.toLowerCase()); repos.push({ repo: slug, path: null }); }
+        }
+      } catch { /* search is a bonus — the local list still works */ }
+    });
     const rows = await mapLimit(repos, CONCURRENCY, async (r): Promise<RepoRow> => {
       const auto = !!Object.keys(cfg.auto).find(k => k.toLowerCase() === r.repo.toLowerCase());
       try {

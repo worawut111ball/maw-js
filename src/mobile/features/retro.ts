@@ -188,7 +188,7 @@ export function candidates(d: RetroDeps, f: RetroFile = d.load()): Candidate[] {
     const workedMin = act ? workedMinutes(act.minutes, lastRetroAt) : 0;
     const { due, why } = retroDue({ status, workedMin, lastActivityAt, lastRetroAt, handled: mark?.handled }, f, now);
     const [ws, room] = chanIds(r.channel);
-    out.push({ sessionId: r.sessionId, ws, room, label: r.name || r.channel?.label || "Claude", project: act?.cwd ? basename(act.cwd) : null,
+    out.push({ sessionId: r.sessionId, ws, room, label: r.channel?.label && r.channel.label !== "Superset" ? r.channel.label : r.name || "Claude", project: act?.cwd ? basename(act.cwd) : null,
       status, workedMin, lastActivityAt, lastRetroAt, due, why });
   }
   return out.sort((a, b) => Number(b.due) - Number(a.due) || (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));

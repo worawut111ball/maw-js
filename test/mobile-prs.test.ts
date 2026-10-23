@@ -255,3 +255,11 @@ describe("list + routes", () => {
     await listPrs(true, f.d); expect(f.ghCalls.length).toBe(2 * n);
   });
 });
+
+test("repos not cloned here are found through gh search per owner", async () => {
+  const f = fakes({ gh: (a: string[]) => a[0] === "search" ? { code: 0, stdout: JSON.stringify([{ repository: { nameWithOwner: "o/remote-only" } }]), stderr: "" } : a[0] === "pr" && a[3] === "o/remote-only" ? { code: 0, stdout: JSON.stringify([]), stderr: "" } : { code: 0, stdout: "[]", stderr: "" } });
+  const calls: string[][] = []; const gh = f.d.gh; f.d.gh = async (a: string[]) => { calls.push(a); return gh(a); };
+  await listPrs(true, f.d);
+  expect(calls.some(a => a[0] === "search")).toBe(true);
+  expect(calls.some(a => a[0] === "pr" && a.includes("o/remote-only"))).toBe(true);
+});

@@ -260,6 +260,16 @@
   .sheet { box-sizing: border-box; }
   /* home header: title + cat widget + 4 icons must fit 360px phones */
   .homehead { gap: 6px; padding-inline: 12px; }
+  /* home menu tiles → their own pages */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
+  .mtile { position: relative; display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); text-align: left; color: var(--text); min-width: 0; }
+  .mtile .ti { font-size: 20px; flex: none; }
+  .mtile .tt { min-width: 0; display: grid; } .mtile b { font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mtile small { color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .mtile .tb { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px; background: #f59e0b; color: #1a1003; font: 700 11px/18px var(--font); text-align: center; }
+  .mtile.bad .tb { background: var(--danger); color: #fff; } .mtile.ok small { color: #4ade80; }
+  .mtile:active { filter: brightness(1.2); }
+  .pgmain { padding: 10px 12px calc(16px + env(safe-area-inset-bottom)); }
   .homehead h1 { flex: 0 1 auto; font-size: 17px; }
   .homehead .iconbtn { min-width: 34px; height: 34px; padding: 0 6px; border-radius: 10px; font-size: 15px; flex: none; }
   .homehead > :nth-child(2) { margin-left: auto; min-width: 0; }
@@ -419,7 +429,8 @@ function rememberChatHtml(room, html) {
 //   onRoom({p,w,room})  after a room view is drawn · onPoll({p,w,room,live}) every ~2.5 s in a room
 //   onHome()  after home is drawn · onComposer({w,room,msg})  composer ready · tabs [{key,label,render(w, el)}] extra project tabs
 //   keys [{label, cls, onClick({w,room})}] extra buttons at the start of the quick-keys row
-window.mawExt = { onRoom: [], onPoll: [], onHome: [], onComposer: [], tabs: [], keys: [] };
+window.mawExt = { onRoom: [], onPoll: [], onHome: [], onComposer: [], tabs: [], keys: [], pages: [] };
+// pages [{key, icon, title, summary() → {text, badge?, tone?}, mount(el)}] — a tile in the home "เมนู" grid that opens its own screen
 const extCall = (name, arg) => { for (const f of mawExt[name]) { try { f(arg); } catch (e) { console.error("[ext]", name, e); } } };
 /** Helpers for packs: type into / press a key in the open room. */
 async function roomSend(text) { await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ text }) }); }
@@ -430,7 +441,23 @@ const fromHash = location.hash.match(/t=([a-f0-9]{32,})/);
 if (fromHash) { store.set("maw-mobile-token", fromHash[1]); history.replaceState(null, "", location.pathname); }
 store.del("maw-desktop-ui"); // opening this page = phone UI wanted again (installed app always starts here)
 
+// timing of every request as the phone sees it (network + Mac), sent home every 30 s → GET /mobile/perf on the Mac
+const perf = new Map();
+function perfNote(path, ms) {
+  const k = path.split("?")[0].replace(/\/[0-9a-f-]{20,}|\/%25\d+|\/%\d+|\/dir:[^/]+|\/[0-9a-f]{16}\b/gi, "/:id");
+  const a = perf.get(k) || []; a.push(Math.round(ms)); if (a.length > 50) a.shift(); perf.set(k, a);
+}
+setInterval(() => {
+  if (!perf.size || document.hidden) return;
+  const rows = [...perf].map(([k, a]) => { const s = [...a].sort((x, y) => x - y); return { k, n: a.length, med: s[s.length >> 1], max: s[s.length - 1] }; });
+  perf.clear();
+  fetch("/mobile/perf", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + (store.get("maw-mobile-token") || "") }, body: JSON.stringify({ rows, ua: navigator.userAgent.slice(0, 80) }) }).catch(() => {});
+}, 30_000);
 async function api(path, opts = {}) {
+  const t0 = performance.now();
+  try { return await apiRaw(path, opts); } finally { perfNote(path, performance.now() - t0); }
+}
+async function apiRaw(path, opts = {}) {
   const res = await fetch("/mobile" + path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + (store.get("maw-mobile-token") || ""), ...(opts.headers || {}) } });
   if (res.status === 401) { renderLogin(); throw new Error("unauthorized"); }
   const body = await res.json().catch(() => ({}));
@@ -453,9 +480,27 @@ const toolClass = n => "tc-" + (TOOL_CLASS[n] || "other");
 function agentKind() { const p = state.projects.find(x => x.name === state.project); const r = p?.workspaces.flatMap(w => w.rooms).find(r => r.id === state.room); return r?.agent || ""; }
 const roomsOf = p => p.workspaces.flatMap(w => w.rooms.map(r => ({ ...r, ws: w.id })));
 
+// ── menu pages (PR, สรุปงาน …): tiles on home, each opens a full screen ──
+function tilesHtml() {
+  return mawExt.pages.map(pg => {
+    let sm = {}; try { sm = pg.summary?.() || {}; } catch { /* pack not ready */ }
+    return `<button class="mtile ${esc(sm.tone || "")}" data-page="${esc(pg.key)}"><span class="ti">${esc(pg.icon || "•")}</span>
+      <span class="tt"><b>${esc(pg.title)}</b><small>${esc(sm.text || "…")}</small></span>${sm.badge ? `<span class="tb">${esc(sm.badge)}</span>` : ""}</button>`;
+  }).join("");
+}
+mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.innerHTML = tilesHtml(); wireTiles(t); } };
+function wireTiles(root) { root.querySelectorAll("[data-page]").forEach(b => b.onclick = () => { history.pushState({ v: "pg" }, ""); renderPage(b.dataset.page); }); }
+function renderPage(key) {
+  const pg = mawExt.pages.find(x => x.key === key); if (!pg) return renderHome();
+  state.page = key; state.project = null; state.room = null;
+  $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
+  document.getElementById("back").onclick = () => history.back();
+  try { pg.mount(document.getElementById("pgbody")); } catch (e) { document.getElementById("pgbody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
 // ── home: projects ──
 function renderHome() {
-  state.project = null; state.room = null;
+  state.project = null; state.room = null; state.page = null;
   const waiting = state.projects.flatMap(p => roomsOf(p).filter(r => r.status === "waiting").map(r => ({ ...r, project: p.name })));
   const busy = p => roomsOf(p).some(r => r.agent);
   const list = state.projects.filter(p => state.showEmpty || busy(p)).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
@@ -465,6 +510,7 @@ function renderHome() {
       <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
     <main>
       <button class="openproj" id="openproj">➕ เปิดโปรเจค · repo ในเครื่อง · โฟลเดอร์</button>
+      ${mawExt.pages.length ? `<div class="tiles" id="tiles">${tilesHtml()}</div>` : ""}
       <div id="ext-home"></div>
       ${waiting.length ? `<div class="section">🟡 รอคำตอบ</div>${waiting.map(r => `
         <button class="card waitcard" data-go="${esc(r.project)}|${esc(r.ws)}|${esc(r.id)}">
@@ -480,6 +526,7 @@ function renderHome() {
   document.getElementById("toggleEmpty").onclick = () => { state.showEmpty = !state.showEmpty; renderHome(); };
 
   document.getElementById("openproj").onclick = () => openProjectSheet();
+  const tl = document.getElementById("tiles"); if (tl) wireTiles(tl);
   extCall("onHome");
   document.getElementById("more").onclick = openMoreMenu;
 }
@@ -625,7 +672,7 @@ function renderProject() {
       // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
       const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, text, files, at: Date.now(), state: "sending", note: "",
         pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
-      pendingSends.push(pend);
+      pendingSends.push(pend); savePending(pend);
       msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
       paintPending(); queueSend(pend);
     }
@@ -821,18 +868,47 @@ async function runSend(p) {
     const text = (p.text ? p.text + (paths.length ? "\n\n" : "") : "") + paths.map(x => `[แนบไฟล์] ${x}`).join("\n");
     p.paths = paths;
     await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", body: JSON.stringify({ text }) });
-    p.state = "sent"; p.sentAt = Date.now();
+    p.state = "sent"; p.sentAt = Date.now(); savePending();
     const box = document.getElementById("msg");
     if (state.filesRoom !== p.key || (!box?.value.trim() && !state.files.length)) clearDraft(p.key); // keep a newer draft typed meanwhile
     paintPending(); setTimeout(loadScreen, 400);
   } catch (e) {
-    p.state = "failed"; p.err = e.message; p.note = ""; paintPending();
+    p.state = "failed"; p.err = e.message; p.note = ""; paintPending(); savePending();
     playSound("error");
     if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted")
       navigator.serviceWorker?.ready.then(r => r.showNotification("🔴 ส่งไม่ได้", { body: `${e.message} — แตะเพื่อลองใหม่`, tag: "send-fail", vibrate: [320, 110, 320, 110, 320], icon: "/icon-192.png", data: { url: "/m.html" } })).catch(() => {});
   }
 }
-function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); if (!quiet) paintPending(); }
+function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); forgetPendingFiles(p); savePending(); if (!quiet) paintPending(); }
+// Android may kill the page mid-send (camera, app switch) → keep the bubbles: list in localStorage, files in Cache Storage
+const PEND_KEY = "maw-pend", PEND_CACHE = "maw-pend";
+function savePending(withFiles) {
+  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
+  if (withFiles && withFiles.files.length && "caches" in window)
+    caches.open(PEND_CACHE).then(box => Promise.all(withFiles.files.map((f, i) => box.put(`${location.origin}/pend/${withFiles.id}/${i}`, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }))))).catch(() => {});
+}
+function forgetPendingFiles(p) {
+  if (!p.files.length || !("caches" in window)) return;
+  caches.open(PEND_CACHE).then(box => Promise.all(p.files.map((_, i) => box.delete(`${location.origin}/pend/${p.id}/${i}`)))).catch(() => {});
+}
+async function restorePending() {
+  let list = []; try { list = JSON.parse(store.get(PEND_KEY) || "[]"); } catch { /* broken → start clean */ }
+  const box = "caches" in window ? await caches.open(PEND_CACHE).catch(() => null) : null;
+  for (const x of list) {
+    if (x.state === "sent" && Date.now() - (x.sentAt || 0) > 60_000) continue;
+    const files = [];
+    for (let i = 0; i < (x.n || 0); i++) {
+      const r = await box?.match(`${location.origin}/pend/${x.id}/${i}`).catch(() => null);
+      if (r) files.push(new File([await r.blob()], decodeURIComponent(r.headers.get("x-name") || "file"), { type: r.headers.get("content-type") || "" }));
+    }
+    // it may or may not have reached the Mac before the page died → never resend on its own
+    const state = x.state === "sending" ? "failed" : x.state;
+    pendingSends.push({ ...x, files, state, err: x.state === "sending" ? "แอปถูกปิดระหว่างส่ง — ดูในแชทก่อนกดลองใหม่" : x.err, note: "",
+      pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) });
+    pendSeq = Math.max(pendSeq, x.id || 0);
+  }
+  savePending(); paintPending();
+}
 /** Sent bubbles leave once the real message shows up in the chat (or after a minute as a fallback). */
 function reconcilePending(list) {
   const mine = list.filter(m => m.role === "user").slice(-12);
@@ -1792,7 +1868,7 @@ async function load(manual) {
   try {
     state.projects = (await api("/projects")).projects;
     soundOnChange(state.projects);
-    if (!state.project) renderHome(); else if (!document.querySelector(".sheet-bg")) refreshTabs();
+    if (state.page) mawExt.refreshTiles(); else if (!state.project) renderHome(); else if (!document.querySelector(".sheet-bg")) refreshTabs();
     if (manual) toast("อัปเดตแล้ว");
   } catch (e) { if (e.message !== "unauthorized") toast("โหลดไม่ได้: " + e.message); }
 }
@@ -1808,7 +1884,7 @@ function refreshTabs() {
   }
   for (const r of w.rooms) { const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
 }
-window.addEventListener("popstate", () => { if (state.project) renderHome(); state.lastRoomShown = null; });
+window.addEventListener("popstate", () => { if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
 // New version on the Mac → reload by itself (only when nothing is half-typed), so the phone never runs stale code
 let pageStamp = null;
 async function checkVersion() {
@@ -1826,6 +1902,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 checkVersion();
 function start() {
   clearInterval(timer); clearInterval(start._sys);
+  if (!start._pend) { start._pend = 1; restorePending().catch(() => {}); }
   load(); loadSys(); takeShared(); takeOpen(); start._sys = setInterval(() => { if (!document.hidden) loadSys(); }, 10_000);
   timer = setInterval(() => {
     if (document.hidden) return;
@@ -1846,6 +1923,7 @@ start();
 <script src="/m-ext/retro.js" defer></script>
 <script src="/m-ext/ports.js" defer></script>
 <script src="/m-ext/prs.js" defer></script>
+<script src="/m-ext/mind.js" defer></script>
 
 </body>
 </html>

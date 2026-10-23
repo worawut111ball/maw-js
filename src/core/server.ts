@@ -61,6 +61,13 @@ mountViews(views);
 // Serve packed maw-ui dist (Shape A — single port, single process)
 const MAW_UI_DIR = process.env.MAW_UI_DIR || join(homedir(), ".maw", "ui", "dist");
 if (existsSync(MAW_UI_DIR)) {
+  // phone app shell: never let Chrome reuse an old copy (Android restores a killed PWA from its disk cache and
+  // ran a days-old m.html that had no self-update) — revalidate every time, files are small
+  views.use("/*", async (c, next) => {
+    await next();
+    const p = new URL(c.req.url).pathname;
+    if (p === "/m.html" || p === "/sw.js" || p === "/manifest.json" || p.startsWith("/m-ext/")) c.header("Cache-Control", "no-cache");
+  });
   views.use("/*", serveStatic({ root: MAW_UI_DIR }));
 } else {
   // The Door — minimal landing page when no packed maw-ui is installed.
@@ -168,6 +175,19 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     },
   };
 
+  // Phone on 4G: a room's chat is ~170 KB of JSON (0.7 s on the air). gzip text bodies ≥ 4 KB → ~6× smaller.
+  const COMPRESSIBLE = /json|text\/|javascript/;
+  async function gzipped(req: Request, res: Response | Promise<Response>): Promise<Response> {
+    const r = await res;
+    if (!/\bgzip\b/.test(req.headers.get("accept-encoding") ?? "") || r.headers.has("content-encoding") || !r.body) return r;
+    if (!COMPRESSIBLE.test(r.headers.get("content-type") ?? "") || r.status === 204 || r.status === 304) return r;
+    const raw = new Uint8Array(await r.arrayBuffer());
+    if (raw.length < 4096) return new Response(raw, { status: r.status, headers: r.headers });
+    const h = new Headers(r.headers);
+    h.set("content-encoding", "gzip"); h.set("vary", "Accept-Encoding"); h.delete("content-length");
+    return new Response(Bun.gzipSync(raw, { level: 6 }), { status: r.status, headers: h });
+  }
+
   const fetchHandler = (req: Request, server: any) => {
     const url = new URL(req.url);
     if (url.pathname === "/ws/pty") {
@@ -180,7 +200,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     }
     // Phone app surface (separate prefix so tailscale serve can expose only /mobile)
     if (url.pathname.startsWith("/mobile")) {
-      return mobileApi.handle(req);
+      return gzipped(req, mobileApi.handle(req));
     }
     // Elysia handles all /api/* routes
     if (url.pathname.startsWith("/api")) {
@@ -193,6 +213,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
       return new Response(Bun.file(path));
     }
     // Hono handles views + static
+    if (url.pathname === "/m.html" || url.pathname.startsWith("/m-ext/")) return gzipped(req, views.fetch(req, { server }));
     return views.fetch(req, { server });
   };
 

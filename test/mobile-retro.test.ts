@@ -138,7 +138,7 @@ describe("loop", () => {
     expect((await retroPass(w.d)).notified).toEqual([]);
     expect(w.typed).toEqual([]);
     expect(w.pushes.length).toBe(1);
-    expect(w.pushes[0].title).toBe("📝 สรุปงานไหม · main · maw-js");
+    expect(w.pushes[0].title).toBe("📝 สรุปงานไหม · t1 · maw-js");
     expect(w.pushes[0].body).toMatch(/^ทำงานไป 40 นาที/);
   });
   test("auto: runs once, never twice, never into a dialog", async () => {
@@ -149,7 +149,7 @@ describe("loop", () => {
     expect((await retroPass(w.d)).ran).toEqual([]);
     expect((await retroPass(w.d)).ran).toEqual([]);
     expect(w.typed).toEqual(["/rrr"]);
-    expect(w.pushes.map(p => p.title)).toEqual(["📝 สั่ง /rrr แล้ว · main · maw-js"]);
+    expect(w.pushes.map(p => p.title)).toEqual(["📝 สั่ง /rrr แล้ว · t1 · maw-js"]);
   });
   test("auto: skips a working room", async () => {
     const w = world({ mode: "auto", status: "busy" });

@@ -127,7 +127,7 @@ function supersetTitle(terminalId: string): string | null {
   if (Date.now() - supersetTitles.at > 15_000) {
     const map = new Map<string, string>();
     try {
-      const snap = JSON.parse(execFileSync(SUPERSET_BIN, ["snapshot", "--json"], { encoding: "utf-8", timeout: 5000 }));
+      const snap = supersetSnapshot();   // shared, non-blocking copy
       for (const w of snap.workspaces ?? []) for (const t of w.terminals ?? []) if (t.title) map.set(t.id, String(t.title).replace(/^[◐◑◒◓●○◌⠀-⣿✳✻·*\s]+/, ""));
     } catch { /* Superset not running */ }
     supersetTitles = { at: Date.now(), map };
@@ -354,10 +354,28 @@ export function compactProgress(elapsedS: number, contextTokens: number | null, 
 
 export const ss = (args: string[]) => execFileSync(SUPERSET_BIN, args, { encoding: "utf-8", timeout: 15_000 });
 
+/** Superset CLI without blocking the server (each run is ~250 ms). */
+export async function ssAsync(args: string[], timeoutMs = 15_000): Promise<string> {
+  const p = Bun.spawn([SUPERSET_BIN, ...args], { stdout: "pipe", stderr: "pipe" });
+  const t = setTimeout(() => p.kill(), timeoutMs);
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  clearTimeout(t);
+  if (code !== 0) throw new Error(err.trim() || `superset exit ${code}`);
+  return out;
+}
+// The phone polls screen, suggestion, prompt and mode of the same room every 2.5 s — one Superset read serves them all
+const ssScreens = new Map<string, { at: number; lines: number; p: Promise<string> }>();
+const tailLines = (text: string, n: number) => { const l = text.split("\n"); return l.length > n ? l.slice(-n).join("\n") : text; };
 export async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
   if (ch.kind === "tmux") return capture(ch.pane, lines);
-  const out = JSON.parse(ss(["terminals", "read", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--max-lines", String(lines), "--json"]));
-  return String(out.text ?? "");
+  const key = ch.workspaceId + "/" + ch.terminalId, hit = ssScreens.get(key);
+  if (hit && Date.now() - hit.at < 900 && hit.lines >= lines) return tailLines(await hit.p, lines);
+  const p = ssAsync(["terminals", "read", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--max-lines", String(lines), "--json"])
+    .then(out => String(JSON.parse(out).text ?? ""));
+  ssScreens.set(key, { at: Date.now(), lines, p });
+  p.catch(() => ssScreens.delete(key));
+  if (ssScreens.size > 64) ssScreens.delete(ssScreens.keys().next().value!);
+  return p;
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -378,12 +396,12 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
     }
     return;
   }
-  ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
+  await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
 }
 
 export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
   if (ch.kind === "tmux") return new Tmux().sendKeys(ch.pane, QUICK_KEYS[label]);
-  ss(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--keys", SUPERSET_KEYS[label]]);
+  await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--keys", SUPERSET_KEYS[label]]);
 }
 
 
@@ -407,8 +425,20 @@ export function statusFromSuperset(state: string | null | undefined, hasAgent: b
 const cleanTitle = (t: string | null | undefined) => String(t ?? "").replace(/^[◐◑◒◓●○◌✳✻·*\s]+/, "").trim();
 
 let snapCache: { at: number; data: any } = { at: 0, data: null };
+let snapRefreshing = false;
 export function supersetSnapshot(): any {
-  if (Date.now() - snapCache.at < 2_000 && snapCache.data) return snapCache.data;
+  const age = Date.now() - snapCache.at;
+  if (age < 2_000 && snapCache.data) return snapCache.data;
+  // stale but recent: answer now, refresh in the background (a sync run blocks the whole server ~250 ms every poll)
+  if (snapCache.data && snapCache.at !== 0 && age < 60_000) {
+    if (!snapRefreshing) {
+      snapRefreshing = true;
+      ssAsync(["snapshot", "--json"]).then(out => { snapCache = { at: Date.now(), data: JSON.parse(out) }; })
+        .catch(() => { snapCache = { at: Date.now(), data: { workspaces: [] } }; }).finally(() => { snapRefreshing = false; });
+    }
+    return snapCache.data;
+  }
+  // first call, or invalidated right after an action (snapCache.at = 0) → read now
   let data: any = { workspaces: [] };
   try { data = JSON.parse(ss(["snapshot", "--json"])); } catch { /* Superset not running */ }
   snapCache = { at: Date.now(), data };
@@ -1167,16 +1197,21 @@ export function slashCommands(agent: string, cwd: string | null, home = homedir(
   return list;
 }
 
+let wsPathsRefreshing = false;
 export function workspacePath(wsId: string): string | null {
   if (wsId === "tmux") return null;
   if (wsId.startsWith("dir:")) return dirFromId(wsId);
-  if (Date.now() - wsPaths.at > 30_000) {
-    const map = new Map<string, string>();
-    try {
-      const list = JSON.parse(ss(["workspaces", "list", "--local", "--json"]));
-      for (const w of Array.isArray(list) ? list : list.workspaces ?? []) if (w.worktreePath && w.worktreeExists !== false) map.set(w.id, w.worktreePath);
-    } catch { /* Superset not running */ }
+  const fill = (out: string) => {
+    const map = new Map<string, string>(), list = JSON.parse(out);
+    for (const w of Array.isArray(list) ? list : list.workspaces ?? []) if (w.worktreePath && w.worktreeExists !== false) map.set(w.id, w.worktreePath);
     wsPaths = { at: Date.now(), map };
+  };
+  const stale = Date.now() - wsPaths.at > 30_000;
+  // known id + stale list → answer from the old list and refresh in the background (a sync run blocks the server)
+  if (stale && wsPaths.map.has(wsId)) {
+    if (!wsPathsRefreshing) { wsPathsRefreshing = true; ssAsync(["workspaces", "list", "--local", "--json"]).then(fill).catch(() => {}).finally(() => { wsPathsRefreshing = false; }); }
+  } else if (stale || !wsPaths.map.has(wsId) && Date.now() - wsPaths.at > 3_000) {
+    try { fill(ss(["workspaces", "list", "--local", "--json"])); } catch { wsPaths = { at: Date.now(), map: wsPaths.map }; /* Superset not running */ }
   }
   return wsPaths.map.get(wsId) ?? null;
 }
@@ -1273,6 +1308,27 @@ export function nestedDeco(repo: string): { letter: string; count: number } | nu
   if (!entries.length) return null;
   const letter = entries.map(decoLetter).reduce((a, b) => (RANK[b] > RANK[a] ? b : a));
   return { letter, count: entries.length };
+}
+
+/** Same as nestedDeco + repoBranch, but async (git runs in parallel, the server keeps serving) and kept 10 s. */
+const nestedCache = new Map<string, { at: number; v: { git: ReturnType<typeof nestedDeco>; repo: string } }>();
+async function gitAsync(repo: string, args: string[]): Promise<string> {
+  const p = Bun.spawn(["git", "-C", repo, "-c", "core.quotepath=false", ...args], { stdout: "pipe", stderr: "ignore" });
+  const t = setTimeout(() => p.kill(), 10_000);
+  const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]); clearTimeout(t);
+  if (code !== 0) throw new Error(`git exit ${code}`);
+  return out;
+}
+export async function nestedInfo(repo: string): Promise<{ git: ReturnType<typeof nestedDeco>; repo: string }> {
+  const c = nestedCache.get(repo);
+  if (c && Date.now() - c.at < 10_000 && statusCache.has(repo)) return c.v;
+  const [st, br] = await Promise.all([gitAsync(repo, ["status", "--porcelain=v1", "-uall", "-z"]).catch(() => ""), gitAsync(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")]);
+  const entries: GitEntry[] = [], recs = st.split("\0").filter(Boolean);
+  for (let i = 0; i < recs.length; i++) { const r = recs[i]; entries.push({ path: r.slice(3), x: r[0], y: r[1] }); if (r[0] === "R" || r[0] === "C") i++; }
+  statusCache.set(repo, { at: Date.now(), entries });
+  const v = { git: entries.length ? { letter: entries.map(decoLetter).reduce((a, b) => (RANK[b] > RANK[a] ? b : a)), count: entries.length } : null, repo: br.trim() };
+  nestedCache.set(repo, { at: Date.now(), v });
+  return v;
 }
 
 /** Git repos inside a workspace (the workspace itself + nested ones up to 3 levels down). */
@@ -1401,6 +1457,7 @@ export const SUPERSET_KEYS: Record<string, string> = {
   "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
 };
 
+const perfLog: { at: number; ua: string; rows: { k: string; n: number; med: number; max: number }[] }[] = [];
 export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
   const app = new Elysia({ prefix: "/mobile" })
     // Local hook receiver — guarded by its own token, never by Tailscale identity.
@@ -1524,19 +1581,19 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       } catch { return { presets: [] }; }
     })
     // ── explorer ──
-    .get("/workspaces/:ws/tree", ({ params, query, set }) => {
+    .get("/workspaces/:ws/tree", async ({ params, query, set }) => {
       const root = workspacePath(params.ws);
       if (!root) { set.status = 404; return { ok: false, error: "ไม่พบโฟลเดอร์ของ workspace นี้" }; }
       const r = listDir(root, String(query.path ?? ""));
       if (!r) { set.status = 400; return { ok: false, error: "bad path" }; }
       const abs = join(realpathSync(root), r.path);
       const deco = decorateDir(abs), ign = ignoredNames(abs, r.items.map(it => it.name));
-      return { ok: true, root, ...r, items: r.items.map(it => {
+      return { ok: true, root, ...r, items: await Promise.all(r.items.map(async it => {
         // a folder that is its own repo: show ITS changes + branch, not the parent's "untracked" (matches what you see inside)
         const nested = it.dir && existsSync(join(abs, it.name, ".git")) ? join(abs, it.name) : null;
-        if (nested) return { ...it, git: nestedDeco(nested), repo: repoBranch(nested), ignored: ign.has(it.name) };
+        if (nested) { const n = await nestedInfo(nested); return { ...it, git: n.git, repo: n.repo, ignored: ign.has(it.name) }; }
         return { ...it, git: deco.get(it.name) ?? null, ignored: ign.has(it.name) };
-      }) };
+      })) };
     }, { query: t.Object({ path: t.Optional(t.String()) }) })
     .get("/workspaces/:ws/file", ({ params, query, set }) => {
       const root = workspacePath(params.ws);
@@ -1644,6 +1701,14 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       catch { return { ok: true, suggestion: null, spinner: null, queued: [], usage }; }
     }, { query: t.Object({ agent: t.Optional(t.String()), sid: t.Optional(t.String()) }) })
     // phone UI version = newest mtime of the deployed page + feature packs (the page reloads itself when it changes)
+    // what the phone measured (ms per route: network + Mac) — debugging only, kept in memory
+    .post("/perf", ({ body }) => {
+      const rows = Array.isArray((body as any)?.rows) ? (body as any).rows.slice(0, 60) : [];
+      perfLog.push({ at: Date.now(), ua: String((body as any)?.ua ?? "").slice(0, 80), rows: rows.map((r: any) => ({ k: String(r.k).slice(0, 80), n: +r.n || 0, med: +r.med || 0, max: +r.max || 0 })) });
+      while (perfLog.length > 60) perfLog.shift();
+      return { ok: true };
+    })
+    .get("/perf", () => ({ ok: true, log: perfLog }))
     .get("/version", () => {
       const dir = process.env.MAW_UI_DIR ?? join(homedir(), ".maw", "ui", "dist");
       const files = ["m.html", "sw.js", ...(() => { try { return readdirSync(join(dir, "m-ext")).map(f => join("m-ext", f)); } catch { return []; } })()];

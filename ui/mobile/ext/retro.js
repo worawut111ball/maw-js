@@ -3,17 +3,14 @@
 // Home is redrawn every ~2.5 s, so everything here paints from cache and keeps its own state (armed button, open/closed).
 (() => {
   if (!window.mawExt) return;
-  const R = { data: null, at: 0, inflight: false, busy: false, armed: "", armedT: 0, open: true };
-  try { R.open = localStorage.getItem("maw-retro-open") !== "0"; } catch { /* private mode */ }
+  const R = { data: null, at: 0, inflight: false, busy: false, armed: "", armedT: 0, el: null };
   const EVERY_OPEN = 15_000, EVERY_CLOSED = 60_000;
 
   const css = `
-  .rt { background: var(--card); border: 1px solid var(--line); border-radius: 16px; margin: 0 0 10px; overflow: hidden; }
-  .rt-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 13px; text-align: left; font: 650 14.5px var(--font); color: var(--text); }
-  .rt-h .m { color: var(--dim); font-weight: 500; font-size: 12.5px; }
-  .rt-h .bd { margin-left: auto; flex: none; padding: 2px 8px; border-radius: 999px; background: #f59e0b26; color: #fbbf24; font-size: 11.5px; font-weight: 700; }
-  .rt-h .cv { flex: none; color: var(--dim); transition: transform .15s; } .rt.open .rt-h .cv { transform: rotate(90deg); }
-  .rt-b { padding: 0 12px 12px; display: none; } .rt.open .rt-b { display: block; }
+  .rt-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; } .rt-page > * { min-width: 0; }
+  .rt-sec { margin: 14px 2px 6px; color: var(--dim); font-size: 12px; font-weight: 600; letter-spacing: .02em; } .rt-sec:first-child { margin-top: 2px; } .rt-sec .due { color: #fbbf24; }
+  .rt-rs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .rt-rs .rt-r { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
   .rt-seg { display: flex; gap: 2px; padding: 3px; background: var(--card2); border-radius: 10px; }
   .rt-seg button { flex: 1; padding: 7px 4px; border-radius: 7px; color: var(--dim); font: 600 13px var(--font); }
   .rt-seg button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 3px #0006; }
@@ -24,9 +21,7 @@
   .rt-c { padding: 4px 10px; border-radius: 999px; background: var(--card2); color: var(--dim); font: 600 12.5px var(--font); }
   .rt-c.on { background: var(--accent); color: #031022; }
   .rt-c:disabled { opacity: .45; text-decoration: line-through; }
-  .rt-rs { margin-top: 8px; border-top: 1px solid var(--line); }
-  .rt-r { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--line); }
-  .rt-r:last-child { border-bottom: 0; padding-bottom: 0; }
+  .rt-r { display: flex; align-items: center; gap: 9px; }
   .rt-r .n { flex: 1; min-width: 0; } .rt-r .n b { display: block; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rt-r .n span { display: block; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .rt-r .n span.due { color: #fbbf24; }
@@ -57,25 +52,20 @@
         <span class="${r.due ? "due" : ""}">${esc(r.due ? "⏰ ถึงเวลาสรุป · " + meta : meta)}</span></div>
         <button class="rt-go ${r.due ? "due" : ""} ${armed ? "armed" : ""}" data-rt="${esc(r.sessionId)}" ${why || !r.ws || !avail[s.skill] ? "disabled" : ""}>${why ? esc(why) : !r.ws ? "สั่งไม่ได้" : armed ? "แตะอีกครั้ง" : `สั่ง /${esc(s.skill)}`}</button></div>`;
     }).join("");
-    return `<button class="rt-h" id="rt-h"><span>📝 สรุปงาน</span><span class="m">(${esc(s.skill)} · ${esc(MODES.find(m => m[0] === s.mode)?.[1] || s.mode)})</span>${due ? `<span class="bd">${due} ถึงเวลา</span>` : ""}<span class="cv" ${due ? "" : 'style="margin-left:auto"'}>›</span></button>
-      <div class="rt-b">
+    return `<div class="rt-sec">โหมด</div>
         <div class="rt-seg">${MODES.map(([k, l]) => `<button class="${s.mode === k ? "on" : ""} ${k}" data-mode="${k}">${l}</button>`).join("")}</div>
         <div class="rt-x">${esc(explain(s))}</div>
         <div class="rt-l"><span class="k">skill</span>${(d.skills || []).map(k => `<button class="rt-c ${s.skill === k.name ? "on" : ""}" data-skill="${esc(k.name)}" ${k.available ? "" : 'disabled title="ไม่มี skill นี้ในเครื่อง"'}>${esc(k.name)}${k.available ? "" : " · ไม่มี"}</button>`).join("")}</div>
         ${s.mode !== "manual" ? `<div class="rt-l"><span class="k">ทำงานครบ</span>${[15, 30, 60, 90].map(n => `<button class="rt-c ${s.minMinutes === n ? "on" : ""}" data-min="${n}">${n} น.</button>`).join("")}</div>
         <div class="rt-l"><span class="k">ว่าง</span>${[5, 10, 20, 30].map(n => `<button class="rt-c ${s.idleMinutes === n ? "on" : ""}" data-idle="${n}">${n} น.</button>`).join("")}</div>` : ""}
-        <div class="rt-rs">${rooms || `<div class="rt-none">ไม่มีห้อง Claude ที่เปิดอยู่</div>`}</div>
-      </div>`;
+        <div class="rt-sec">ห้อง Claude${due ? ` · <b class="due">${due} ถึงเวลาสรุป</b>` : ""}</div>
+        <div class="rt-rs">${rooms || `<div class="rt-none">ไม่มีห้อง Claude ที่เปิดอยู่</div>`}</div>`;
   }
 
   function paint() {
-    const slot = document.getElementById("ext-home");
-    if (!slot || !R.data) return;
-    let card = slot.querySelector(".rt");
-    if (!card) { card = document.createElement("div"); card.className = "rt"; slot.prepend(card); }
-    card.classList.toggle("open", R.open);
+    const card = R.el; if (!card || !card.isConnected) return;
+    if (!R.data) { card.innerHTML = `<div class="rt-none">กำลังโหลด…</div>`; return; }
     card.innerHTML = html(R.data);
-    card.querySelector("#rt-h").onclick = () => { R.open = !R.open; try { localStorage.setItem("maw-retro-open", R.open ? "1" : "0"); } catch {} paint(); if (R.open) refresh(); };
     card.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => saveSettings({ mode: b.dataset.mode }));
     card.querySelectorAll("[data-skill]").forEach(b => b.onclick = () => saveSettings({ skill: b.dataset.skill }));
     card.querySelectorAll("[data-min]").forEach(b => b.onclick = () => saveSettings({ minMinutes: +b.dataset.min }));
@@ -85,9 +75,9 @@
 
   async function refresh(force) {
     if (R.inflight || document.hidden) return;
-    if (!force && Date.now() - R.at < (R.open ? EVERY_OPEN : EVERY_CLOSED)) return;
+    if (!force && Date.now() - R.at < (R.el?.isConnected ? EVERY_OPEN : EVERY_CLOSED)) return;
     R.inflight = true;
-    try { R.data = await api("/retro"); R.at = Date.now(); if (!state.project) paint(); }
+    try { R.data = await api("/retro"); R.at = Date.now(); paint(); mawExt.refreshTiles?.(); }
     catch { R.at = Date.now(); /* old server without the pack / offline → no card */ }
     finally { R.inflight = false; }
   }
@@ -105,7 +95,7 @@
     if (R.busy || !R.data) return;
     if (!(R.armed === sid && Date.now() < R.armedT)) {
       R.armed = sid; R.armedT = Date.now() + 4000; paint();
-      setTimeout(() => { if (Date.now() >= R.armedT) { R.armed = ""; if (!state.project) paint(); } }, 4100);
+      setTimeout(() => { if (Date.now() >= R.armedT) { R.armed = ""; paint(); } }, 4100);
       return;
     }
     R.armed = ""; R.busy = true;
@@ -115,7 +105,18 @@
     finally { R.busy = false; refresh(true); }
   }
 
-  mawExt.onHome.push(() => { paint(); refresh(); });
-  if (!state.project) { paint(); refresh(true); }   // home may already be on screen before this deferred script ran
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && !state.project) refresh(true); });
+  // own screen from the home "เมนู" grid
+  const modeName = m => MODES.find(x => x[0] === m)?.[1] || m;
+  mawExt.pages.push({
+    key: "retro", icon: "📝", title: "สรุปงาน",
+    summary() {
+      if (!R.data) return { text: "rrr · …" };
+      const due = R.data.rooms.filter(r => r.due).length, s = R.data.settings;
+      return { text: `${s.skill} · ${modeName(s.mode)}${due ? ` · ${due} ถึงเวลา` : ""}`, badge: due ? String(due) : "" };
+    },
+    mount(el) { R.el = document.createElement("div"); R.el.className = "rt-page"; el.appendChild(R.el); paint(); refresh(true); },
+  });
+  refresh(true);
+  setInterval(() => refresh(false), 15_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(true); });
 })();
