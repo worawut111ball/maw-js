@@ -543,9 +543,12 @@ describe("open local repos / folders from the phone", () => {
     expect(allowedDir("/etc", home)).toBeNull();
   });
   test("dir ids round-trip and reject junk", () => {
-    const h = fs.realpathSync(os.homedir());
-    expect(dirFromId(dirId(h))).toBe(h);
-    expect(dirFromId("dir:../../etc")).toBeNull();
+    // own temp home — another test file (upload) mocks os.homedir to a dir it deletes
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "home-")));
+    const h = path.join(home, "work"); fs.mkdirSync(h);
+    expect(dirFromId(dirId(h), home)).toBe(h);
+    expect(dirFromId(dirId(home), home)).toBe(home);
+    expect(dirFromId("dir:../../etc", home)).toBeNull();
   });
   test("scanRepos finds git repos, skips node_modules", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "rh-"));

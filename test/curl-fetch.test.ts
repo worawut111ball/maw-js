@@ -33,9 +33,13 @@ try {
 } catch { /* unreachable — skip integration tests */ }
 
 const liveTest = hasLocalMawServer ? test : test.skip;
+// curlFetch uses native fetch everywhere except macOS, where it shells out to curl
+// (Local Network Privacy). Tests that drive the fetch path (stubbed globalThis.fetch,
+// nativeFetch warnings) only apply off macOS.
+const nativeTest = process.platform === "darwin" ? test.skip : test;
 
 describe("curlFetch", () => {
-  test("uses native fetch on Linux", async () => {
+  nativeTest("uses native fetch on Linux", async () => {
     // On Linux (this test runs on white.local), curlFetch should use native fetch
     // We can verify by checking process.platform
     expect(process.platform).toBe("linux");
@@ -46,7 +50,7 @@ describe("curlFetch", () => {
     expect(res.ok).toBe(false);
   });
 
-  test("warns on nativeFetch failure with method + URL (#385 site 1)", async () => {
+  nativeTest("warns on nativeFetch failure with method + URL (#385 site 1)", async () => {
     // Previous behavior: catch swallowed ALL errors (abort/JSON/network/DNS)
     // and returned a bare {ok:false, status:0, data:null} — callers had no
     // diagnosis. Fix: warn loud with method + URL + error message before
@@ -135,7 +139,7 @@ describe("curlFetch body size cap (#653)", () => {
   // Tests snapshot global.fetch per-case so they don't leak across the file.
   // Pattern lifted from costs.test.ts fix (#649) to keep snapshot/restore safe.
 
-  test("rejects body exceeding maxBytes (streaming)", async () => {
+  nativeTest("rejects body exceeding maxBytes (streaming)", async () => {
     const origFetch = globalThis.fetch;
     try {
       // Stream 20 chunks of 1 MB each — no Content-Length header, so the
@@ -159,7 +163,7 @@ describe("curlFetch body size cap (#653)", () => {
     }
   });
 
-  test("rejects when Content-Length exceeds cap (before buffering)", async () => {
+  nativeTest("rejects when Content-Length exceeds cap (before buffering)", async () => {
     const origFetch = globalThis.fetch;
     try {
       globalThis.fetch = (async () => {
@@ -175,7 +179,7 @@ describe("curlFetch body size cap (#653)", () => {
     }
   });
 
-  test("passes through when body under cap", async () => {
+  nativeTest("passes through when body under cap", async () => {
     const origFetch = globalThis.fetch;
     try {
       globalThis.fetch = (async () => {
@@ -193,7 +197,7 @@ describe("curlFetch body size cap (#653)", () => {
     }
   });
 
-  test("default cap is 10 MB when maxBytes not supplied", async () => {
+  nativeTest("default cap is 10 MB when maxBytes not supplied", async () => {
     const origFetch = globalThis.fetch;
     try {
       globalThis.fetch = (async () => {
@@ -240,5 +244,47 @@ describe("curlFetch federation auth", () => {
     expect(elapsed).toBeLessThan(2000);
     // 404 is expected (target not found) — but it didn't hang
     expect(res.status).toBeDefined();
+  });
+});
+
+// macOS counterpart of the cap tests above: there curlFetch spawns curl, so drive it
+// against a real local server instead of a stubbed globalThis.fetch.
+const curlTest = process.platform === "darwin" ? test : test.skip;
+describe("curlFetch body size cap — curl path (macOS)", () => {
+  const big = new Uint8Array(64 * 1024);
+  let server: ReturnType<typeof Bun.serve>;
+  const url = (p: string) => `http://127.0.0.1:${server.port}${p}`;
+  beforeEach(() => {
+    server?.stop(true);
+    server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) {
+      const p = new URL(req.url).pathname;
+      if (p === "/small") return Response.json({ hello: "world" });
+      if (p === "/declared") return new Response(big, { headers: { "content-type": "application/octet-stream" } });
+      // no Content-Length: stream 8 × 64 KB so only the pipe byte counter can stop it
+      let n = 0;
+      return new Response(new ReadableStream<Uint8Array>({ pull(c) { n++ < 8 ? c.enqueue(big) : c.close(); } }));
+    } });
+  });
+
+  curlTest("passes through when body under cap", async () => {
+    const res = await curlFetch(url("/small"), { maxBytes: 1024, timeout: 5000 });
+    expect(res.ok).toBe(true);
+    expect(res.data).toEqual({ hello: "world" });
+  });
+
+  curlTest("rejects when Content-Length exceeds cap (curl --max-filesize)", async () => {
+    const res = await curlFetch(url("/declared"), { maxBytes: 1024, timeout: 5000 });
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(63); // curl: "Maximum file size exceeded"
+  });
+
+  curlTest("rejects streamed body exceeding maxBytes", async () => {
+    const res = await curlFetch(url("/stream"), { maxBytes: 100 * 1024, timeout: 5000 });
+    expect(res.ok).toBe(false);
+    // curl ≥ 8 enforces --max-filesize mid-stream too (stops at exactly maxBytes, exit 63);
+    // older curl lets it run and the pipe byte counter reports "body exceeded".
+    if (res.status === 63) expect(res.data).toBeNull();
+    else expect(res.data?.error).toMatch(/body exceeded 102400 bytes/);
+    server.stop(true);
   });
 });

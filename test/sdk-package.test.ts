@@ -61,7 +61,9 @@ describe("@maw-js/sdk workspace package", () => {
             dependencies: { "@maw-js/sdk": `file:${SDK_PKG_DIR}` },
           }),
         );
-        const install = spawnSync("bun", ["install"], {
+        // symlink backend: bun copies file: directories by default, which breaks the
+        // SDK's re-exports from ../../src (they only resolve inside the repo).
+        const install = spawnSync("bun", ["install", "--backend=symlink"], {
           cwd: dir,
           encoding: "utf8",
         });

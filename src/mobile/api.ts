@@ -482,9 +482,9 @@ export function allowedDir(path: string, home = homedir()): string | null {
     return statSync(real).isDirectory() ? real : null;
   } catch { return null; }
 }
-export function dirFromId(id: string): string | null {
+export function dirFromId(id: string, home = homedir()): string | null {
   if (!/^dir:[A-Za-z0-9_-]+$/.test(id)) return null;
-  return allowedDir(Buffer.from(id.slice(4), "base64url").toString("utf-8"));
+  return allowedDir(Buffer.from(id.slice(4), "base64url").toString("utf-8"), home);
 }
 export function loadFolders(file = FOLDERS_FILE): PinnedFolder[] {
   try { return (JSON.parse(readFileSync(file, "utf-8")) as PinnedFolder[]).filter(f => allowedDir(f.path)); } catch { return []; }

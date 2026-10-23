@@ -27,7 +27,10 @@ mock.module("../src/config/load", () => ({
   cfg: (k: string) => (fakeConfig as any)[k],
 }));
 
-const { buildCommand, buildCommandInDir } = await import("../src/config/command");
+// Query suffix = a fresh module instance. Other files mock the "../src/config" barrel
+// (helpers/mock-config → buildCommand: "echo test"), and bun patches that into the
+// already-loaded ./config/command exports process-wide — the plain import would get the stub.
+const { buildCommand, buildCommandInDir } = await import("../src/config/command?fresh-from-barrel-mocks");
 
 // buildCommand strips --dangerously-skip-permissions when process.getuid() === 0
 // (root-stripping from #181). Tests below assert the flag is preserved in the
