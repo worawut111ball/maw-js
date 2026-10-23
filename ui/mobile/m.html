@@ -691,7 +691,9 @@ function renderProject() {
         if (how === "clear") await roomKey("ctrlu");
       }
       // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
-      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, text, files, at: Date.now(), state: "sending", note: "",
+      // newest user message already in the chat → anything after it is ours (pasted images come back as "[Image #12]", not our text)
+      const lastUserI = state.chat?.room === room.id ? Math.max(-1, ...[...state.chat.items.values()].filter(m => m.role === "user").map(m => m.i)) : null;
+      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI, text, files, at: Date.now(), state: "sending", note: "",
         pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
       pendingSends.push(pend); savePending(pend);
       msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
@@ -905,7 +907,7 @@ function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) 
 // Android may kill the page mid-send (camera, app switch) → keep the bubbles: list in localStorage, files in Cache Storage
 const PEND_KEY = "maw-pend", PEND_CACHE = "maw-pend";
 function savePending(withFiles) {
-  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
+  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
   if (withFiles && withFiles.files.length && "caches" in window)
     caches.open(PEND_CACHE).then(box => Promise.all(withFiles.files.map((f, i) => box.put(`${location.origin}/pend/${withFiles.id}/${i}`, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }))))).catch(() => {});
 }
@@ -933,12 +935,15 @@ async function restorePending() {
 }
 /** Sent bubbles leave once the real message shows up in the chat (or after a minute as a fallback). */
 function reconcilePending(list) {
-  const mine = list.filter(m => m.role === "user").slice(-12);
-  for (const p of [...pendingSends]) {
+  const mine = list.filter(m => m.role === "user").slice(-12), claimed = new Set();
+  for (const p of [...pendingSends].sort((a, b) => a.id - b.id)) {
     if (p.state !== "sent" || p.ws !== state.ws || p.room !== state.room) continue;
     const head = (p.text || p.paths?.[0] || "").slice(0, 40).trim();
-    const seen = mine.some(m => (!m.ts || Date.parse(m.ts) >= p.at - 120_000) && head && String(m.text || "").includes(head));
-    if (seen || Date.now() - p.sentAt > 60_000) dropPending(p, true);
+    let hit = mine.find(m => !claimed.has(m.i) && (!m.ts || Date.parse(m.ts) >= p.at - 120_000) && head && String(m.text || "").includes(head));
+    // no text match (images only, or the agent rewrote it): the first user message newer than what was there at send time
+    if (!hit && p.lastUserI != null) hit = mine.find(m => !claimed.has(m.i) && m.i > p.lastUserI);
+    if (hit) claimed.add(hit.i);
+    if (hit || Date.now() - p.sentAt > 60_000) dropPending(p, true);
   }
 }
 function paintPending() {
