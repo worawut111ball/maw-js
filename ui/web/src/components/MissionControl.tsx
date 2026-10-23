@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo, useState } from "react";
 import { HoverPreviewCard } from "./HoverPreviewCard";
 import { Joystick } from "./Joystick";
 import { OracleSearch } from "./OracleSearch";
@@ -36,21 +36,93 @@ export const MissionControl = memo(function MissionControl({
   const mc = useMissionControl({ sessions, agents, send, onSelectAgent, addEvent });
   const { isMobile } = useDevice();
 
+  // Phone (<640px): the zoom/pan map is tiny and has no touch pan — default to a list,
+  // and when the map is shown fit its viewBox to the clusters (fit-to-width).
+  const [phoneView, setPhoneViewState] = useState<"list" | "map">(() => {
+    try { return localStorage.getItem("mission-phone-view") === "map" ? "map" : "list"; } catch { return "list"; }
+  });
+  const setPhoneView = (v: "list" | "map") => {
+    setPhoneViewState(v);
+    try { localStorage.setItem("mission-phone-view", v); } catch { /* storage blocked */ }
+  };
+  const showList = isMobile && phoneView === "list";
+  const fitBox = useMemo(() => {
+    let minX = 600 - 140, maxX = 600 + 140, minY = 500 - 140, maxY = 500 + 140; // hub
+    for (const it of mc.layout) {
+      const r = Math.max(70, 35 + it.agents.length * 18);
+      minX = Math.min(minX, it.x - r - 16); maxX = Math.max(maxX, it.x + r + 16);
+      minY = Math.min(minY, it.y - r - 34); maxY = Math.max(maxY, it.y + r + 30);
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }, [mc.layout]);
+  const viewBox = isMobile
+    ? `${fitBox.x} ${fitBox.y} ${fitBox.w} ${fitBox.h}`
+    : `${mc.vbX} ${mc.vbY} ${mc.vbW} ${mc.vbH}`;
+
   return (
     <div
       ref={mc.containerRef}
-      className="relative w-full overflow-hidden h-[calc(100dvh-124px)] sm:h-[calc(100vh-60px)]"
+      className="relative w-full overflow-hidden h-[calc(100dvh-124px)] sm:h-[calc(100vh-60px)] flex flex-col sm:block"
       style={{ background: "#020208", cursor: mc.isPanning ? "grabbing" : "default" }}
       onMouseDown={mc.onMouseDown}
       onMouseMove={mc.onMouseMove}
       onMouseUp={mc.onMouseUp}
       onMouseLeave={mc.onMouseUp}
     >
+      {/* Phone: List / Map switch */}
+      {isMobile && (
+        <div className="self-center flex-shrink-0 mt-2 mb-1 z-20 flex rounded-xl border border-white/10 bg-black/70 p-0.5 font-mono text-[12px]">
+          {(["list", "map"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setPhoneView(v)}
+              className={`min-h-10 px-5 rounded-lg ${phoneView === v ? "bg-cyan-400/15 text-cyan-300" : "text-white/50"}`}
+            >
+              {v === "list" ? "List" : "Map"}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showList && <BottomStats agents={agents} />}
+      {showList && (
+        <div className="mission-list flex-1 min-h-0 overflow-y-auto px-4 pt-1 pb-20 space-y-3">
+          {mc.layout.length === 0 && (
+            <div className="text-center text-white/40 text-sm font-mono pt-10">No rooms</div>
+          )}
+          {mc.layout.map((it) => {
+            const room = { label: it.style.label, accent: it.style.accent };
+            return (
+              <section key={it.session.name} className="rounded-xl border bg-white/[0.02]" style={{ borderColor: `${it.style.accent}33` }}>
+                <header className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.05]">
+                  <span className="text-[12px] font-bold tracking-[2px] uppercase font-mono" style={{ color: it.style.accent }}>{it.style.label}</span>
+                  <span className="ml-auto text-[11px] font-mono text-white/40">{it.agents.length} agent{it.agents.length !== 1 ? "s" : ""}</span>
+                </header>
+                {it.agents.map((a) => (
+                  <button
+                    key={a.target}
+                    onClick={() => mc.onAgentClick(a, it.x, it.y, room)}
+                    className="w-full min-h-12 flex items-center gap-3 px-3 py-2 text-left border-b last:border-b-0 border-white/[0.04] active:bg-white/[0.05]"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: a.status === "busy" ? "#fdd835" : a.status === "ready" ? "#34d399" : "rgba(255,255,255,0.3)" }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[14px] text-white/85 truncate">{a.name}</span>
+                      <span className="block text-[11px] font-mono text-white/35 truncate">{a.target}</span>
+                    </span>
+                    <span className="text-[11px] font-mono flex-shrink-0" style={{ color: a.status === "busy" ? "#fdd835" : a.status === "ready" ? "#34d399" : "rgba(255,255,255,0.4)" }}>{a.status}</span>
+                  </button>
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      )}
+
       {/* SVG Mission Control */}
       <svg
         ref={mc.svgRef}
-        viewBox={`${mc.vbX} ${mc.vbY} ${mc.vbW} ${mc.vbH}`}
-        className="w-full h-full"
+        viewBox={viewBox}
+        className={`w-full flex-1 min-h-0 sm:h-full${showList ? " hidden" : ""}${isMobile ? " phone-still" : ""}`}
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -194,13 +266,17 @@ export const MissionControl = memo(function MissionControl({
 
       {/* Multi-card bar */}
       {mc.multiCards.size > 0 && !mc.pinnedPreview && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center gap-2 overflow-x-auto pointer-events-auto p-3" style={{ height: "calc(100vh - 80px)", scrollbarWidth: "none", background: "transparent" }}>
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center gap-2 overflow-x-auto pointer-events-auto p-3" style={isMobile
+          ? { top: 52, bottom: 72, justifyContent: "flex-start", scrollSnapType: "x mandatory", scrollbarWidth: "none", background: "transparent" }
+          : { height: "calc(100vh - 80px)", scrollbarWidth: "none", background: "transparent" }}>
           {[...mc.multiCards].map(target => {
             const agent = agents.find(a => a.target === target);
             if (!agent) return null;
             const room = roomStyle(agent.session);
             return (
-              <div key={target} style={{ flex: 1, minWidth: 280, maxWidth: 700, height: "100%" }}>
+              <div key={target} style={isMobile
+                ? { flex: "0 0 calc(100vw - 24px)", height: "100%", scrollSnapAlign: "center" }
+                : { flex: 1, minWidth: 280, maxWidth: 700, height: "100%" }}>
                 <HoverPreviewCard
                   agent={agent}
                   roomLabel={room.label}
@@ -221,7 +297,7 @@ export const MissionControl = memo(function MissionControl({
       )}
 
       {/* Bottom left buttons — search */}
-      <div className="absolute bottom-4 left-6 flex items-center gap-2 z-20">
+      <div className="absolute bottom-4 left-4 sm:left-6 flex items-center gap-2 z-20">
         <button
           onClick={() => mc.setShowSearch(true)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/50 backdrop-blur border border-white/10 text-white/50 hover:text-[#64b5f6] hover:border-[#64b5f6]/30 cursor-pointer transition-all"
@@ -232,7 +308,7 @@ export const MissionControl = memo(function MissionControl({
             <line x1={21} y1={21} x2={16.65} y2={16.65} />
           </svg>
           <span className="text-[10px] font-mono">Oracle</span>
-          <kbd className="text-[8px] text-white/20 ml-1">⌘K</kbd>
+          <kbd className="hidden sm:inline text-[8px] text-white/20 ml-1">⌘K</kbd>
         </button>
       </div>
 
@@ -240,7 +316,7 @@ export const MissionControl = memo(function MissionControl({
       {mc.showSearch && <OracleSearch onClose={() => mc.setShowSearch(false)} />}
 
       {/* Bottom stats + FPS */}
-      <BottomStats agents={agents} />
+      {!isMobile && <BottomStats agents={agents} />}
       <FpsCounter />
     </div>
   );

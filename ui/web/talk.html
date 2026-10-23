@@ -162,6 +162,23 @@
   .fullscreen .top-bar,
   .fullscreen .input-bar { display: none; }
   .fullscreen .terminal-wrap { flex: 1; }
+
+  .input-bar input { min-width: 0; }
+
+  /* Phone (≤640px): fit 360px, ≥40px tap targets, no endless animations (phone heat) */
+  @media (max-width: 640px) {
+    body { height: 100dvh; }
+    .top-bar { gap: 8px; height: 56px; }
+    .oracle-name { letter-spacing: 2px; }
+    .top-btn { min-height: 40px; min-width: 40px; padding: 0 10px; justify-content: center; font-size: 0.9rem; }
+    .top-btn .lbl { display: none; }
+    .input-bar { height: 68px; gap: 8px; padding: 0 12px; }
+    .send-btn { padding: 0 14px; }
+    .mic-orb-wrap { padding: 14px 0 10px; }
+  }
+  @media (max-width: 640px), (prefers-reduced-motion: reduce) {
+    .mic-ring, .mic-orb.listening .mic-orb-inner, .mic-btn.listening { animation: none; }
+  }
 </style>
 </head>
 <body>
@@ -173,8 +190,8 @@
   <span class="status-dot" id="statusDot"></span>
   <span class="oracle-sub" id="oracleSub">The Builder</span>
   <div class="spacer"></div>
-  <button class="top-btn" id="fullscreenBtn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
-  <a class="top-btn" href="/">← Office</a>
+  <button class="top-btn" id="fullscreenBtn" onclick="toggleFullscreen()" aria-label="Fullscreen">⛶ <span class="lbl">Fullscreen</span></button>
+  <a class="top-btn" href="/" aria-label="Office">← <span class="lbl">Office</span></a>
 </div>
 
 <!-- BIG MIC ORB -->

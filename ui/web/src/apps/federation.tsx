@@ -9,6 +9,7 @@ import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRe
 import "../index.css";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { apiUrl } from "../lib/api";
+import { isPhone, makeFrameGate } from "../lib/motion";
 import type { FeedEvent, FeedEventType } from "../lib/feed";
 
 // ─── Types ───
@@ -447,9 +448,14 @@ function App() {
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(W, H);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Phone: 1x pixels — bloom at 2x on a budget phone is the main heat source
+    renderer.setPixelRatio(isPhone() ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
+    // Absolute so a stale canvas size never pushes the side panel off-screen (phone stacks it below)
+    renderer.domElement.style.position = "absolute";
+    renderer.domElement.style.top = "0";
+    renderer.domElement.style.left = "0";
     el.appendChild(renderer.domElement);
 
     // CSS2D label renderer (overlays HTML on 3D)
@@ -547,11 +553,18 @@ function App() {
       labelRenderer.setSize(w, h);
     }
     window.addEventListener("resize", onResize);
+    // The viewport also changes size without a window resize (side panel content loads on phone)
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => onResize()) : null;
+    ro?.observe(el);
 
     // Animate
     let time = 0;
-    function animate() {
-      requestAnimationFrame(animate);
+    let rafId = 0;
+    // Phone: ≤20 fps · reduced motion: lower · hidden tab: no work at all
+    const gate = makeFrameGate(20);
+    function animate(now = performance.now()) {
+      rafId = requestAnimationFrame(animate);
+      if (!gate(now)) return;
       time += 0.016;
       controls.update();
 
@@ -758,6 +771,9 @@ function App() {
 
     // Cleanup
     return () => {
+      cancelAnimationFrame(rafId);
+      gate.dispose();
+      ro?.disconnect();
       window.removeEventListener("resize", onResize);
       renderer.dispose();
       el.removeChild(renderer.domElement);
@@ -1081,11 +1097,11 @@ function App() {
   const totalAgents = agents.length;
 
   return (
-    <div className="h-screen flex flex-col" style={{ background: "#020a18" }}>
-      <header className="flex items-center gap-4 px-6 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+    <div className="h-[100dvh] flex flex-col" style={{ background: "#020a18" }}>
+      <header className="phone-text-up flex flex-wrap items-center gap-x-4 gap-y-1 px-4 sm:px-6 py-2 sm:py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
         <div className="flex items-center gap-3">
           <span className="text-xl">🕸</span>
-          <h1 className="text-lg font-black tracking-tight" style={{ color: "#00f5d4" }}>Federation Mesh</h1>
+          <h1 className="text-lg font-black tracking-tight whitespace-nowrap" style={{ color: "#00f5d4" }}>Federation Mesh</h1>
         </div>
         {node && (
           <span
@@ -1098,7 +1114,7 @@ function App() {
         <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${connected ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>
           {connected ? "LIVE" : "OFFLINE"}
         </span>
-        <div className="flex items-center gap-3 text-[10px] font-mono text-white/20">
+        <div className="flex items-center gap-x-3 text-[10px] font-mono text-white/20 basis-full sm:basis-auto overflow-x-auto scrollbar-none whitespace-nowrap">
           <span>{machines.length} machines</span>
           <span>·</span>
           <span>{totalAgents} agents</span>
@@ -1109,7 +1125,7 @@ function App() {
           <span>·</span>
           <span className="text-cyan-400/40">{lineages.length} lineage</span>
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto hidden sm:flex items-center gap-1.5">
           {machines.map(m => (
             <span key={m} className="flex items-center gap-1 text-[9px] font-mono" style={{ color: machineCSS(m) }}>
               <span className="w-2 h-2 rounded-full" style={{ background: machineCSS(m) }} />{m}
@@ -1118,12 +1134,12 @@ function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col sm:flex-row flex-1 min-h-0 overflow-hidden">
         {/* Three.js viewport */}
-        <div ref={mountRef} className="flex-1" onPointerMove={handlePointerMove} onClick={handleClick} />
+        <div ref={mountRef} className="flex-1 min-h-0 overflow-hidden" onPointerMove={handlePointerMove} onClick={handleClick} />
 
         {/* Sidebar */}
-        <div className="w-[240px] flex-shrink-0 border-l overflow-y-auto p-4 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+        <div className="phone-text-up w-full sm:w-[240px] max-h-[40%] sm:max-h-none flex-shrink-0 border-t sm:border-t-0 sm:border-l overflow-y-auto p-4 space-y-4" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
           {selAgent ? (
             <>
               <div>

@@ -52,6 +52,7 @@ maw ui --dev
 | `peerProxyClient.ts` | Browser client for `POST /api/proxy` (REST relay for HTTP-LAN peers) |
 | `peerConnection.ts` | Classify peer connectivity: same-origin / direct / mixed-content-blocked / invalid |
 | `peerConnectionBanner.ts` | Derive UI error banner from peer classification |
+| `motion.ts` | งบอนิเมชันบนมือถือ (<640px): `makeFrameGate()` จำกัด rAF/canvas/WebGL ≤20 fps · หยุดเมื่อ `document.hidden` · ลดลงอีกเมื่อ prefers-reduced-motion — loop ใหม่ต้องใช้ตัวนี้ (เพิ่ม 23 ต.ค. 69) |
 
 ## Deploy
 

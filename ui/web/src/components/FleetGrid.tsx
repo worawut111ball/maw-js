@@ -6,7 +6,6 @@ import { FootballPitch } from "./FootballPitch";
 import { AgentRow } from "./AgentRow";
 import { roomStyle, PREVIEW_CARD, guessCommand } from "../lib/constants";
 import { BottomStats } from "./BottomStats";
-import { useFps } from "./FpsCounter";
 import { useFleetStore, RECENT_TTL_MS, type RecentEntry } from "../lib/store";
 import { useDevice } from "../hooks/useDevice";
 import type { AgentState, Session, AgentEvent } from "../lib/types";
@@ -238,7 +237,6 @@ function sortRooms(sessions: Session[], agentMap: Map<string, AgentState[]>, mod
 export const FleetGrid = memo(function FleetGrid({
   sessions, agents, connected, send, onSelectAgent, eventLog, addEvent, feedActive, agentFeedLog, teams,
 }: FleetGridProps) {
-  const fps = useFps();
   const { isMobile } = useDevice();
   const observe = useVisibleTargets(send);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -392,7 +390,7 @@ export const FleetGrid = memo(function FleetGrid({
   }, [agents, busyAgents, recentMap]);
 
   return (
-    <div ref={containerRef} className="relative w-full min-h-screen overflow-x-hidden" style={{ background: "#0a0a12" }}>
+    <div ref={containerRef} className="relative w-full min-h-[calc(100dvh-124px)] sm:min-h-screen overflow-x-hidden" style={{ background: "#0a0a12" }}>
       {/* Toggle: Stage vs Pitch */}
       {stageMode === "pitch" ? (
         <FootballPitch

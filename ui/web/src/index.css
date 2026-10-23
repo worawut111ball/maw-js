@@ -142,3 +142,16 @@ button, [role="button"], a[href] {
 @keyframes orbital-res { 0% { width: 90px; height: 90px; opacity: 0.6; } 100% { width: 220px; height: 220px; opacity: 0; } }
 @keyframes orbital-glow { 0%, 100% { box-shadow: 0 0 8px var(--tw-shadow-color, rgba(76,175,80,0.3)); } 50% { box-shadow: 0 0 20px var(--tw-shadow-color, rgba(76,175,80,0.6)); } }
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Phone (<640px) / reduced motion: no endless CSS animations inside .phone-still
+   (SVG pulses repaint every frame — a budget Android phone overheated from that) */
+@media (max-width: 639.98px), (prefers-reduced-motion: reduce) {
+  .phone-still, .phone-still * { animation: none !important; }
+}
+
+/* Phone: lift 8–10px labels to a readable size and make clickable rows ≥40px tall
+   (federation / federation_2d header + side panel) */
+@media (max-width: 639.98px) {
+  .phone-text-up .text-\[8px\], .phone-text-up .text-\[9px\], .phone-text-up .text-\[10px\] { font-size: 12px; }
+  .phone-text-up .cursor-pointer { min-height: 40px; }
+}

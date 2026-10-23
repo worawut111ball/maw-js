@@ -32,6 +32,17 @@
     position: fixed; bottom: 16px; right: 16px; z-index: 10;
     font-size: 10px; color: rgba(255,255,255,0.3); font-family: 'SF Mono', monospace;
   }
+  #canvas-container { touch-action: none; }
+
+  /* Phone (≤640px): one-line top bar, ≥40px back link, readable status text */
+  @media (max-width: 640px) {
+    #canvas-container { height: 100dvh; }
+    #topbar { padding: 6px 16px; gap: 10px; }
+    #topbar .title { letter-spacing: 2px; white-space: nowrap; }
+    #topbar .stats { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    #topbar a { min-height: 40px; display: inline-flex; align-items: center; padding: 0 4px; font-size: 13px; white-space: nowrap; }
+    #connection, #load-status { font-size: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -82,6 +93,11 @@ const SESSION_COLORS = [
 // ===== STATE =====
 let scene, camera, renderer, controls;
 let frustumSize = 30;
+// Phone (≤640px) frame budget: ≤20 fps, nothing while hidden; reduced motion ≤10 fps
+const IS_PHONE = window.matchMedia('(max-width: 640px)').matches;
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FPS_CAP = IS_PHONE ? (REDUCED ? 10 : 20) : (REDUCED ? 30 : 0);
+let lastFrame = 0;
 const agents = new Map(); // target → { model, mixer, actions, activeAction, ring, sprite, sessionColor, data, fallback?, body? }
 const sessionPositions = new Map();
 const clock = new THREE.Clock();
@@ -99,11 +115,12 @@ function init() {
 
   // Orthographic isometric camera (45° azimuth, ~35° elevation)
   const aspect = window.innerWidth / window.innerHeight;
+  const fs = viewSize(aspect);
   camera = new THREE.OrthographicCamera(
-    -frustumSize * aspect / 2,
-    frustumSize * aspect / 2,
-    frustumSize / 2,
-    -frustumSize / 2,
+    -fs * aspect / 2,
+    fs * aspect / 2,
+    fs / 2,
+    -fs / 2,
     0.1, 300
   );
   camera.position.set(22, 18, 22);
@@ -111,8 +128,9 @@ function init() {
 
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
+  // Phone: 1x pixels + no soft shadows — the two biggest GPU costs on a budget phone
+  renderer.setPixelRatio(IS_PHONE ? 1 : Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = !IS_PHONE;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
@@ -196,12 +214,18 @@ function init() {
   window.addEventListener('resize', onResize);
 }
 
+// Portrait phone: fit the floor to the screen WIDTH (was: height → desks cut off at the sides)
+function viewSize(aspect) {
+  return aspect < 1 ? frustumSize / Math.max(aspect, 0.45) * 0.8 : frustumSize;
+}
+
 function onResize() {
   const aspect = window.innerWidth / window.innerHeight;
-  camera.left = -frustumSize * aspect / 2;
-  camera.right = frustumSize * aspect / 2;
-  camera.top = frustumSize / 2;
-  camera.bottom = -frustumSize / 2;
+  const fs = viewSize(aspect);
+  camera.left = -fs * aspect / 2;
+  camera.right = fs * aspect / 2;
+  camera.top = fs / 2;
+  camera.bottom = -fs / 2;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
@@ -763,9 +787,12 @@ function connectWS() {
 }
 
 // ===== ANIMATION LOOP =====
-function animate() {
+function animate(now = performance.now()) {
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
+  if (document.hidden) return;
+  if (FPS_CAP && now - lastFrame < 1000 / FPS_CAP - 2) return;
+  lastFrame = now;
+  const dt = Math.min(clock.getDelta(), 0.25);
   const t = clock.getElapsedTime();
 
   let idx = 0;

@@ -219,6 +219,26 @@
     from { opacity: 0; transform: translateY(80px) scale(1.05); }
     to { opacity: 1; }
   }
+
+  /* Phone (≤640px): one-line header (title used to wrap onto the filter pills),
+     scrollable filter row with ≥40px pills, 16px gutters, dynamic viewport height */
+  @media (max-width: 640px) {
+    body { height: 100dvh; }
+    .header { padding: 12px 16px; gap: 8px; align-items: center; }
+    .header h1 { font-size: 1.05em; white-space: nowrap; flex-shrink: 0; }
+    .header .node { white-space: nowrap; }
+    .header .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .selector { top: 44px; right: 0; padding: 6px 16px; flex-wrap: nowrap; overflow-x: auto; }
+    .sel-btn { min-height: 40px; padding: 0 14px; font-size: 0.8em; display: inline-flex; align-items: center; }
+    .stack-container { height: calc(100dvh - 80px); padding-top: 96px; }
+    .card-stack { width: calc(100vw - 32px); }
+    .card { padding: 16px; }
+    .card-header { flex-wrap: wrap; gap: 6px; }
+    .timeline { right: 6px; }
+    .tl-tick .tl-label { display: none; } /* label sat on top of the card */
+    .nav-btn { width: 44px; height: 44px; }
+    .bottom-bar { font-size: 0.8em; padding: 12px 16px; }
+  }
 </style>
 </head>
 <body>

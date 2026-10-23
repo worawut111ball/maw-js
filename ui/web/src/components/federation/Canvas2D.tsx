@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import { useFederationStore } from "./store";
 import { drawGrid, drawClusterLabels, drawEdges, drawAgents, drawLegend } from "./draw";
+import { isPhone, makeFrameGate } from "../../lib/motion";
 
 export function Canvas2D() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -19,18 +20,25 @@ export function Canvas2D() {
     const ctx = canvas.getContext("2d")!;
     let animId: number;
     let time = 0;
+    // Phone: ≤20 fps · reduced motion: lower · hidden tab: skip
+    const gate = makeFrameGate(20);
 
     function resize() {
-      const dpr = window.devicePixelRatio || 1;
+      // Phone: cap backing store at 1.5x — full-screen gradients at 3x every frame heat the phone
+      const dpr = Math.min(window.devicePixelRatio || 1, isPhone() ? 1.5 : 4);
       const rect = canvas!.getBoundingClientRect();
       canvas!.width = rect.width * dpr;
       canvas!.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     resize();
     window.addEventListener("resize", resize);
+    // Canvas box also changes without a window resize (phone: side panel stacks below)
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => resize()) : null;
+    ro?.observe(canvas);
 
-    function draw() {
+    function draw(now = performance.now()) {
+      if (!gate(now)) { animId = requestAnimationFrame(draw); return; }
       time += 16;
       const W = canvas!.getBoundingClientRect().width;
       const H = canvas!.getBoundingClientRect().height;
@@ -62,7 +70,7 @@ export function Canvas2D() {
     }
 
     animId = requestAnimationFrame(draw);
-    return () => { cancelAnimationFrame(animId); window.removeEventListener("resize", resize); };
+    return () => { cancelAnimationFrame(animId); gate.dispose(); ro?.disconnect(); window.removeEventListener("resize", resize); };
   }, []);
 
   // Interaction helpers
@@ -80,7 +88,7 @@ export function Canvas2D() {
     return null;
   }, [screenToWorld]);
 
-  const handleDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const hit = hitTest(sx, sy);
@@ -92,7 +100,7 @@ export function Canvas2D() {
     }
   }, [hitTest]);
 
-  const handleMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
 
@@ -141,9 +149,10 @@ export function Canvas2D() {
   }, []);
 
   return (
-    <canvas ref={canvasRef} className="flex-1 min-w-0"
-      onMouseDown={handleDown} onMouseMove={handleMove}
-      onMouseUp={handleUp} onMouseLeave={handleUp}
+    // Pointer events (not mouse) so one-finger drag pans and tap selects on phones
+    <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ touchAction: "none" }}
+      onPointerDown={handleDown} onPointerMove={handleMove}
+      onPointerUp={handleUp} onPointerLeave={handleUp} onPointerCancel={handleUp}
       onWheel={handleWheel} />
   );
 }

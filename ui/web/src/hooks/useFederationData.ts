@@ -6,6 +6,7 @@ import { useFederationStore } from "../components/federation/store";
 import { simulate } from "../components/federation/simulation";
 import type { AgentNode, AgentEdge, Particle } from "../components/federation/types";
 import type { FeedEvent } from "../lib/feed";
+import { isPhone } from "../lib/motion";
 
 export function useFederationData() {
   const { setGraph, setNode, setPlugins, setMessageLog, handleFeedEvent, handleFeedHistory, handleLiveMessage } = useFederationStore();
@@ -122,8 +123,10 @@ export function useFederationData() {
       }
 
       // Build agent nodes
-      const W = (window.innerWidth - 240) || 900;
-      const H = (window.innerHeight - 52) || 600;
+      // Phone: canvas is full width, side panel stacks below (~half the height)
+      const phone = isPhone();
+      const W = (phone ? window.innerWidth : window.innerWidth - 240) || 900;
+      const H = (phone ? Math.round(window.innerHeight * 0.5) : window.innerHeight - 52) || 600;
       const agentList: AgentNode[] = [];
       const seen = new Set<string>();
 

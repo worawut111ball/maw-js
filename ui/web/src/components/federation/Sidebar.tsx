@@ -44,7 +44,7 @@ export function Sidebar() {
   )].sort((a, b) => b.ts - a.ts);
 
   return (
-    <div className="w-[240px] flex-shrink-0 border-l overflow-hidden flex flex-col"
+    <div className="phone-text-up phone-still w-full sm:w-[240px] max-h-[40%] sm:max-h-none flex-shrink-0 border-t sm:border-t-0 sm:border-l overflow-hidden flex flex-col"
       style={{ borderColor: "rgba(255,255,255,0.1)", background: "rgba(3,10,24,0.98)" }}>
 
       {/* Tab bar */}

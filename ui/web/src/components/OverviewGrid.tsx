@@ -175,7 +175,7 @@ export const OverviewGrid = memo(function OverviewGrid({
   }, [agents, grouped]);
 
   return (
-    <div className="relative w-full min-h-screen" style={{ background: "#0a0a12" }}>
+    <div className="phone-text-up relative w-full min-h-[calc(100dvh-124px)] sm:min-h-screen" style={{ background: "#0a0a12" }}>
       {/* Summary bar */}
       <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 sm:px-6 py-3 sm:py-4 border-b border-white/[0.06] whitespace-nowrap">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-4 text-sm font-mono">
@@ -183,8 +183,10 @@ export const OverviewGrid = memo(function OverviewGrid({
           <span className="text-white/60">{sessions.length} rooms</span>
           <span className="text-white/20">/</span>
           <span className="text-white/60">{agents.length} agents</span>
-          <span className="text-white/20">/</span>
-          <span style={{ color: fps >= 50 ? "#4caf50" : fps >= 30 ? "#ffa726" : "#ef5350" }}>{fps} fps</span>
+          {fps !== null && (<>
+            <span className="text-white/20">/</span>
+            <span style={{ color: fps >= 50 ? "#4caf50" : fps >= 30 ? "#ffa726" : "#ef5350" }}>{fps} fps</span>
+          </>)}
         </div>
         <div className="flex items-center gap-3 sm:gap-5 text-sm font-mono">
           {busyCount > 0 && (
