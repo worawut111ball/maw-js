@@ -415,7 +415,12 @@ export async function mergePr(repo: string, n: number, method: string, deleteBra
 // ── routes ───────────────────────────────────────────────────────
 
 export function mount(app: any, d: PrsDeps = deps): void {
-  if (d === deps) startLoop();   // the real server only — tests pass their own deps
+  if (d === deps) {
+    startLoop();   // the real server only — tests pass their own deps
+    // fill the cache shortly after start so the first PR page is instant (cold = ~9 s of gh calls), then every 80 s
+    const warm = () => listPrs(false, d).catch(() => {});
+    if (process.env.NODE_ENV !== "test") { setTimeout(warm, 15_000); setInterval(warm, 80_000); }
+  }
   app.get("/prs", async ({ query }: any) => {
     const data = await listPrs(query?.fresh === "1", d);
     return { ok: true, ...data };

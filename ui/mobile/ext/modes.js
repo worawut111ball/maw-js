@@ -3,11 +3,11 @@
 (function () {
   const MODES = {
     default: { label: "○ default", cls: "def", hint: "ถามก่อนแก้ไฟล์" },
-    acceptEdits: { label: "⏵⏵ accept edits", cls: "acc", hint: "แก้ไฟล์ได้เลยไม่ต้องถาม" },
-    plan: { label: "⏸ plan mode", cls: "plan", hint: "วางแผนอย่างเดียว ยังไม่แก้" },
-    bypass: { label: "⏵⏵ bypass", cls: "byp", hint: "ข้ามการขออนุญาตทั้งหมด" },
-    auto: { label: "⏵⏵ auto mode", cls: "auto", hint: "ให้ระบบตัดสินใจเอง" },
-    dontAsk: { label: "⏵⏵ don't ask", cls: "byp", hint: "ไม่ถาม ปฏิเสธสิ่งที่ไม่อนุญาต" },
+    acceptEdits: { label: "» accept edits", cls: "acc", hint: "แก้ไฟล์ได้เลยไม่ต้องถาม" },
+    plan: { label: "‖ plan mode", cls: "plan", hint: "วางแผนอย่างเดียว ยังไม่แก้" },
+    bypass: { label: "» bypass", cls: "byp", hint: "ข้ามการขออนุญาตทั้งหมด" },
+    auto: { label: "» auto mode", cls: "auto", hint: "ให้ระบบตัดสินใจเอง" },
+    dontAsk: { label: "» don't ask", cls: "byp", hint: "ไม่ถาม ปฏิเสธสิ่งที่ไม่อนุญาต" },
     unknown: { label: "? โหมด", cls: "unk", hint: "อ่านจากจอไม่ได้ (อาจมีเมนูค้างอยู่)" },
   };
   const MODELS = [["default", "Default"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"], ["fable", "Fable"], ["opus[1m]", "Opus 1M"], ["sonnet[1m]", "Sonnet 1M"], ["fable[1m]", "Fable 1M"]];

@@ -421,6 +421,24 @@ let state = { projects: [], project: null, ws: null, room: null, follow: true, s
 let timer = null;
 // per-room chat memory so switching rooms paints instantly (last 12 rooms)
 const chatCache = new Map(), chatHtmlCache = new Map();
+// warm the other agent rooms of this workspace in the background → the first switch paints at once
+let prefetching = null;
+async function prefetchRooms(w) {
+  if (prefetching === w.id || document.hidden) return; prefetching = w.id;
+  try {
+    for (const r of w.rooms.filter(r => r.agent && r.id !== state.room && !chatHtmlCache.has(r.id)).slice(0, 4)) {
+      if (state.ws !== w.id || document.hidden) break;
+      const c = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(r.id)}/chat?limit=150`).catch(() => null);
+      if (!c || c.kind !== "messages" || chatHtmlCache.has(r.id) || state.room === r.id) continue;
+      const items = new Map(c.items.map(it => [it.i, it])), list = [...items.values()].sort((a, b) => a.i - b.i);
+      chatCache.set(r.id, { room: r.id, epoch: c.epoch, start: c.start, total: c.total, items });
+      const keep = state.room; state.room = r.id;   // labels (Claude / Codex) come from the room being drawn
+      try { rememberChatHtml(r.id, (c.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${c.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list)); }
+      finally { state.room = keep; }
+      await new Promise(res => setTimeout(res, 300));   // gentle on 4G
+    }
+  } finally { prefetching = null; }
+}
 function rememberChatHtml(room, html) {
   chatHtmlCache.delete(room); chatHtmlCache.set(room, html);
   while (chatHtmlCache.size > 12) { const k = chatHtmlCache.keys().next().value; chatHtmlCache.delete(k); chatCache.delete(k); }
@@ -488,7 +506,9 @@ function tilesHtml() {
       <span class="tt"><b>${esc(pg.title)}</b><small>${esc(sm.text || "…")}</small></span>${sm.badge ? `<span class="tb">${esc(sm.badge)}</span>` : ""}</button>`;
   }).join("");
 }
-mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.innerHTML = tilesHtml(); wireTiles(t); } };
+mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.hidden = !mawExt.pages.length; t.innerHTML = tilesHtml(); wireTiles(t); } };
+// packs load deferred — on a cold start home is drawn before they register their pages
+window.addEventListener("load", () => mawExt.refreshTiles());
 function wireTiles(root) { root.querySelectorAll("[data-page]").forEach(b => b.onclick = () => { history.pushState({ v: "pg" }, ""); renderPage(b.dataset.page); }); }
 function renderPage(key) {
   const pg = mawExt.pages.find(x => x.key === key); if (!pg) return renderHome();
@@ -510,7 +530,7 @@ function renderHome() {
       <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
     <main>
       <button class="openproj" id="openproj">➕ เปิดโปรเจค · repo ในเครื่อง · โฟลเดอร์</button>
-      ${mawExt.pages.length ? `<div class="tiles" id="tiles">${tilesHtml()}</div>` : ""}
+      <div class="tiles" id="tiles" ${mawExt.pages.length ? "" : "hidden"}>${tilesHtml()}</div>
       <div id="ext-home"></div>
       ${waiting.length ? `<div class="section">🟡 รอคำตอบ</div>${waiting.map(r => `
         <button class="card waitcard" data-go="${esc(r.project)}|${esc(r.ws)}|${esc(r.id)}">
@@ -572,6 +592,7 @@ function renderProject() {
   const room = w?.rooms.find(r => r.id === state.room);
   const canType = !!room && room.status !== "ended";
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
+  if (room) store.set("maw-last-view", JSON.stringify({ project: p.name, ws: w.id, room: room.id, mode: state.mode, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
   const seg = segTabs ? `<div class="seg">${segTabs.map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
   if (state.pview !== "rooms" && segTabs) {
@@ -683,6 +704,7 @@ function renderProject() {
     });
   }
   loadScreen();
+  setTimeout(() => { if (state.project === p.name && state.ws === w.id) prefetchRooms(w); }, 1500);
 }
 /** Markdown for agent replies: headings, lists, tables, quotes, code fences, inline code/bold/italic/links. */
 function inline(t) {
@@ -1541,6 +1563,17 @@ function openSession(sid) {
     if (r.claudeSessionId === sid) { state.project = p.name; state.ws = w.id; state.room = r.id; state.pview = "rooms"; state.chat = null; history.pushState({ v: "p" }, ""); return renderProject(); }
   toast("ห้องนี้ปิดไปแล้ว");
 }
+// Android killed the app while you were in a room → reopen there (within 30 min), not on home
+async function resumeLast() {
+  const q = new URL(location.href).searchParams; if (q.get("open") || q.get("shared") || state.project) return;
+  let v = null; try { v = JSON.parse(store.get("maw-last-view") || "null"); } catch {}
+  if (!v || Date.now() - v.at > 30 * 60_000) return;
+  if (!state.projects.length) await load();
+  const p = state.projects.find(x => x.name === v.project), w = p?.workspaces.find(x => x.id === v.ws);
+  if (!w?.rooms.some(r => r.id === v.room) || state.project) return;
+  state.project = p.name; state.ws = w.id; state.room = v.room; state.pview = "rooms"; state.mode = v.mode === "raw" ? "raw" : "chat"; state.follow = true;
+  history.pushState({ v: "p" }, ""); renderProject();
+}
 async function takeOpen(url) {
   const sid = new URL(url || location.href, location.origin).searchParams.get("open"); if (!sid) return;
   if (!url) history.replaceState(null, "", "/m.html");
@@ -1884,7 +1917,7 @@ function refreshTabs() {
   }
   for (const r of w.rooms) { const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
 }
-window.addEventListener("popstate", () => { if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
+window.addEventListener("popstate", () => { if (state.project) store.del("maw-last-view"); if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
 // New version on the Mac → reload by itself (only when nothing is half-typed), so the phone never runs stale code
 let pageStamp = null;
 async function checkVersion() {
@@ -1902,7 +1935,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) chec
 checkVersion();
 function start() {
   clearInterval(timer); clearInterval(start._sys);
-  if (!start._pend) { start._pend = 1; restorePending().catch(() => {}); }
+  if (!start._pend) { start._pend = 1; restorePending().catch(() => {}); resumeLast().catch(() => {}); }
   load(); loadSys(); takeShared(); takeOpen(); start._sys = setInterval(() => { if (!document.hidden) loadSys(); }, 10_000);
   timer = setInterval(() => {
     if (document.hidden) return;
