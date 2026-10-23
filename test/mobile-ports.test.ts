@@ -73,3 +73,12 @@ describe("ports pack — parsers", () => {
     expect(isAgentProc(700, procs, new Set([700]))).toBe(true);
   });
 });
+
+test("tailscale serve: local port → https port", async () => {
+  const { servedHttps } = await import("../src/mobile/features/ports");
+  const m = servedHttps(JSON.stringify({ Web: { "host.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:3456" } } }, "host.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:5710" } } } } }));
+  expect(m.get(5710)).toBe(8443);
+  expect(m.get(3456)).toBe(443);
+  expect(m.get(9999)).toBeUndefined();
+  expect(servedHttps("nope").size).toBe(0);
+});

@@ -17,9 +17,13 @@ test.describe("mobile bottom navigation and landscape", () => {
 
     await expect(bottomNav).toBeVisible();
     await expect(statusBar).toBeHidden();
-    for (const id of ["nav-chat", "nav-fleet", "nav-mission", "nav-inbox", "nav-config"]) {
+    for (const id of ["nav-chat", "nav-fleet", "nav-mission", "nav-config", "nav-more"]) {
       await expect(page.getByTestId(id)).toBeVisible();
     }
+    // Inbox lives in the "More" sheet now (bottom nav keeps 5 slots)
+    await page.getByTestId("nav-more").click();
+    await expect(page.getByTestId("more-sheet")).toBeVisible();
+    await expect(page.getByTestId("more-item-inbox")).toBeVisible();
   });
 
   test("Task 8: phone landscape keeps quick commands above bottom nav", async ({ page, serverReady }, testInfo) => {

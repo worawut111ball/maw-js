@@ -50,14 +50,15 @@
 
   function card(w, x, el) {
     const d = document.createElement("div"); d.className = "pt-card";
-    const href = `${location.protocol}//${location.hostname}:${x.port}`;
+    // through Tailscale: the HTTPS port `tailscale serve` maps to this one (443 = no port), else plain http (dev servers)
+    const href = x.httpsPort ? `https://${location.hostname}${x.httpsPort === 443 ? "" : ":" + x.httpsPort}` : `http://${location.hostname}:${x.port}`;
     const term = x.terminal ? (x.terminal.kind === "tmux" ? "tmux " : "") + x.terminal.label : null;
     d.innerHTML = `<div class="pt-top"><span class="pt-port">:${x.port}</span>${x.ports.length > 1 ? `<span class="pt-more">+${esc(x.ports.slice(1).join(", "))}</span>` : ""}
         <span class="pt-name">${esc(x.name)}</span><span class="pt-up">${esc(up(x.uptime))}</span></div>
       <div class="pt-cmd">${esc(short(x.command))}</div>
       <div class="pt-meta"><span class="pt-tag">pid ${x.pid}</span>${term ? `<span class="pt-tag">${esc(term)}</span>` : `<span class="pt-tag">ไม่รู้ terminal</span>`}
         ${x.agent ? `<span class="pt-tag warn">agent รัน</span>` : ""}${x.localOnly ? `<span class="pt-tag warn">เปิดเฉพาะใน Mac</span>` : ""}</div>
-      <div class="pt-acts"><a class="pt-btn ${x.localOnly ? "off" : ""}" href="${esc(href)}" target="_blank" rel="noopener">เปิด</a>
+      <div class="pt-acts"><a class="pt-btn ${x.localOnly ? "off" : ""}" href="${esc(href)}" target="_blank" rel="noopener">เปิด <small style="opacity:.7">${x.httpsPort ? "https" + (x.httpsPort === 443 ? "" : ":" + x.httpsPort) : "http"}</small></a>
         <button class="pt-btn bad" data-a="stop">หยุด</button>
         ${x.terminal && !x.agent ? `<button class="pt-btn" data-a="rerun">รันใหม่</button>` : ""}</div>`;
     const base = `/workspaces/${enc(w.id)}/ports/${x.pid}`;

@@ -3,7 +3,7 @@
 // Owning terminal comes from the process env (TMUX_PANE / SUPERSET_*). Re-run = ctrl+c in that terminal, then ↑ + Enter.
 // Absolute paths only — maw's launchd PATH has no /usr/sbin.
 import { execFileSync } from "child_process";
-import { realpathSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { homedir } from "os";
 import { Tmux } from "../../core/transport/tmux-class";
 import { pressKey, readLiveRooms, supersetSnapshot, workspacePath, type ReplyChannel } from "./ctx";
@@ -158,6 +158,31 @@ export async function scanPorts(fresh = false): Promise<PortProc[]> {
 }
 
 const realRoot = (p: string) => { try { return realpathSync(p); } catch { return p; } };
+/** `tailscale serve status --json` → local port → HTTPS port that proxies to it (8443 → 5710). */
+export function servedHttps(json: string): Map<number, number> {
+  const out = new Map<number, number>();
+  let d: any; try { d = JSON.parse(json); } catch { return out; }
+  for (const [hostPort, v] of Object.entries<any>(d?.Web ?? {})) {
+    const https = Number(String(hostPort).split(":").pop());
+    for (const h of Object.values<any>(v?.Handlers ?? {})) {
+      const m = /^https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)\/?$/.exec(String(h?.Proxy ?? ""));
+      if (m && https && !out.has(+m[1])) out.set(+m[1], https);
+    }
+  }
+  return out;
+}
+const TAILSCALE = ["/Applications/Tailscale.app/Contents/MacOS/tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"].find(f => existsSync(f));
+let serveCache = { at: 0, map: new Map<number, number>() };
+function servedMap(): Map<number, number> {
+  if (Date.now() - serveCache.at < 30_000 || !TAILSCALE) return serveCache.map;
+  // TERM is required: without it the macOS app binary tries to start its GUI instead of acting as the CLI
+  let out = ""; try { out = execFileSync(TAILSCALE, ["serve", "status", "--json"], { encoding: "utf-8", timeout: 4_000, env: { ...process.env, TERM: process.env.TERM || "xterm-256color" } }); } catch { /* not serving */ }
+  serveCache = { at: Date.now(), map: servedHttps(out) };
+  return serveCache.map;
+}
+// the phone opens a port through Tailscale: the HTTPS one `tailscale serve` maps to it, else plain http
+const withLink = (x: PortProc) => { const https = servedMap().get(x.port); return { ...x, httpsPort: https ?? null }; };
+
 async function portsOf(ws: string, fresh = false): Promise<{ root: string | null; list: PortProc[] }> {
   const p = workspacePath(ws); if (!p) return { root: null, list: [] };
   const root = realRoot(p);
@@ -182,7 +207,7 @@ export function mount(app: any): void {
     if (!RE_WS.test(params.ws)) return fail(set, 400, "workspace ไม่ถูกต้อง");
     const { root, list } = await portsOf(params.ws);
     if (!root) return { ok: true, path: null, ports: [] };
-    return { ok: true, path: root, ports: list };
+    return { ok: true, path: root, ports: list.map(withLink) };
   });
 
   // every port of this user in a folder under $HOME (not $HOME itself = desktop apps), grouped by folder
