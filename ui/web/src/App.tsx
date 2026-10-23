@@ -478,7 +478,7 @@ export function App() {
 
   if (route === "mission") {
     return (
-      <Layout activeView="mission" {...layoutProps}>
+      <Layout activeView="mission" {...layoutProps} fullHeight>
         <MissionControl sessions={sessions} agents={agents} connected={connected} send={send} onSelectAgent={onSelectAgent} eventLog={eventLog} addEvent={addEvent} teams={teams} />
       </Layout>
     );

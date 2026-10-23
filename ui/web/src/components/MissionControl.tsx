@@ -62,7 +62,7 @@ export const MissionControl = memo(function MissionControl({
   return (
     <div
       ref={mc.containerRef}
-      className="relative w-full overflow-hidden h-[calc(100dvh-124px)] sm:h-[calc(100vh-60px)] flex flex-col sm:block"
+      className="relative w-full overflow-hidden flex-1 min-h-0 flex flex-col sm:block"
       style={{ background: "#020208", cursor: mc.isPanning ? "grabbing" : "default" }}
       onMouseDown={mc.onMouseDown}
       onMouseMove={mc.onMouseMove}
