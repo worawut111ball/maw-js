@@ -20,7 +20,7 @@ const claudeBash = [
   "",
   " Do you want to proceed?",
   ` ${blue("❯")} ${blue("1. Yes")}`,
-  "   2. Yes, and don't ask again for git push commands in /Users/ball/my-project/maw-js",
+  "   2. Yes, and don't ask again for git push commands in ~/my-project/maw-js",
   "   3. No, and tell Claude what to do differently (esc)",
   "",
   ` ${dim("Esc to cancel · Tab to amend · ctrl+e to explain")}`,
@@ -315,6 +315,54 @@ describe("parseMenu — other dialogs", () => {
     const m = parseMenu(trust)!;
     expect(m.title).toBe("Accessing workspace:");
     expect(m.numbers).toEqual([1, 2]);
+  });
+
+  test("AskUserQuestion: separator rule inside the options, 6 numbered rows", () => {
+    // real screen (Claude Code 2.x) — a rule sits between "5. Type something." and "6. Chat about this"
+    const ask = "✻ Sautéed for 1m 31s · done 10:40 PM \n\n \n❯ something else                                                            \n─────────────────────────────────────────────────────────────────────────────\n ☐ Account  \n\nWhich test account should we try on dev instead?\n \n  1. alice → Admin (Recommended)\n     Has admin + editor + viewer today · drop publish rights first, then check \n     that the admin page still opens\n❯ 2. bob → Editor\n     Has editor + viewer · remove publish rights and keep \n     editor only\n  3. carol → Viewer\n     Already viewer only · no change needed, just try the app\n  4. dave / erin → Guest\n     Already guest only · log in and look around\n  5. Type something.\n─────────────────────────────────────────────────────────────────────────────\n  6. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n───────────────────── Design data flow diagram ──";
+    expect(parsePrompt(ask)).toBeNull();
+    const m = parseMenu(ask)!;
+    expect(m.title).toBe("☐ Account");
+    expect(m.body).toContain("Which test account should we try on dev instead?");
+    expect(m.body).toContain("❯ 2. bob → Editor");
+    expect(m.body).toContain("6. Chat about this");
+    expect(m.numbers).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(m.footer).toContain("Enter to select");
+  });
+
+  // real screens captured from Claude Code 2.1 / Codex CLI 0.163 in a throwaway tmux session (24 ต.ค. 69)
+  test("AskUserQuestion last page (Review your answers) has no footer — still a menu", () => {
+    const review = "──────────────────────────────────────────────────\n←  ☒ Color  ☒ Toppings  ✔ Submit  →\n\nReview your answers\n\n ● Which color do you want?\n   → Green\n ● Which toppings do you want?\n   → Cheese, Olive\n\nReady to submit your answers?\n\n❯ 1. Submit answers\n  2. Cancel";
+    const m = parseMenu(review)!;
+    expect(m).not.toBeNull();
+    expect(m.body).toContain("Ready to submit your answers?");
+    expect(m.body).toContain("● Which color do you want?");   // the dialog's own bullets don't end it
+    expect(m.numbers).toEqual([1, 2]);
+    expect(m.footer).toBe("");
+  });
+
+  test("plan mode exit (footer \"ctrl+g to edit in Vim\") → menu with 3 numbers", () => {
+    const plan = "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n  ────────────────────────────────────────────────────────────────────────────────────────────────\n   Ready to code?\n\n   Here is Claude's plan:\n  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n   1. Run echo hello >> stamp.txt in project dir to append \"hello\" line.\n   2. Verify with tail -n 1 stamp.txt → shows hello.\n  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n  ────────────────────────────────────────────────────────────────────────────────────────────────\n   Claude has written up a plan and is ready to execute. Would you like to proceed?\n\n   ❯ 1. Yes, and use auto mode\n     2. Yes, manually approve edits\n     3. Tell Claude what to change\n        shift+tab to approve with this feedback\n\n   ctrl+g to edit in Vim · ~/.claude/plans/plan-demo.md";
+    const m = parseMenu(plan)!;
+    expect(m.title).toContain("Would you like to proceed?");
+    expect(m.numbers).toEqual([1, 2, 3]);
+    expect(m.footer).toContain("ctrl+g to edit");
+  });
+
+  test("Codex dialogs: footers without \"to\" (trust folder, hooks review)", () => {
+    const t = parseMenu("  Folder access\n  /tmp/demo\n\n  Trust this folder? Codex can read, edit, and run files here, subject to your permission\n  settings. Continue only if you trust these files.\n\n› 1. Trust and continue\n  2. Quit\n\n  enter continue · esc quit")!;
+    expect(t.title).toBe("Folder access");
+    expect(t.numbers).toEqual([1, 2]);
+    expect(t.footer).toBe("enter continue · esc quit");
+    expect(parseMenu("  Hooks need review\n\n  9 hooks are new or changed.\n  Hooks can run outside the sandbox after you trust them.\n\n› 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n  enter confirm · esc skip")!.numbers).toEqual([1, 2, 3]);
+  });
+
+  test("Codex command approval → permission prompt; Codex idle input → nothing", () => {
+    const p = parsePrompt("• Running printf 'hi' > hello.txt\n\n  Would you like to run the following command?\n\n  Environment: local\n\n  Reason: the session is read-only\n\n  $ printf 'hi' > hello.txt\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again for commands that start with `printf 'hi' > hello.txt` (p)\n  3. No, and tell Codex what to do differently (esc)\n\n  Press enter to confirm or esc to cancel")!;
+    expect(p.question).toBe("Would you like to run the following command?");
+    expect(p.options.map(o => o.n)).toEqual([1, 2, 3]);
+    expect(parseMenu("• Done.\n\n› Ask Codex to do anything\n\n  medium · Fast off · Context 5% used\n  ? for shortcuts")).toBeNull();
+    expect(parsePrompt("• Done.\n\n› Ask Codex to do anything\n\n  medium · Fast off · Context 5% used\n  ? for shortcuts")).toBeNull();
   });
 
   test("normal input box and answered dialogs are not menus", () => {

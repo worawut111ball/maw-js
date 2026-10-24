@@ -206,7 +206,9 @@ export interface MenuPrompt {
 const MENU_RULE = /^\s*[╭┌╰└]?[─━═╌┄┈▔▁-]{6,}[╮┐╯┘]?\s*$/;
 // a dialog footer says how to answer it; Claude's normal input footer ("? for shortcuts", "shift+tab to cycle",
 // "esc to interrupt") must not count
-const MENU_FOOTER = /\b(?:enter|esc|space|tab)\b[^·]*\bto (?:continue|confirm|select|cancel|exit|go back|submit|toggle|save|skip|choose|proceed|open)\b|[←→↑↓]+(?:\/[←→↑↓]+)? to \w/i;
+const MENU_FOOTER = /\b(?:enter|esc|space|tab|ctrl\+\w)\b[^·]*\bto (?:continue|confirm|select|cancel|exit|go back|submit|toggle|save|skip|choose|proceed|open|edit|approve)\b|[←→↑↓]+(?:\/[←→↑↓]+)? to \w/i;
+// Codex writes its footers without "to": "enter continue · esc quit"
+const CODEX_FOOTER = /^\s*(?:enter|esc|tab|space)\s+[a-z]+(?: [a-z]+)?(?:\s*·\s*(?:enter|esc|tab|space|[←→↑↓/]+)\s+[a-z]+(?: [a-z]+)?)+\s*$/i;
 const NOT_DIALOG = /for shortcuts|to cycle|to interrupt|auto mode on|bypass permissions on|accept edits on|plan mode on/i;
 
 /** The dialog still open at the bottom of the screen that is NOT a numbered permission prompt, else null. */
@@ -221,14 +223,26 @@ export function parseMenu(raw: string): MenuPrompt | null {
     if (!lines[i].trim() || MENU_RULE.test(lines[i])) continue;
     seen++;
     if (NOT_DIALOG.test(lines[i])) return null;
-    if (MENU_FOOTER.test(lines[i])) { foot = i; break; }
+    if (MENU_FOOTER.test(lines[i]) || CODEX_FOOTER.test(lines[i])) { foot = i; break; }
   }
-  if (foot < 0) return null;
+  // no footer: AskUserQuestion's last page ("Review your answers" → "❯ 1. Submit answers / 2. Cancel") ends on
+  // its numbered rows. Only when the cursor sits on one of them — chat output never ends like that (the input box
+  // and its "? for shortcuts" footer follow it)
+  if (foot < 0) {
+    const tail: number[] = [];
+    for (let i = end; i >= 0 && tail.length < 6 && /^\s*[❯›>▶]?\s*\d[.)]\s+\S/.test(lines[i]); i--) tail.push(i);
+    if (tail.length < 2 || !tail.some(i => /^\s*[❯›>▶]\s*\d[.)]/.test(lines[i]))) return null;
+    foot = end + 1;
+  }
   // top: the rule above, at most 40 lines up; stop at things that belong to the conversation
   let top = -1;
+  // a rule with no cursor row below it yet is a separator inside the dialog (AskUserQuestion puts one
+  // between "Type something." and "Chat about this") — keep climbing to the dialog's own top rule
+  const cursorBelow = (i: number) => lines.slice(i + 1, foot).some(l => /^\s*[❯›>▶]\s*\S/.test(l));
   for (let i = foot - 1; i >= Math.max(0, foot - 40); i--) {
-    if (MENU_RULE.test(lines[i])) { top = i; break; }
-    if (SPINNER.test(lines[i]) || /^\s*[⏺●⎿✻]/.test(lines[i])) { top = i; break; }
+    if (MENU_RULE.test(lines[i])) { if (cursorBelow(i)) { top = i; break; } continue; }
+    // conversation marks: ⏺/●/✻ at column 0, ⎿ under a tool call (a dialog indents its own "●" bullets)
+    if (SPINNER.test(lines[i]) || /^[⏺●✻]|^\s*⎿/.test(lines[i])) { top = i; break; }
   }
   const block = lines.slice(top + 1, foot);
   while (block.length && !block[0].trim()) block.shift();
@@ -238,15 +252,15 @@ export function parseMenu(raw: string): MenuPrompt | null {
   const title = body[0].trim();
   const rest = body.slice(1);
   while (rest.length && !rest[0].trim()) rest.shift();
-  const numbers = rest.map(l => /^\s*[❯›>▶]?\s*(\d)[.)]\s+\S/.exec(l)).filter(Boolean).map(m => +m![1]).filter(n => n >= 1 && n <= 4);
-  const footer = lines[foot].trim();
+  const numbers = rest.map(l => /^\s*[❯›>▶]?\s*(\d)[.)]\s+\S/.exec(l)).filter(Boolean).map(m => +m![1]).filter(n => n >= 1 && n <= 9);
+  const footer = (lines[foot] ?? "").trim();
   const text = rest.join("\n").slice(0, MAX_DETAIL_CHARS);
   const sig = createHash("sha1").update(["menu", title, text, footer].join("\u0001")).digest("hex").slice(0, 12);
   return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], sig };
 }
 
 /** Keys the phone may press inside an open dialog. */
-export const MENU_KEYS = ["up", "down", "left", "right", "enter", "esc", "tab", "space", "1", "2", "3", "4"];
+export const MENU_KEYS = ["up", "down", "left", "right", "enter", "esc", "tab", "space", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 // ── push when a dialog opens ──
 // Permission prompts already push through the Claude hook; other dialogs (trust folder, "Teach auto mode…",

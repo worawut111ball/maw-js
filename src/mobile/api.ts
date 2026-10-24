@@ -1458,13 +1458,13 @@ const MAX_DIFF = 200_000;
 export const QUICK_KEYS: Record<string, string> = {
   enter: "Enter", esc: "Escape", up: "Up", down: "Down", tab: "Tab", ctrlc: "C-c",
   btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u", space: "Space",
-  "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
+  "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", y: "y", n: "n",
 };
 /** Same labels in Superset CLI key names. */
 export const SUPERSET_KEYS: Record<string, string> = {
   enter: "enter", esc: "esc", up: "up", down: "down", tab: "tab", ctrlc: "ctrl+c",
   btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u", space: "space",
-  "1": "1", "2": "2", "3": "3", "4": "4", y: "y", n: "n",
+  "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", y: "y", n: "n",
 };
 
 const perfLog: { at: number; ua: string; rows: { k: string; n: number; med: number; max: number }[] }[] = [];
