@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseTemps, safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { asleepPanes, parseTemps, safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -105,6 +105,18 @@ describe("rooms", () => {
     expect([...rooms.keys()]).toEqual(["live"]);
     expect(rooms.get("live")!.channel).toEqual({ kind: "tmux", pane: "%3", label: "t1" });
   });
+
+  test("one chat open twice (tmux room + `claude --resume` elsewhere) → the tmux copy wins in either file order", () => {
+    for (const tmuxPid of [process.pid, process.ppid]) {
+      const other = tmuxPid === process.pid ? process.ppid : process.pid;
+      const dir = mkdtempSync(join(tmpdir(), "rooms-"));
+      writeFileSync(join(dir, `${tmuxPid}.json`), JSON.stringify({ pid: tmuxPid, sessionId: "same", status: "idle", tmux: "team2:@2.%2" }));
+      writeFileSync(join(dir, `${other}.json`), JSON.stringify({ pid: other, sessionId: "same", status: "idle", tmux: null }));
+      const r = readLiveRooms(dir).get("same")!;
+      expect(r.pid).toBe(tmuxPid);
+      expect(r.channel).toEqual({ kind: "tmux", pane: "%2", label: "team2" });
+    }
+  });
 });
 
 describe("quick keys", () => {
@@ -137,6 +149,23 @@ describe("projects", () => {
     expect([a.title, a.status, a.claudeSessionId]).toEqual(["claude Jtekt 2", "working", "s1"]);
     expect([b.agent, b.status]).toEqual(["codex", "waiting"]);
     expect([c.title, c.status]).toEqual(["terminal", "idle"]);
+  });
+
+  test("after a Mac restart: tabs Superset remembers but has not started are listed as asleep, in tab order", () => {
+    const after = { workspaces: [{ id: "11111111-1111-1111-1111-111111111111", project: "facwms", name: "local", branch: "main",
+      terminals: [{ id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", title: "", agent: { id: "claude", state: "starting" } }],
+      layout: { tabs: [
+        { title: "all", panes: [{ id: "pane-1", kind: "terminal", title: "Claude", terminalId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }] },
+        { title: "review", panes: [
+          { id: "pane-2", kind: "terminal", title: "Codex", terminalId: "dddddddd-dddd-dddd-dddd-dddddddddddd", agent: { id: "codex", state: "idle" } },
+          { id: "pane-3", kind: "terminal", title: null, terminalId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee" }] },
+        { title: "notes", panes: [{ id: "pane-4", kind: "browser", title: "docs" }] },
+      ] } }] };
+    expect(asleepPanes(after.workspaces[0]).map(a => [a.paneId, a.agent])).toEqual([["pane-2", "codex"], ["pane-3", null]]);
+    const rooms = buildProjects(after, new Map())[0].workspaces[0].rooms;
+    expect(rooms.map(r => r.title)).toEqual(["all", "review · Codex", "review · Terminal"]);
+    expect(rooms.map(r => r.status === "asleep")).toEqual([false, true, true]);
+    expect(rooms[1].agent).toBe("codex");
   });
 
   test("room ids from the phone are validated", () => {

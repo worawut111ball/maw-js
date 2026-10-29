@@ -28,12 +28,15 @@ export function load(file = FILE, allow = allowedDir): AutoRoom[] {
 }
 function save(list: AutoRoom[], file = FILE) { writeFileSync(file, JSON.stringify(list, null, 2), { mode: 0o600 }); }
 
-/** Shell command tmux runs in the new session: continue the last chat in that folder, else start fresh. */
+/** Shell command tmux runs in the new session: continue the last chat in that folder, else start fresh.
+ *  When the agent quits (e.g. "No, exit" on the trust prompt Claude shows for ~ on every start) the room drops to a
+ *  login shell instead of closing — the tmux session, and the room on the phone, stay. */
 export function commandFor(r: AutoRoom): string | null {
   if (r.agent === "shell") return null;
-  if (r.agent === "codex") return "codex resume --last || codex";
+  const keep = `; echo "[agent ended — type claude / codex to start again]"; exec "\${SHELL:-/bin/zsh}" -l`;
+  if (r.agent === "codex") return `codex resume --last || codex${keep}`;
   const f = r.skipPermissions ? " --dangerously-skip-permissions" : "";
-  return `claude --continue${f} || claude${f}`;
+  return `claude --continue${f} || claude${f}${keep}`;
 }
 
 type Tmux = (args: string[]) => string;

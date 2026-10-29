@@ -18,7 +18,7 @@
 <style>
   :root {
     --bg: #020208; --card: #0d0f1a; --card2: #141729; --line: #1f2337; --text: #e6e8f2; --dim: #8a90a8;
-    --working: #22c55e; --waiting: #f59e0b; --done: #38bdf8; --idle: #64748b; --ended: #3b3f52; --accent: #60a5fa; --danger: #ef4444;
+    --working: #22c55e; --waiting: #f59e0b; --done: #38bdf8; --idle: #64748b; --ended: #3b3f52; --asleep: #3b3f52; --accent: #60a5fa; --danger: #ef4444;
     --font: -apple-system, "Segoe UI", Roboto, "Noto Sans Thai", "Sarabun", sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, "Noto Sans Mono", monospace;
   }
@@ -41,7 +41,9 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
   .s-working { background: var(--working); box-shadow: 0 0 8px var(--working); }   /* no pulse: an endless animation keeps the phone redrawing at 60 fps */
   .s-waiting { background: var(--waiting); box-shadow: 0 0 8px var(--waiting); }
-  .s-done { background: var(--done); } .s-idle { background: var(--idle); } .s-ended { background: var(--ended); }
+  .s-done { background: var(--done); } .s-idle { background: var(--idle); } .s-ended { background: var(--ended); } .s-asleep { background: transparent; box-shadow: inset 0 0 0 1.5px var(--idle); }
+  .wake { margin: 28px 16px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); display: grid; gap: 10px; text-align: center; color: var(--dim); font-size: 13.5px; line-height: 1.5; }
+  .wake b { color: var(--text); font-size: 15px; } .wake button { justify-self: center; padding: 10px 22px; border-radius: 99px; background: var(--accent); color: #031022; font: 600 14px var(--font); }
   @keyframes pulse { 50% { opacity: .35 } }
   .waitcard { border-color: #5a3d0a; }
   .empty { color: var(--dim); text-align: center; padding: 40px 16px; }
@@ -416,7 +418,7 @@
 <div class="app" id="app"></div>
 <div class="toast" id="toast"></div>
 <script>
-const ST = { working: "กำลังทำ", waiting: "รอคำตอบ", done: "เสร็จแล้ว", idle: "ว่าง", ended: "ปิดแล้ว" };
+const ST = { working: "กำลังทำ", waiting: "รอคำตอบ", done: "เสร็จแล้ว", idle: "ว่าง", ended: "ปิดแล้ว", asleep: "ยังไม่เปิด" };
 const ICON = { claude: "✳ Claude", codex: "◎ Codex", opencode: "OpenCode", gemini: "✦ Gemini", copilot: "Copilot", amp: "Amp", "cursor-agent": "Cursor", droid: "Droid", pi: "Pi", agy: "Agy", mastracode: "Mastra" };
 const $app = document.getElementById("app");
 let state = { projects: [], project: null, ws: null, room: null, follow: true, showEmpty: false, presets: [], mode: "chat", chat: null, open: new Set(), pview: "rooms", fpath: "", fview: null, gview: null, files: [] };
@@ -428,7 +430,7 @@ let prefetching = null;
 async function prefetchRooms(w) {
   if (prefetching === w.id || document.hidden) return; prefetching = w.id;
   try {
-    for (const r of w.rooms.filter(r => r.agent && r.id !== state.room && !chatHtmlCache.has(r.id)).slice(0, 4)) {
+    for (const r of w.rooms.filter(r => r.agent && r.status !== "asleep" && r.id !== state.room && !chatHtmlCache.has(r.id)).slice(0, 4)) {
       if (state.ws !== w.id || document.hidden) break;
       const c = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(r.id)}/chat?limit=150`).catch(() => null);
       if (!c || c.kind !== "messages" || chatHtmlCache.has(r.id) || state.room === r.id) continue;
@@ -617,7 +619,7 @@ function renderProject() {
   const p = state.projects.find(x => x.name === state.project); if (!p) return renderHome();
   const w = p.workspaces.find(x => x.id === state.ws) || p.workspaces[0];
   const room = w?.rooms.find(r => r.id === state.room);
-  const canType = !!room && room.status !== "ended";
+  const canType = !!room && room.status !== "ended" && room.status !== "asleep";
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
   if (room) store.set("maw-last-view", JSON.stringify({ project: p.name, ws: w.id, room: room.id, mode: state.mode, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
@@ -645,7 +647,7 @@ function renderProject() {
         <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(room.title)}</span>
         <span class="mode"><button data-m="chat" class="${state.mode === "chat" ? "on" : ""}">แชท</button><button data-m="raw" class="${state.mode === "raw" ? "on" : ""}">จอ</button></span></div>
       <div class="roominfo"><div class="ctxrow" id="ctx" hidden></div><div id="ext-room-top"></div></div>
-      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">${(state.mode === "chat" && chatHtmlCache.get(state.room)) || "กำลังโหลด…"}</div></div>
+      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">${room.status === "asleep" ? `<div class="wake"><b>ห้องนี้ยังไม่ได้เปิดหลังรีสตาร์ท Mac</b>Superset จำแท็บนี้ไว้ แต่ยังไม่ได้เริ่ม — กดเปิดแล้ว Claude / Codex ในแท็บนี้จะคุยต่อจากเดิม<button id="wake">เปิดห้องนี้</button></div>` : (state.mode === "chat" && chatHtmlCache.get(state.room)) || "กำลังโหลด…"}</div></div>
       ${canType ? `
       <div class="keys"><button class="key sk" id="skbtn">/ สกิล</button>${mawExt.keys.map((k, i) => !k.show || k.show({ w, room }) ? `<button class="key ${esc(k.cls || "")}" data-xk="${i}">${esc(String(k.label).replace(/^[^\p{L}\p{N}\/]+/u, ""))}</button>` : "").join("")}${[["enter", "⏎"], ["1", "1"], ["2", "2"], ["3", "3"], ["esc", "Esc"], ["up", "↑"], ["down", "↓"], ["tab", "Tab"], ["ctrlc", "Ctrl+C"]]
         .map(([k, l]) => `<button class="key ${k === "ctrlc" ? "warn" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
@@ -668,6 +670,16 @@ function renderProject() {
   keepScroll(document.getElementById("tabs"), "tabs:" + p.name + "/" + (w?.id || ""), ".tab.on");
   keepScroll($app.querySelector(".seg"), "seg:" + p.name, "button.on");
   if (!room) return;
+  if (room.status === "asleep") {
+    document.getElementById("wake").onclick = async e => {
+      const b = e.currentTarget; b.disabled = true; b.textContent = "กำลังเปิด…";
+      try {
+        const r = await api(`/workspaces/${encodeURIComponent(w.id)}/rooms/${encodeURIComponent(room.id)}/wake`, { method: "POST" });
+        state.room = r.room; state.follow = true; await load(); renderProject();
+      } catch (err) { toast(err.message); b.disabled = false; b.textContent = "เปิดห้องนี้"; }
+    };
+    return;
+  }
   $app.querySelectorAll("[data-xk]").forEach(b => b.onclick = () => { try { mawExt.keys[+b.dataset.xk].onClick({ w, room }); } catch (e) { toast(e.message); } });
   extCall("onRoom", { p, w, room });
   const scr = document.getElementById("screen");
@@ -1092,7 +1104,7 @@ async function loadSuggestion() {
   } catch { hide(); }
 }
 async function loadScreen() {
-  const scr = document.getElementById("screen"); if (!scr || !state.room) return;
+  const scr = document.getElementById("screen"); if (!scr || !state.room || scr.querySelector(".wake")) return;
   // one request per room at a time: on slow 4G the 2.5 s poll would otherwise pile up behind itself
   const key = `${state.ws}/${state.room}/${state.mode}`;
   if (loadScreen.busy?.key === key && Date.now() - loadScreen.busy.at < 15_000) return;

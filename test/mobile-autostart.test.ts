@@ -8,9 +8,11 @@ const allow = (p: string) => (p.startsWith("/Users/x/") || p === "/Users/x" ? p 
 
 describe("autostart", () => {
   test("commands come from a fixed set — the phone never sends one", () => {
-    expect(commandFor({ session: "t1", dir: "/Users/x", agent: "claude", skipPermissions: true })).toBe("claude --continue --dangerously-skip-permissions || claude --dangerously-skip-permissions");
-    expect(commandFor({ session: "t2", dir: "/Users/x", agent: "claude", skipPermissions: false })).toBe("claude --continue || claude");
-    expect(commandFor({ session: "c", dir: "/Users/x", agent: "codex", skipPermissions: true })).toBe("codex resume --last || codex");
+    expect(commandFor({ session: "t1", dir: "/Users/x", agent: "claude", skipPermissions: true })).toStartWith("claude --continue --dangerously-skip-permissions || claude --dangerously-skip-permissions; ");
+    expect(commandFor({ session: "t2", dir: "/Users/x", agent: "claude", skipPermissions: false })).toStartWith("claude --continue || claude; ");
+    expect(commandFor({ session: "c", dir: "/Users/x", agent: "codex", skipPermissions: true })).toStartWith("codex resume --last || codex; ");
+    // the agent quitting (trust prompt → "No, exit") leaves a shell, so the tmux session does not disappear
+    for (const agent of ["claude", "codex"] as const) expect(commandFor({ session: "k", dir: "/Users/x", agent, skipPermissions: false })).toEndWith('; exec "${SHELL:-/bin/zsh}" -l');
     expect(commandFor({ session: "s", dir: "/Users/x", agent: "shell", skipPermissions: false })).toBeNull();
     expect(sanitize({ session: "a; rm -rf /", dir: "/Users/x" }, allow)).toBeNull();
     expect(sanitize({ session: "ok", dir: "/etc" }, allow)).toBeNull();
@@ -22,7 +24,7 @@ describe("autostart", () => {
     const tmux = (a: string[]) => { calls.push(a); if (a[0] === "has-session" && a[2] === "=up") return ""; if (a[0] === "has-session") throw new Error("no"); return ""; };
     const started = ensure([{ session: "up", dir: "/Users/x", agent: "claude", skipPermissions: false }, { session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true }], tmux);
     expect(started).toEqual(["down"]);
-    expect(calls.find(a => a[0] === "new-session")).toEqual(["new-session", "-d", "-s", "down", "-c", "/Users/x/p", "claude --continue --dangerously-skip-permissions || claude --dangerously-skip-permissions"]);
+    expect(calls.find(a => a[0] === "new-session")).toEqual(["new-session", "-d", "-s", "down", "-c", "/Users/x/p", commandFor({ session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true })]);
   });
 
   test("routes add, update and remove; live tmux sessions offered", () => {

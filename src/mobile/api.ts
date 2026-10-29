@@ -60,7 +60,7 @@ export function isAuthorized(headers: Headers, cfg: MobileConfig): boolean {
 
 // ── Hook state (Claude Code hooks / Codex notify) ────────────────
 
-export type AgentStatus = "working" | "waiting" | "done" | "idle" | "ended";
+export type AgentStatus = "working" | "waiting" | "done" | "idle" | "ended" | "asleep";   // asleep: a Superset tab not started since the Mac restarted
 
 interface HookState { status: AgentStatus; event: string; message?: string; at: number }
 
@@ -152,6 +152,10 @@ export function readLiveRooms(dir = SESSIONS_DIR): Map<string, LiveRoom> {
                       label: supersetTitle(env.SUPERSET_TERMINAL_ID) ?? "Superset" };
         }
       }
+      // one chat resumed in two places (a tmux room + `claude --resume` in a plain terminal): keep the copy the phone
+      // can reach, whatever order the files are read in
+      const had = rooms.get(String(d.sessionId));
+      if (had?.channel && !channel) continue;
       rooms.set(String(d.sessionId), { pid, sessionId: String(d.sessionId), status: d.status ?? null, name: d.name ?? null, channel });
     } catch { /* half-written file */ }
   }
@@ -459,6 +463,16 @@ function tabTitles(ws: any): Map<string, string> {
   }
   return map;
 }
+/** Panes Superset remembers in its layout whose terminal is not running — after a Mac restart Superset only starts the
+ *  tabs someone opens in the desktop app. The phone lists them as "asleep" rooms; waking one focuses its pane. */
+export function asleepPanes(ws: any): { terminalId: string; paneId: string; agent: string | null }[] {
+  const live = new Set((ws.terminals ?? []).map((t: any) => t.id));
+  const out: { terminalId: string; paneId: string; agent: string | null }[] = [];
+  for (const tab of ws.layout?.tabs ?? []) for (const pane of tab.panes ?? [])
+    if (pane.kind === "terminal" && pane.terminalId && !live.has(pane.terminalId) && !out.some(o => o.terminalId === pane.terminalId))
+      out.push({ terminalId: String(pane.terminalId), paneId: String(pane.id), agent: pane.agent?.id ?? null });
+  return out;
+}
 /** Position of each terminal in Superset's tab strip (left → right, panes in order) so the phone lists rooms the same way. */
 function tabOrder(ws: any): Map<string, number> {
   const order = new Map<string, number>();
@@ -550,9 +564,11 @@ export function buildProjects(snapshot: any, rooms: Map<string, LiveRoom>, local
     const p = projects.get(name) ?? { name, source: "superset" as const, workspaces: [] };
     const titles = tabTitles(w), order = tabOrder(w);
     const pos = (t: any) => order.get(t.id) ?? 1e6;
+    const asleep = asleepPanes(w).map(a => ({ id: a.terminalId, agent: a.agent, asleep: true }));
     p.workspaces.push({
       id: String(w.id), name: String(w.name ?? ""), branch: w.branch ?? null,
-      rooms: [...(w.terminals ?? [])].sort((a: any, b: any) => pos(a) - pos(b)).map((t: any) => {
+      rooms: [...(w.terminals ?? []), ...asleep].sort((a: any, b: any) => pos(a) - pos(b)).map((t: any) => {
+        if (t.asleep) return { id: t.id, title: titles.get(t.id) || t.agent || "terminal", agent: t.agent, status: "asleep" as const, claudeSessionId: null };
         const live = byTerminal.get(t.id);
         const agent = t.agent?.id ?? null;
         return {
@@ -1747,6 +1763,30 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       snapCache.at = 0;
       return { ok: true };
     }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()) }) })
+    // Start a Superset tab that has not run since the Mac restarted: opening its workspace and focusing its pane makes the
+    // desktop app start the terminal (and the agent it held — Claude/Codex continue the same chat). Its terminal id may change → answer with the id the room has now.
+    .post("/workspaces/:ws/rooms/:room/wake", async ({ params, set }) => {
+      if (!/^[0-9a-f-]{36}$/i.test(params.ws)) { set.status = 400; return { ok: false, error: "bad workspace" }; }
+      const read = async () => (JSON.parse(await ssAsync(["snapshot", "--workspace", params.ws, "--json"])).workspaces ?? [])[0];
+      try {
+        const w = await read();
+        const pane = (w?.layout?.tabs ?? []).flatMap((t: any) => t.panes ?? []).find((p: any) => p.terminalId === params.room);
+        if (!pane) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้ใน Superset" }; }
+        if ((w.terminals ?? []).some((t: any) => t.id === params.room)) return { ok: true, room: params.room };
+        // the desktop app only starts terminals of the workspace it shows → open that workspace, then its tab
+        await ssAsync(["workspaces", "open", params.ws, "--local"]);
+        await ssAsync(["panes", "focus", "--workspace", params.ws, "--pane", String(pane.id)]);
+        const until = Date.now() + 7_000;                       // answer before Bun's 10 s idle timeout drops the request
+        while (Date.now() < until) {
+          await new Promise(r => setTimeout(r, 500));
+          const now = await read();
+          const p = (now?.layout?.tabs ?? []).flatMap((t: any) => t.panes ?? []).find((x: any) => x.id === pane.id);
+          if (p?.terminalId && (now.terminals ?? []).some((t: any) => t.id === p.terminalId)) { snapCache.at = 0; return { ok: true, room: String(p.terminalId) }; }
+        }
+        snapCache.at = 0;
+        set.status = 504; return { ok: false, error: "Superset ยังเปิดห้องนี้ไม่เสร็จ — รอสักครู่แล้วดูอีกที หรือเปิดแท็บในแอปบน Mac" };
+      } catch (e: any) { set.status = 502; return { ok: false, error: String(e?.stderr || e?.message || e).slice(0, 300) }; }
+    })
     // Open a new room in a Superset workspace: an agent with a first prompt, or a plain shell.
     .post("/workspaces/:ws/rooms", async ({ params, body, set }) => {
       if (params.ws.startsWith("dir:")) {
