@@ -461,7 +461,7 @@ async function roomKey(key) { await api(`/rooms/${encodeURIComponent(state.ws)}/
 const store = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} }, del: k => { try { localStorage.removeItem(k) } catch {} } };
 const fromHash = location.hash.match(/t=([a-f0-9]{32,})/);
 if (fromHash) { store.set("maw-mobile-token", fromHash[1]); history.replaceState(null, "", location.pathname); }
-store.del("maw-desktop-ui"); // opening this page = phone UI wanted again (installed app always starts here)
+store.del("maw-desktop-ui"); store.del("maw-view-trail"); // opening this page = phone UI wanted again (installed app always starts here)
 
 // timing of every request as the phone sees it (network + Mac), sent home every 30 s → GET /mobile/perf on the Mac
 const perf = new Map();
@@ -545,11 +545,13 @@ function renderPage(key) {
   $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
   document.getElementById("back").onclick = () => history.back();
   try { pg.mount(document.getElementById("pgbody")); } catch (e) { document.getElementById("pgbody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  store.set("maw-last-view", JSON.stringify({ kind: "page", key, at: Date.now() }));
 }
 
 // ── home: projects ──
 function renderHome() {
   state.project = null; state.room = null; state.page = null;
+  if (!resumeLast.pending) store.del("maw-last-view");   // home is home — unless we're about to put the user back
   const waiting = state.projects.flatMap(p => roomsOf(p).filter(r => r.status === "waiting").map(r => ({ ...r, project: p.name })));
   const busy = p => roomsOf(p).some(r => r.agent);
   const list = state.projects.filter(p => state.showEmpty || busy(p)).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
@@ -621,7 +623,7 @@ function renderProject() {
   const room = w?.rooms.find(r => r.id === state.room);
   const canType = !!room && room.status !== "ended" && room.status !== "asleep";
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
-  if (room) store.set("maw-last-view", JSON.stringify({ project: p.name, ws: w.id, room: room.id, mode: state.mode, at: Date.now() }));
+  store.set("maw-last-view", JSON.stringify({ kind: "project", project: p.name, ws: w?.id, room: room?.id ?? null, mode: state.mode, pview: state.pview, fpath: state.fpath || "", fview: state.fview || null, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
   const seg = segTabs ? `<div class="seg">${segTabs.map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
   if (state.pview !== "rooms" && segTabs) {
@@ -1612,15 +1614,32 @@ function openSession(sid) {
   toast("ห้องนี้ปิดไปแล้ว");
 }
 // Android killed the app while you were in a room → reopen there (within 30 min), not on home
+// back to where the user was after a reload (pull-to-refresh, a new version, Android killing the app) — within 12 h
 async function resumeLast() {
-  const q = new URL(location.href).searchParams; if (q.get("open") || q.get("shared") || state.project) return;
+  // how this page was opened (reload / navigate / back_forward) + what we decided → sent home with the perf notes
+  const nav = performance.getEntriesByType?.("navigation")?.[0]?.type || "?";
+  const note = why => perfNote(`/resume/${nav}/${why}`, 0);
+  const q = new URL(location.href).searchParams; if (q.get("open") || q.get("shared") || state.project || state.page) return note("busy");
   let v = null; try { v = JSON.parse(store.get("maw-last-view") || "null"); } catch {}
-  if (!v || Date.now() - v.at > 30 * 60_000) return;
-  if (!state.projects.length) await load();
-  const p = state.projects.find(x => x.name === v.project), w = p?.workspaces.find(x => x.id === v.ws);
-  if (!w?.rooms.some(r => r.id === v.room) || state.project) return;
-  state.project = p.name; state.ws = w.id; state.room = v.room; state.pview = "rooms"; state.mode = v.mode === "raw" ? "raw" : "chat"; state.follow = true;
-  history.pushState({ v: "p" }, ""); renderProject();
+  if (!v) return note("none");
+  if (Date.now() - v.at > 12 * 3600_000) return note("stale");
+  resumeLast.pending = true;
+  try {
+    if (!state.projects.length) await load();
+    // menu pages come from the feature packs (deferred scripts) — on a slow link they can land after /projects
+    if (document.readyState !== "complete") await new Promise(res => { addEventListener("load", res, { once: true }); setTimeout(res, 8000); });
+    if (state.project || state.page) return note("moved");      // the user already went somewhere
+    if (v.kind === "page") {
+      if (!mawExt.pages.some(x => x.key === v.key)) return note("page-missing-" + v.key);
+      history.pushState({ v: "pg" }, ""); renderPage(v.key); return note("page-" + v.key);
+    }
+    const p = state.projects.find(x => x.name === v.project); if (!p) return note("project-missing");
+    const w = p.workspaces.find(x => x.id === v.ws) || p.workspaces[0];
+    state.project = p.name; state.ws = w?.id; state.room = w?.rooms.some(r => r.id === v.room) ? v.room : w?.rooms[0]?.id;
+    state.pview = v.pview || "rooms"; state.mode = v.mode === "raw" ? "raw" : "chat"; state.follow = true;
+    state.fpath = v.fpath || ""; state.fview = v.fview || null;
+    history.pushState({ v: "p" }, ""); renderProject(); note("project");
+  } finally { resumeLast.pending = false; }
 }
 async function takeOpen(url) {
   const sid = new URL(url || location.href, location.origin).searchParams.get("open"); if (!sid) return;
@@ -1954,7 +1973,14 @@ function renderLogin() {
 }
 
 // ── data + polling ──
+/** Keep the remembered view's time current while the app is open (a page read for an hour is still "where I was"). */
+function touchView() {
+  if (!state.page && !state.project) return;
+  try { const v = JSON.parse(store.get("maw-last-view") || "null"); if (v) { v.at = Date.now(); store.set("maw-last-view", JSON.stringify(v)); } } catch {}
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) touchView(); });
 async function load(manual) {
+  touchView();
   try {
     state.projects = (await api("/projects")).projects;
     soundOnChange(state.projects);
@@ -1974,7 +2000,7 @@ function refreshTabs() {
   }
   for (const r of w.rooms) { const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
 }
-window.addEventListener("popstate", () => { if (state.project) store.del("maw-last-view"); if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
+window.addEventListener("popstate", () => { if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
 // New version on the Mac → reload by itself (only when nothing is half-typed), so the phone never runs stale code
 let pageStamp = null;
 async function checkVersion() {
@@ -2015,6 +2041,7 @@ start();
 <script src="/m-ext/prs.js" defer></script>
 <script src="/m-ext/mind.js" defer></script>
 <script src="/m-ext/autostart.js" defer></script>
+<script src="/m-ext/docs.js" defer></script>
 
 </body>
 </html>

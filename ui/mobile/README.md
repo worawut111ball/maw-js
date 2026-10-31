@@ -47,11 +47,12 @@ src/mobile/
 | retro | เมนู "สรุปงาน": สั่ง /rrr หรือ /mind-rrr · แมนนวล / กึ่งออโต้ / ออโต้ | `/retro*` |
 | prs | เมนู "PR": PR เปิดทุก repo · AI ตรวจ (skill `/review-pr-check` อ่านอย่างเดียว) · merge โดยคนกดเท่านั้น | `/prs*` |
 | mind | เมนู "Mind": Mail Box + Mind Chat ของ Artron Mind (token อยู่บน Mac เท่านั้น) | `/mind/*` |
+| docs | เมนู "📄 เอกสาร": เอกสาร ISO (โฟลเดอร์ `WP05 …`) ทุก repo · อ่านทีละหน้า (Mac แปลง Word/Excel/PDF → ภาพด้วย LibreOffice + pdftoppm, cache ใน `~/.maw/docs-cache`) · ไล่ `[TBD]` · ส่งคำตอบเข้าห้อง Claude · ✏️ ปากกาขีดทับหน้า + โน้ต → รายการรอส่ง → ส่งทีเดียวเข้าห้อง (ข้อความบรรทัดเดียว + path ภาพ) → เทียบก่อน/หลังกับรุ่นใหม่ (`~/.maw/docs-marks*`) · รุ่นเก่า (`_V1.0` เมื่อมี `_V1.1`) พับไว้ ไม่นับ TBD · อ่านอย่างเดียว | `GET /docs` · `POST /docs/render` · `GET /docs/page` · `/docs/marks*` · `GET /docs/mark-img` |
 
 ## ข้อมูลที่เก็บบน Mac (`~/.maw/`)
 
 `mobile.json` (token แอป + hook — ห้ามพิมพ์ค่า) · `push.json` (กุญแจ push — ห้ามพิมพ์ค่า) · `travel.json` · `autostart.json` · `prs.json` · `retro.json` · `folders.json` ·
-`pr-verdicts/` (ผลตรวจ PR จาก AI) · `uploads/` (รูป/ไฟล์ที่ส่งจากมือถือ) · `status/` (สถานะจาก statusline ของ Claude) · `bin/thermal`, `bin/temps`
+`pr-verdicts/` (ผลตรวจ PR จาก AI) · `docs-cache/` (ภาพหน้าเอกสาร — ลบได้ สร้างใหม่เอง) · `uploads/` (รูป/ไฟล์ที่ส่งจากมือถือ) · `status/` (สถานะจาก statusline ของ Claude) · `bin/thermal`, `bin/temps`
 
 ## กติกา (ห้ามพลาด)
 
@@ -67,3 +68,4 @@ src/mobile/
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 23 ต.ค. 69 | ไอ้แดง (Claude Code) | สร้าง README — สรุปโครง pack ทั้งหมด, deploy, ข้อมูลใน ~/.maw, กติกา (ประวัติละเอียดอยู่ใน PLAN-maw-mobile.md) |
+| 30 ต.ค. 69 | ไอ้แดง (Claude Code) | เพิ่ม pack docs (เมนูเอกสาร ISO) · ห้อง Superset "ยังไม่เปิด" + wake · autostart เหลือ shell เมื่อ agent ปิด |
