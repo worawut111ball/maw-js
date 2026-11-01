@@ -146,7 +146,7 @@
     freeUrls();
     const tbd = m?.tbd || [];
     el.innerHTML = `<div class="dc-top"><div class="t">${esc(f.name)}</div><div class="p">${esc(f.set.label)}${f.set.sub ? " · " + esc(f.set.sub) : ""} · ${when(f.mtime)}</div>
-        <div class="dc-bar"><button id="dc-back">← รายการ</button>${tbd.length ? `<button class="y" id="dc-next">ไป TBD ถัดไป (${tbd.length})</button>` : ""}<button id="dc-say">💬 สั่งแก้ไฟล์นี้</button>${pending().length ? `<button class="r" id="dc-q">📝 รอส่ง ${pending().length} จุด</button>` : ""}${sent().length ? `<button id="dc-sent">✅ ส่งแล้ว ${sent().length}</button>` : ""}</div></div>
+        <div class="dc-bar"><button id="dc-back">← รายการ</button>${tbd.length ? `<button class="y" id="dc-next">ไป TBD ถัดไป (${tbd.length})</button>` : ""}<button id="dc-say">💬 สั่งแก้ไฟล์นี้</button><button id="dc-dl">⬇️ โหลด</button>${pending().length ? `<button class="r" id="dc-q">📝 รอส่ง ${pending().length} จุด</button>` : ""}${sent().length ? `<button id="dc-sent">✅ ส่งแล้ว ${sent().length}</button>` : ""}</div></div>
       ${!m ? `<div class="dc-note">กำลังแปลงเอกสารเป็นภาพ… ครั้งแรกของแต่ละไฟล์ใช้ราว 10–40 วินาที ครั้งต่อไปเปิดทันที</div>`
         : m.error ? `<div class="dc-note">เปิดไม่ได้: ${esc(m.error)}</div>`
         : `${tbd.length ? `<div class="dc-list">${tbd.map((t, i) => `<div class="dc-t"><span class="pg">หน้า ${t.page}</span><span class="x" data-go="${i}">${esc(t.text)}</span><button data-fix="${i}">ตอบ</button></div>`).join("")}</div>` : `<div class="dc-note">ไม่มี [TBD] ในไฟล์นี้ ✓</div>`}
@@ -155,6 +155,7 @@
     document.getElementById("dc-back").onclick = () => { freeUrls(); D.file = null; D.meta = null; saveView(); draw(); };
     saveView();
     document.getElementById("dc-say").onclick = () => fixSheet(null);
+    document.getElementById("dc-dl").onclick = () => downloadSheet(f, m);
     const q = document.getElementById("dc-q"); if (q) q.onclick = queueSheet;
     const sn = document.getElementById("dc-sent"); if (sn) sn.onclick = sentSheet;
     el.querySelectorAll("[data-mk]").forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); editor(+b.dataset.mk); });
@@ -247,6 +248,37 @@
       try { await api(`/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/send`, { method: "POST", body: JSON.stringify({ text }) }); store.set("maw-docs-room", ws + "|" + room); toast("ส่งเข้าห้องแล้ว"); close(); }
       catch (e) { toast("ส่งไม่ได้: " + e.message); }
     };
+  }
+
+  // download with the app's token (a plain link can't send it), then hand the file to the phone
+  function downloadSheet(f, m) {
+    const ext = f.ext.toUpperCase(), canPdf = f.ext !== "pdf", pdfReady = canPdf && m && !m.error;
+    const bg = sheet(`<h2>โหลดไฟล์</h2><div class="dc-note" style="overflow-wrap:anywhere">${esc(f.name.split("/").pop())}</div>
+      <div class="dc-q">
+        <button class="dc-qi" data-dl="orig" style="width:100%;text-align:left"><span class="n"><b>⬇️ ต้นฉบับ (.${esc(f.ext)})</b><span>ไฟล์จริง ${size(f.size)} — เปิดแก้ใน ${ext === "DOCX" || ext === "DOC" ? "Word" : ext === "XLSX" || ext === "XLS" ? "Excel" : "แอปที่รองรับ"} ได้</span></span></button>
+        ${canPdf ? `<button class="dc-qi" data-dl="pdf" style="width:100%;text-align:left" ${pdfReady ? "" : "disabled"}><span class="n"><b>⬇️ PDF</b><span>${pdfReady ? "ส่งต่ออ่านง่าย — หน้าตาแบบที่เห็นในแอป (LibreOffice จัดหน้า อาจต่างจาก Word เล็กน้อย)" : "รอแปลงเอกสารให้เสร็จก่อน"}</span></span></button>
+        <button class="dc-qi" data-dl="both" style="width:100%;text-align:left" ${pdfReady ? "" : "disabled"}><span class="n"><b>⬇️ ทั้งสองไฟล์</b><span>ต้นฉบับ + PDF</span></span></button>` : ""}
+      </div><button class="ghost" id="dc-x" style="width:100%;margin-top:4px">ปิด</button>`);
+    bg.querySelector("#dc-x").onclick = () => bg.remove();
+    bg.querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+      const k = b.dataset.dl;
+      if (k !== "pdf") await download(b, f, false);
+      if (k !== "orig") await download(b, f, true);
+      bg.remove();
+    });
+  }
+  async function download(btn, f, pdf) {
+    const label = btn.innerHTML; btn.disabled = true; btn.textContent = "กำลังโหลด…";
+    try {
+      const res = await fetch(`/mobile/docs/file?id=${encodeURIComponent(f.id)}${pdf ? "&pdf=1" : ""}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "HTTP " + res.status);
+      const base = f.name.split("/").pop(), name = pdf ? base.replace(/\.[^.]+$/, ".pdf") : base;
+      // saved to the phone's Downloads (Chrome shows "open" in its download bar / notification)
+      const a = document.createElement("a"); a.href = URL.createObjectURL(await res.blob()); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30_000);
+      toast("โหลดแล้ว: " + name);
+    } catch (e) { toast("โหลดไม่ได้: " + e.message); }
+    finally { btn.disabled = false; btn.innerHTML = label; }
   }
 
   // ── pen marks ──

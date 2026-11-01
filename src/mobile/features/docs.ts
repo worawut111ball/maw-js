@@ -5,6 +5,7 @@
 // GET  /docs/page?id=&n=      → JPEG of page n (1-based) once rendered
 // GET  /docs/marks?id=        → pen marks on this document (any version of it) · POST /docs/marks {id,page,note,image}
 // POST /docs/marks/delete {id, mid} · POST /docs/marks/send {id, ws, room} → one message with every unsent mark to a room
+// GET  /docs/file?id=[&pdf=1] → the document itself (download) or its rendered PDF
 // GET  /docs/mark-img?mid=    → the marked page (JPEG, red ink on the page) — the "before" of a fix
 // Read-only: files are converted into ~/.maw/docs-cache (LibreOffice → PDF → JPEG pages); the documents are never touched.
 // "[TBD]" is what the /iso skill writes (highlighted yellow) wherever it is not sure — the phone lists and jumps to them.
@@ -320,6 +321,21 @@ export function mount(app: any): void {
     for (const m of todo) { m.sentAt = now; m.room = `${body.ws}|${body.room}`; }
     saveMarks(all);
     return { ok: true, sent: todo.length };
+  });
+
+  // download: the original file, or the PDF made for the page images
+  app.get("/docs/file", async ({ query, set }: any) => {
+    const f = await fileOf(query?.id);
+    if (!f) { set.status = 404; return { ok: false, error: "ไม่พบเอกสารนี้" }; }
+    let path = f.path, name = basename(f.path);
+    if (query?.pdf === "1" && f.ext !== "pdf") {
+      const metaFile = join(cacheDir(f), "meta.json");
+      const pdf = existsSync(metaFile) ? (JSON.parse(readFileSync(metaFile, "utf-8")) as Meta).pdf : null;
+      if (!pdf || !existsSync(pdf)) { set.status = 409; return { ok: false, error: "ยังไม่ได้แปลงเป็น PDF — เปิดเอกสารก่อน" }; }
+      path = pdf; name = name.replace(/\.[^.]+$/, ".pdf");
+    }
+    const type = /\.pdf$/i.test(name) ? "application/pdf" : "application/octet-stream";
+    return new Response(Bun.file(path), { headers: { "content-type": type, "content-disposition": `attachment; filename="file"; filename*=UTF-8''${encodeURIComponent(name)}` } });
   });
 
   app.get("/docs/mark-img", ({ query, set }: any) => {
