@@ -1607,6 +1607,22 @@ async function togglePush(btn) {
     const t = await api("/push/test", { method: "POST" }); toast(t.sent ? "เปิดแจ้งเตือนแล้ว — ส่งข้อความทดสอบไปแล้ว" : "เปิดแล้ว แต่ส่งทดสอบไม่ได้");
   } catch (e) { toast("เปิดแจ้งเตือนไม่ได้: " + e.message); }
 }
+// Keep this phone registered while notifications are on: Chrome can rotate or expire a subscription, and the Mac
+// drops one that the push service rejects (404/410) — without this the 🔔 says "on" while nothing arrives.
+async function healPush() {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted" || !store.get("maw-push") || !navigator.serviceWorker) return;
+  try {
+    const reg = await navigator.serviceWorker.ready, { key } = await api("/push/key");
+    let sub = await reg.pushManager.getSubscription();
+    // a subscription made for another server key can't be used → make a fresh one
+    const made = sub?.options?.applicationServerKey && btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    if (sub && made && made !== key.replace(/=+$/, "")) { await sub.unsubscribe().catch(() => {}); sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(key) });
+    await api("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub.toJSON() }) });
+  } catch (e) { console.warn("[push] heal", e); }
+}
+setTimeout(healPush, 4000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - (healPush.at || 0) > 3600_000) { healPush.at = Date.now(); healPush(); } });
 // notification tap → open the room of that Claude session
 function openSession(sid) {
   for (const p of state.projects) for (const w of p.workspaces) for (const r of w.rooms)
