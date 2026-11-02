@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { dropForgedTailscaleIdentity } from "./tailscale-identity";
 import { MawEngine } from "../engine";
 import type { WSData } from "./types";
 import { loadConfig } from "../config";
@@ -189,6 +190,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
   }
 
   const fetchHandler = (req: Request, server: any) => {
+    req = dropForgedTailscaleIdentity(req, server.requestIP?.(req)?.address);
     const url = new URL(req.url);
     if (url.pathname === "/ws/pty") {
       if (server.upgrade(req, { data: { target: null, previewTargets: new Set(), mode: "pty" } as WSData })) return;
@@ -260,7 +262,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
   if (tlsCfg?.cert && tlsCfg?.key && existsSync(tlsCfg.cert) && existsSync(tlsCfg.key)) {
     const tlsPort = port + 1;
     const tls = { cert: readFileSync(tlsCfg.cert), key: readFileSync(tlsCfg.key) };
-    Bun.serve({ port: tlsPort, tls, fetch: fetchHandler, websocket: wsHandler });
+    Bun.serve({ port: tlsPort, hostname, tls, fetch: fetchHandler, websocket: wsHandler });
     console.log(`maw serve → https://localhost:${tlsPort} (wss://localhost:${tlsPort}/ws) [TLS]`);
   }
 
