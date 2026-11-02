@@ -1503,6 +1503,7 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     })
     .onBeforeHandle(({ request, path, set }) => {
       if (path.endsWith("/hook")) return;
+      if (/\/vault\/dl(-zip|\/[0-9a-z]+)$/.test(path)) return;      // signed short-lived links — the route checks the signature
       if (!isAuthorized(request.headers, cfg)) { set.status = 401; return { ok: false, error: "unauthorized" }; }
     })
     .get("/health", () => ({ ok: true, hooks: hookStates.size }))

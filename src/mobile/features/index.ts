@@ -12,7 +12,8 @@ import { mount as retro } from "./retro";
 import { mount as prs } from "./prs";
 import { mount as mind } from "./mind";
 import { mount as docs } from "./docs";
+import { mount as vault } from "./vault";
 
 export function mountFeatures(app: any): void {
-  for (const m of [permissions, modes, activity, resume, context, superset, travel, autostart, ports, retro, prs, mind, docs]) m(app);
+  for (const m of [permissions, modes, activity, resume, context, superset, travel, autostart, ports, retro, prs, mind, docs, vault]) m(app);
 }
