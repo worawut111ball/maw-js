@@ -24,6 +24,15 @@ interface MobileHeaderProps {
   onInbox: () => void;
 }
 
+/** Back to maw mobile (/m.html) on the node this page talks to — the one in ?host= when opened from the mobile ⋯ menu. */
+function toMobileApp() {
+  try { sessionStorage.removeItem("maw-desktop"); } catch { /* private mode */ }
+  const host = new URLSearchParams(location.search).get("host");
+  let base = location.origin;
+  try { if (host) base = new URL(/^https?:\/\//.test(host) ? host : `http://${host}`).origin; } catch { /* keep this origin */ }
+  location.href = `${base}/m.html`;
+}
+
 export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbox }: MobileHeaderProps) {
   const viewLabel = VIEW_LABELS[activeView] || activeView.replace(/-/g, " ");
 
@@ -40,6 +49,15 @@ export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbo
       </div>
 
       <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={toMobileApp}
+          className="flex h-10 min-w-10 items-center justify-center rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-2.5 text-[12px] font-semibold text-cyan-200 active:scale-95"
+          aria-label="maw mobile"
+          title="maw mobile"
+        >
+          📱 มือถือ
+        </button>
         <button
           type="button"
           onClick={onInbox}

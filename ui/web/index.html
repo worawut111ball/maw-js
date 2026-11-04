@@ -12,6 +12,19 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>ARRA Office</title>
+  <script>
+    // A phone opening the desktop office goes to maw mobile (/m.html) instead.
+    // ?desktop=1 keeps the desktop view for this tab.
+    (function () {
+      try {
+        var q = location.search;
+        if (/[?&]desktop=1\b/.test(q)) { sessionStorage.setItem("maw-desktop", "1"); return; }
+        if (sessionStorage.getItem("maw-desktop") === "1" || /[?&]host=/.test(q)) return;
+        var phone = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600;
+        if (phone) location.replace("/m.html");
+      } catch (e) { /* stay on the desktop view */ }
+    })();
+  </script>
 </head>
 <body>
   <div id="root"></div>
