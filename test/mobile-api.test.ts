@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { asleepPanes, parseTemps, safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
+import { asleepPanes, parseTemps, safeFolderName, cloneUrlOk, repoNameFromUrl, insideWorkspace, listDir, gitInfo, gitFileDiff, decorateDir, findRepos, promptSuggestion, inputDraft, clearInputBox, activeBranch, rewindCut, parseTranscriptLines, processUsage, elapsedSeconds, compactMsPerToken, compactProgress, nestedDeco, pushFor, loadPush, queuedMessages, claudeUsage, claudeLimits, codexUsage, slashCommands, frontMatter, forgetGitStatus, agentSpinner, transcriptImage, gitAction, gitGraph, ignoredNames, safeName, saveUpload, buildProjects, claudeTranscript, codexTranscript, createMobileApi, isSubagentRollout, hookStates, isAuthorized, readLiveRooms, roomChannel, statusFromHook, statusFromRoom, tmuxChannel, toMobileAgent, type LiveRoom } from "../src/mobile/api";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -513,6 +513,69 @@ test("Mac input draft: real typed text yes, grey suggestion no", () => {
   expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0\x1b[38;5;231mหดเหอกหอหอห\x1b[0m\n${rule}`)).toEqual({ text: "หดเหอกหอหอห", sure: true });
   expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0\x1b[2mไปต่อเลย\x1b[0m\n${rule}`)).toBeNull();
   expect(inputDraft(`${rule}\n❯\u00a0พิมพ์ค้าง\n${rule}`)).toEqual({ text: "พิมพ์ค้าง", sure: false });
+});
+
+test("Mac input draft of several lines (Shift+Enter · ↑ history · Esc rewind) is read whole", () => {
+  const rule = "─".repeat(10);
+  const scr = `${rule}\n\x1b[39m❯\u00a0หนึ่ง\x1b[0m\n  สอง\n  สาม\n${rule}\n  📁 ~/x`;
+  expect(inputDraft(scr)).toEqual({ text: "หนึ่ง\nสอง\nสาม", sure: true });
+  // the status lines under the bottom border are not part of the message
+  expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0เดียว\x1b[0m\n${rule}\n  📁 ~/x\n  📄 • 18:02`)).toEqual({ text: "เดียว", sure: true });
+  // text + blank line + attachment line (how the phone sends a picture) — the blank line is inside the box
+  expect(inputDraft(`${rule}\n\x1b[39m❯\u00a0รูปทดสอบ\x1b[0m\n\n  [แนบไฟล์] /u/.maw/uploads/2026-11-04/ab12cd34-red.png\n${rule}\n  📁 ~/x`))
+    .toEqual({ text: "รูปทดสอบ\n\n[แนบไฟล์] /u/.maw/uploads/2026-11-04/ab12cd34-red.png", sure: true });
+});
+
+test("clearInputBox empties a multi-line box: Ctrl+U per line, Backspace to join (as Claude Code does)", async () => {
+  // fake input box: Ctrl+U clears the cursor's (last) line, Backspace on an empty line joins it with the one above
+  let box = ["หนึ่ง", "สอง", "สาม"];
+  const draw = () => `${"─".repeat(5)}\n\x1b[39m❯\u00a0${box[0] ?? ""}\x1b[0m\n${box.slice(1).map(l => "  " + l).join("\n")}\n${"─".repeat(5)}`;
+  const keys: string[] = [];
+  const press = async (_: unknown, k: string) => {
+    keys.push(k);
+    if (k === "ctrlu") box[box.length - 1] = "";
+    if (k === "bspace" && box.length > 1 && box[box.length - 1] === "") box.pop();
+  };
+  const ok = await clearInputBox({ kind: "tmux", pane: "x" } as any, async () => draw(), press as any, 0);
+  expect(ok).toBe(true);
+  expect(box).toEqual([""]);
+  expect(keys).toEqual(["ctrlu", "bspace", "ctrlu", "bspace", "ctrlu"]);
+  // already empty → no keys at all
+  keys.length = 0;
+  expect(await clearInputBox({ kind: "tmux", pane: "x" } as any, async () => draw(), press as any, 0)).toBe(true);
+  expect(keys).toEqual([]);
+});
+
+test("rewind: the turn undone with Esc Esc → Restore is left out once the next turn forks off an earlier one", () => {
+  const L = (o: any) => JSON.stringify(o);
+  const u = (uuid: string, parentUuid: string | null, text: string) => L({ type: "user", uuid, parentUuid, timestamp: "2026-11-04T13:00:00Z", message: { role: "user", content: text } });
+  const a = (uuid: string, parentUuid: string, text: string) => L({ type: "assistant", uuid, parentUuid, timestamp: "2026-11-04T13:00:01Z", message: { role: "assistant", content: [{ type: "text", text }] } });
+  const st: any = { size: 0, partial: "", items: [], tools: new Map() };
+  parseTranscriptLines(st, [u("u1", null, "ตอบ หนึ่ง"), a("a1", "u1", "หนึ่ง"), u("u2", "a1", "ตอบ สอง"), a("a2", "u2", "สอง")]);
+  expect(activeBranch(st, st.items).map((x: any) => x.text)).toEqual(["ตอบ หนึ่ง", "หนึ่ง", "ตอบ สอง", "สอง"]);
+  parseTranscriptLines(st, [u("u3", "a1", "ตอบ สาม"), a("a3", "u3", "สาม")]);   // forked off a1
+  const live = activeBranch(st, st.items);
+  expect(live.map((x: any) => x.text)).toEqual(["ตอบ หนึ่ง", "หนึ่ง", "ตอบ สาม", "สาม"]);
+  expect(live.map((x: any) => x.i)).toEqual([0, 1, 2, 3]);
+  expect((live as any).dropped).toBe(2);
+});
+
+test("rewind before the next turn: the box holds an answered message without the ↑ History label → cut there", () => {
+  const items: any[] = [
+    { i: 0, role: "user", ts: null, text: "ตอบ หนึ่ง" }, { i: 1, role: "assistant", ts: null, text: "หนึ่ง" },
+    { i: 2, role: "user", ts: null, text: "รูป B" }, { i: 3, role: "assistant", ts: null, text: "ได้รูปแล้ว" },
+  ];
+  const box = (border: string, text: string) => `${border}\n\x1b[39m❯\u00a0${text}\x1b[0m\n${"─".repeat(20)}`;
+  expect(rewindCut(box("─".repeat(20), "รูป B\n\n  [แนบไฟล์] /u/.maw/uploads/2026-11-04/ab-red.png".replace("\n  ", "\n  ")), items)).toBe(2);
+  expect(rewindCut(box("─── History 2/2 " + "─".repeat(10), "รูป B"), items)).toBe(-1);   // ↑ copy, keep everything
+  expect(rewindCut(box("─".repeat(20), "อะไรใหม่"), items)).toBe(-1);                  // just typing
+  expect(rewindCut(box("─".repeat(20), ""), items)).toBe(-1);
+  // the PC wraps a long attachment path in the middle — still the same message
+  const long: any[] = [
+    { i: 0, role: "user", ts: null, text: "ทดสอบอีกรอบ\n\n[แนบไฟล์] /Users/me/.maw/uploads/2026-11-04/c3a8e4f1-0000000000000SLIP0000.jpeg/rewind" },
+    { i: 1, role: "tool", ts: null }, { i: 2, role: "user", ts: null, text: "/rewind" }, { i: 3, role: "system", ts: null, text: "⏹ หยุดงานกลางคัน" },
+  ];
+  expect(rewindCut(box("─".repeat(20), "ทดสอบอีกรอบ\n\n  [แนบไฟล์] /Users/me/.maw/uploads/2026-11-04/c3a8e4\n  f1-0000000000000SLIP0000.jpeg/rewind"), long)).toBe(0);
 });
 
 test("message sent while a tool runs: tool_result between remove and queued_command is not a cancel", () => {

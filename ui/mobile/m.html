@@ -221,7 +221,7 @@
 .pact button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid #475569; background: #1e293b; color: #e5e7eb; }
   .msg.me.canceled .bubble { background: transparent; border: 1px solid #475569; color: #64748b; text-decoration: line-through; } .msg.me.canceled .who { color: #94a3b8; }
   .draftbar { display: flex; align-items: center; gap: 6px; margin: 6px 12px 0; padding: 6px 6px 6px 12px; border-radius: 12px; background: #f59e0b14; border: 1px solid #f59e0b55; flex: none; font-size: 13px; }
-  .draftbar[hidden] { display: none; } .draftbar .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fde68a; } .draftbar .t b { color: #fbbf24; margin-right: 4px; }
+  .draftbar[hidden] { display: none; } .draftbar .t { flex: 1; min-width: 0; overflow: hidden; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; color: #fde68a; } .draftbar .t b { color: #fbbf24; margin-right: 4px; }
   .draftbar button { flex: none; height: 30px; padding: 0 9px; border-radius: 8px; background: var(--card2); font-size: 12.5px; font-weight: 600; } .draftbar button.go { background: var(--accent); color: #031022; } .draftbar button.warn { background: #b45309; color: #fff; }
   .bgrun { font-size: 11px; color: #c4b5fd; background: #7c3aed26; padding: 1px 7px; border-radius: 99px; animation: bgp 1.6s ease-in-out infinite; }
   @keyframes bgp { 50% { opacity: .55; } }
@@ -483,7 +483,7 @@ async function apiRaw(path, opts = {}) {
   const res = await fetch("/mobile" + path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + (store.get("maw-mobile-token") || ""), ...(opts.headers || {}) } });
   if (res.status === 401) { renderLogin(); throw new Error("unauthorized"); }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) throw new Error(body.error || ("HTTP " + res.status));
+  if (!res.ok || body.ok === false) { const e = new Error(body.error || ("HTTP " + res.status)); e.body = body; throw e; }
   return body;
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -542,20 +542,25 @@ function wireTiles(root) { root.querySelectorAll("[data-page]").forEach(b => b.o
 function renderPage(key) {
   const pg = mawExt.pages.find(x => x.key === key); if (!pg) return renderHome();
   state.page = key; state.project = null; state.room = null;
-  $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
+  $app.dataset.view = ""; $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
   document.getElementById("back").onclick = () => history.back();
   try { pg.mount(document.getElementById("pgbody")); } catch (e) { document.getElementById("pgbody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   store.set("maw-last-view", JSON.stringify({ kind: "page", key, at: Date.now() }));
 }
 
 // ── home: projects ──
-function renderHome() {
+// Home is redrawn on every poll. A redraw used to put the list back at the top while the user was scrolling to a room:
+// now an unchanged list is left alone, a changed one keeps its scroll, and a poll waits while the finger is moving.
+let homeScrollAt = 0;
+function renderHome(auto) {
+  const onHome = $app.dataset.view === "home", oldMain = onHome ? $app.querySelector("main") : null;
+  if (auto && onHome && Date.now() - homeScrollAt < 1500) { clearTimeout(renderHome._t); renderHome._t = setTimeout(() => { if ($app.dataset.view === "home") renderHome(true); }, 1600); return; }
   state.project = null; state.room = null; state.page = null;
   if (!resumeLast.pending) store.del("maw-last-view");   // home is home — unless we're about to put the user back
   const waiting = state.projects.flatMap(p => roomsOf(p).filter(r => r.status === "waiting").map(r => ({ ...r, project: p.name })));
   const busy = p => roomsOf(p).some(r => r.agent);
   const list = state.projects.filter(p => state.showEmpty || busy(p)).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
-  $app.innerHTML = `
+  const html = `
     <header class="homehead"><h1>maw</h1>${rcHtml()}
       <button class="iconbtn" id="refresh" aria-label="รีเฟรช">↻</button>
       <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
@@ -571,6 +576,13 @@ function renderHome() {
       ${list.map(projCard).join("") || `<div class="empty">ยังไม่มีโปรเจคที่มี agent ทำงาน</div>`}
       <button class="ghost" id="toggleEmpty">${state.showEmpty ? "ซ่อนโปรเจคที่ไม่มี agent" : `แสดงทุกโปรเจค (${state.projects.length})`}</button>
     </main>`;
+  if (onHome && auto && renderHome._html === html) return;   // nothing changed — don't touch the DOM (tiles/ext refresh on their own)
+  const keep = oldMain ? oldMain.scrollTop : 0;
+  renderHome._html = html; $app.innerHTML = html; $app.dataset.view = "home";
+  const main = $app.querySelector("main");
+  if (keep) main.scrollTop = keep;
+  main.addEventListener("scroll", () => { homeScrollAt = Date.now(); }, { passive: true });
+  main.addEventListener("touchmove", () => { homeScrollAt = Date.now(); }, { passive: true });
   $app.querySelectorAll("[data-p]").forEach(b => b.onclick = () => openProject(b.dataset.p));
   $app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { const [p, w, r] = b.dataset.go.split("|"); openProject(p, w, r); });
   document.getElementById("refresh").onclick = () => load(true);
@@ -627,7 +639,7 @@ function renderProject() {
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
   const seg = segTabs ? `<div class="seg">${segTabs.map(([k, l]) => `<button data-pv="${k}" class="${state.pview === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "";
   if (state.pview !== "rooms" && segTabs) {
-    $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}<span style="color:var(--dim);font-size:12.5px;flex:none">⎇ ${esc(w?.branch || "")}</span>${p.source === "folder" ? `<button class="iconbtn" data-unpin="${esc(p.path)}" title="เลิกปัก">📌</button>` : ""}</header>
+    $app.dataset.view = ""; $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}<span style="color:var(--dim);font-size:12.5px;flex:none">⎇ ${esc(w?.branch || "")}</span>${p.source === "folder" ? `<button class="iconbtn" data-unpin="${esc(p.path)}" title="เลิกปัก">📌</button>` : ""}</header>
       ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
       ${seg}<div class="xp" id="xp">กำลังโหลด…</div>`;
     document.getElementById("back").onclick = () => history.back();
@@ -637,7 +649,7 @@ function renderProject() {
     if (xt) { const el = document.getElementById("xp"); try { return xt.render(w, el); } catch (e) { el.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; } }
     return state.pview === "files" ? renderFiles(w) : renderGit(w);
   }
-  $app.innerHTML = `${""}
+  $app.dataset.view = ""; $app.innerHTML = `${""}
     <header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}
       ${room ? `<span class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span>` : ""}</header>
     ${seg}
@@ -724,17 +736,23 @@ function renderProject() {
     send.onclick = doSend;
     async function doSend() {
       const text = msg.value.trim(), files = [...state.files]; if (!text && !files.length) return;
-      if (state.macDraft) { // typing goes into the same box → it would be glued onto what's already there
+      // what's in the PC's box is checked again by the server right before it types (this view can be 2.5 s old):
+      // "clear" = empty it first · "merge" = type after it · nothing = the server refuses and asks back (409 draft)
+      let mode = "";
+      if (state.pulled && (state.macDraft === state.pulled || !state.macDraft)) mode = "clear";   // the phone holds that text itself (maybe edited)
+      else if (state.macDraft) {
         send.disabled = true;
         const how = await askMacDraft(state.macDraft);
         send.disabled = false;
         if (!how) return;
-        if (how === "clear") await roomKey("ctrlu");
+        mode = how;
       }
+      state.macDraft = null;
+      state.pulled = state.pulledText = null; state.pulledFiles = []; state.justSent = { room: room.id, text, at: Date.now() };
       // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
       // newest user message already in the chat → anything after it is ours (pasted images come back as "[Image #12]", not our text)
       const lastUserI = state.chat?.room === room.id ? Math.max(-1, ...[...state.chat.items.values()].filter(m => m.role === "user").map(m => m.i)) : null;
-      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI, text, files, at: Date.now(), state: "sending", note: "",
+      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI, text, files, mode, at: Date.now(), state: "sending", note: "",
         pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
       pendingSends.push(pend); savePending(pend);
       msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
@@ -742,6 +760,7 @@ function renderProject() {
     }
     $app.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
       if (b.dataset.k === "ctrlc" && !b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้ง"; setTimeout(() => { delete b.dataset.armed; b.textContent = "Ctrl+C"; }, 2500); return; }
+      if (state.justSent) state.justSent.done = true;
       try { await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/send`, { method: "POST", body: JSON.stringify({ key: b.dataset.k }) }); setTimeout(loadScreen, 300); }
       catch (e) { toast("ส่งปุ่มไม่ได้: " + e.message); }
     });
@@ -932,7 +951,15 @@ async function runSend(p) {
     p.note = "";
     const text = (p.text ? p.text + (paths.length ? "\n\n" : "") : "") + paths.map(x => `[แนบไฟล์] ${x}`).join("\n");
     p.paths = paths;
-    await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", body: JSON.stringify({ text }) });
+    for (;;) {
+      try { await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", body: JSON.stringify({ text, clear: p.mode === "clear", merge: p.mode === "merge" }) }); break; }
+      catch (e) {
+        if (e.body?.code !== "draft" || p.mode === "clear") throw e;
+        const how = await askMacDraft(e.body.draft);   // something got into the PC's box meanwhile → the person decides
+        if (!how) throw new Error("ยกเลิก — ช่องพิมพ์ที่คอมมีข้อความค้าง");
+        p.mode = how;
+      }
+    }
     p.state = "sent"; p.sentAt = Date.now(); savePending();
     const box = document.getElementById("msg");
     if (state.filesRoom !== p.key || (!box?.value.trim() && !state.files.length)) clearDraft(p.key); // keep a newer draft typed meanwhile
@@ -991,7 +1018,8 @@ function paintPending() {
   const scr = document.getElementById("screen"); if (!scr) return;
   scr.querySelectorAll(".pend").forEach(n => n.remove());
   if (state.mode !== "chat") return;
-  for (const p of [...pendingSends]) if (p.state === "sent" && Date.now() - p.sentAt > 60_000) dropPending(p, true);
+  // a slash command (/rewind, /clear …) runs in the agent's UI and is never written as a message → its bubble goes soon
+  for (const p of [...pendingSends]) if (p.state === "sent" && Date.now() - p.sentAt > (/^\s*\/\S/.test(p.text) && !p.files.length ? 3_000 : 60_000)) dropPending(p, true);
   const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room);
   if (!mine.length) return;
   const atBottom = state.follow || scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60;
@@ -1050,6 +1078,30 @@ async function shrinkImage(f, max = 1920, q = 0.82) {
     return new File([blob], f.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
   } catch { return f; }
 }
+/** Split a PC draft into its text and the files it refers to ("[แนบไฟล์] …/.maw/uploads/<day>/<file>", the way the phone sends them).
+ *  The PC's box wraps long lines, so a path may come back broken over two lines. */
+function splitDraft(raw) {
+  let t = String(raw || "");
+  for (let k = 0; k < 4; k++) t = t.replace(/(\/\.maw\/uploads\/[^\s]*?)\n([^\s]+)/g, (all, a, b) => /\.[A-Za-z0-9]{2,5}$/.test(a) ? all : a + b);
+  const files = [];
+  t = t.replace(/(?:\[แนบไฟล์\]\s*)?(?:~|\/[^\s]*?)\/\.maw\/uploads\/(\d{4}-\d{2}-\d{2})\/([^\s]+)/g, (all, day, file) => { files.push({ day, file }); return ""; });
+  return { text: t.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(), files };
+}
+async function pullDraft(raw, msg) {
+  const { text, files } = splitDraft(raw);
+  state.pulled = raw; state.pulledText = text; state.pulledFiles = [];
+  msg.value = text; state.files = []; msg.oninput?.(); msg.dispatchEvent(new Event("maw-redraw-att"));
+  for (const f of files) {
+    try {
+      const res = await fetch(`/mobile/uploads/${encodeURIComponent(f.day)}/${encodeURIComponent(f.file)}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+      if (!res.ok || state.pulled !== raw) continue;
+      const blob = await res.blob();
+      const file = new File([blob], f.file.replace(/^[0-9a-f]{8}-/, ""), { type: blob.type || "application/octet-stream" });
+      state.files.push(file); state.pulledFiles.push(file);
+    } catch { /* the file is gone → the text still comes back */ }
+  }
+  if (state.pulled === raw) { msg.oninput?.(); msg.dispatchEvent(new Event("maw-redraw-att")); }
+}
 // Claude Code's grey suggestion in the Mac's input box → one-tap chip above the composer
 async function loadSuggestion() {
   const box = document.getElementById("sugg"), msg = document.getElementById("msg");
@@ -1085,14 +1137,35 @@ async function loadSuggestion() {
     // what's sitting typed in the Mac's input box (tmux knows for sure; Superset can't tell it from a suggestion)
     state.macDraft = r.draft?.sure ? r.draft.text : null;
     const db = document.getElementById("draft");
+    // a message brought back into the PC's box (↑ history, Esc rewind) shows up in the phone's box too, so what's
+    // typed next edits it instead of being glued onto text nobody can see. The PC's box is emptied when it's sent.
+    if (state.pulledRoom !== state.room) { state.pulled = state.pulledText = null; state.pulledFiles = []; state.pulledRoom = state.room; }
+    // what the phone itself is typing into that box while sending (text goes in, Enter follows ~1 s later) is not a draft —
+    // until the box has been seen empty once: after that the same text coming back is a real ↑ / Esc recall
+    const flat = t => String(t || "").replace(/\s+/g, " ").trim();
+    const js = state.justSent?.room === state.room ? state.justSent : null;
+    // "done" only once our send has finished (the box is also empty for a moment before the text goes in)
+    if (js && !state.macDraft && !pendingSends.some(x => x.room === state.room && x.state === "sending")) js.done = true;
+    if (js && !js.done && state.macDraft && Date.now() - js.at < 120_000 && flat(js.text).startsWith(flat(state.macDraft))) state.macDraft = null;
+    // after a page reload the phone's box comes back from its saved draft — if it is that same PC text, it was pulled already
+    if (state.macDraft && !state.pulled && msg && msg.value.trim() && flat(splitDraft(state.macDraft).text) === flat(msg.value)) {
+      state.pulled = state.macDraft; state.pulledText = msg.value; state.pulledFiles = [...state.files];
+    }
+    const untouched = () => msg && msg.value === (state.pulledText ?? "") && state.files.length === (state.pulledFiles?.length || 0);
+    if (state.macDraft && msg && (!msg.value.trim() && !state.files.length || untouched()) && state.macDraft !== state.pulled) {
+      pullDraft(state.macDraft, msg);
+    } else if (!state.macDraft && state.pulled && untouched()) {
+      // gone from the PC's box (sent / cleared there) and not edited here → gone here too
+      msg.value = ""; state.files = []; state.pulled = state.pulledText = null; state.pulledFiles = []; msg.oninput?.(); msg.dispatchEvent(new Event("maw-redraw-att"));
+    }
     if (db) {
-      if (!state.macDraft) { db.hidden = true; db._t = ""; }
+      if (!state.macDraft || state.macDraft === state.pulled) { db.hidden = true; db._t = ""; }
       else if (db._t !== state.macDraft) {
         db._t = state.macDraft; db.hidden = false;
         db.innerHTML = `<span class="t"><b>⌨ ค้างในช่องพิมพ์ที่คอม:</b>${esc(state.macDraft)}</span><button class="go" data-d="send">ส่ง ⏎</button><button data-d="pull">ดึงมาแก้</button><button data-d="clear">ล้าง</button>`;
         db.querySelector('[data-d="send"]').onclick = async () => { await roomKey("enter"); db.hidden = true; toast("ส่งข้อความที่ค้างในคอมแล้ว"); };
-        db.querySelector('[data-d="pull"]').onclick = async () => { const t = state.macDraft; await roomKey("ctrlu"); msg.value = (msg.value ? msg.value + " " : "") + t; msg.oninput(); msg.focus(); db.hidden = true; };
-        db.querySelector('[data-d="clear"]').onclick = async e => { const b = e.currentTarget; if (!b.dataset.armed) { b.dataset.armed = 1; b.classList.add("warn"); b.textContent = "ล้างจริง?"; return; } await roomKey("ctrlu"); db.hidden = true; toast("ล้างช่องพิมพ์ที่คอมแล้ว"); };
+        db.querySelector('[data-d="pull"]').onclick = async () => { const t = state.macDraft, keep = msg.value; await pullDraft(t, msg); if (keep.trim()) { msg.value = keep + "\n" + msg.value; state.pulledText = msg.value; msg.oninput(); } msg.focus(); db.hidden = true; };
+        db.querySelector('[data-d="clear"]').onclick = async e => { const b = e.currentTarget; if (!b.dataset.armed) { b.dataset.armed = 1; b.classList.add("warn"); b.textContent = "ล้างจริง?"; return; } await roomKey("clearbox"); db.hidden = true; toast("ล้างช่องพิมพ์ที่คอมแล้ว"); };
       }
     }
     if (room.agent !== "claude" || r.spinner) return hide();
@@ -1982,7 +2055,7 @@ async function openNewRoom(w) {
 // ── login fallback ──
 function renderLogin() {
   clearInterval(timer);
-  $app.innerHTML = `<div class="login"><h1>เชื่อมต่อ maw</h1>
+  $app.dataset.view = ""; $app.innerHTML = `<div class="login"><h1>เชื่อมต่อ maw</h1>
     <div style="color:var(--dim)">เปิดผ่านลิงก์ <b>https://&lt;ชื่อเครื่อง&gt;.ts.net</b> ของ <code>tailscale serve</code> (ต่อ Tailscale) จะเข้าได้เลย · ถ้าเข้าจากที่อื่น วาง token จาก <code>~/.maw/mobile.json</code> บน Mac</div>
     <input id="tok" placeholder="token" autocomplete="off" autocapitalize="off" spellcheck="false" /><button id="save">บันทึก</button></div>`;
   document.getElementById("save").onclick = () => { store.set("maw-mobile-token", document.getElementById("tok").value.trim()); start(); };
@@ -2000,7 +2073,7 @@ async function load(manual) {
   try {
     state.projects = (await api("/projects")).projects;
     soundOnChange(state.projects);
-    if (state.page) mawExt.refreshTiles(); else if (!state.project) renderHome(); else if (!document.querySelector(".sheet-bg")) refreshTabs();
+    if (state.page) mawExt.refreshTiles(); else if (!state.project) renderHome(true); else if (!document.querySelector(".sheet-bg")) refreshTabs();
     if (manual) toast("อัปเดตแล้ว");
   } catch (e) { if (e.message !== "unauthorized") toast("โหลดไม่ได้: " + e.message); }
 }

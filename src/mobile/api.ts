@@ -249,10 +249,15 @@ async function findRoom(id: string) {
  */
 export function inputDraft(raw: string): { text: string; sure: boolean } | null {
   const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n");
+  const plainOf = (l: string) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 30); i--) {
-    const plain = lines[i].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+    const plain = plainOf(lines[i]);
     if (!/^❯\u00a0/.test(plain)) continue;
-    const text = plain.slice(2).trim();
+    // a message of several lines (Shift+Enter, or one brought back with ↑ / Esc) goes on below, indented, until the box's bottom border
+    const more: string[] = [];
+    for (let j = i + 1; j < lines.length && j <= i + 40; j++) { const l = plainOf(lines[j]); if (/^\s*─/.test(l) || (l.trim() && !/^ {2}/.test(l))) break; more.push(l.slice(2).trimEnd()); }
+    while (more.length && !more[more.length - 1].trim()) more.pop();
+    const text = [plain.slice(2).trim(), ...more].join("\n").trim();
     if (!text || /^(Try "|Press up to edit queued messages)/.test(text)) return null;
     if (!/\x1b\[/.test(lines[i])) return { text, sure: false };
     const after = lines[i].slice(lines[i].indexOf("❯") + 1).replace(/^\u00a0/, "");
@@ -401,6 +406,22 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
     return;
   }
   await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
+}
+
+/**
+ * Empty the agent's input box. Ctrl+U only clears the line the cursor is on, so a message of several lines needs
+ * Backspace (join with the line above) + Ctrl+U for each more line. Re-reads the box until it is empty (max 4 rounds).
+ */
+export async function clearInputBox(ch: ReplyChannel, read = (c: ReplyChannel) => readScreen(c, 60), press = pressKey, pause = 350): Promise<boolean> {
+  for (let round = 0; round < 4; round++) {
+    const d = inputDraft(await read(ch).catch(() => ""));
+    if (!d) return true;
+    const n = d.text.split("\n").length;
+    await press(ch, "ctrlu");
+    for (let k = 1; k < n; k++) { await press(ch, "bspace"); await press(ch, "ctrlu"); }
+    await sleep(pause);
+  }
+  return !inputDraft(await read(ch).catch(() => ""));
 }
 
 export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
@@ -705,7 +726,11 @@ function userMessage(raw: string): { role: "user" | "system"; text: string } | n
   return text ? { role: "user", text } : null;
 }
 
-interface ParseState { size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[]; skipFirst?: boolean }
+interface ParseState {
+  size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[]; skipFirst?: boolean;
+  /** Claude rewind forks the conversation: the next turn's parentUuid points back, the old turns stay in the file */
+  parent?: Map<string, string | null>; itemUuid?: (string | undefined)[]; leaf?: string;
+}
 const transcripts = new Map<string, ParseState>();
 const BOOT_ID = Date.now().toString(36);
 
@@ -722,11 +747,17 @@ function finishBackground(st: ParseState, raw: string) {
 }
 
 export function parseTranscriptLines(st: ParseState, lines: string[]): void {
-  const push = (it: Omit<ChatItem, "i">) => { const x = { ...it, i: st.items.length } as ChatItem; st.items.push(x); return x; };
+  let cur: string | undefined;
+  const push = (it: Omit<ChatItem, "i">) => { const x = { ...it, i: st.items.length } as ChatItem; st.items.push(x); (st.itemUuid ??= [])[x.i] = cur; return x; };
   for (const line of lines) {
     if (!line.trim()) continue;
     let e: any; try { e = JSON.parse(line); } catch { continue; }
     if (e.isSidechain) continue;
+    cur = typeof e.uuid === "string" ? e.uuid : undefined;
+    if (cur) {
+      (st.parent ??= new Map()).set(cur, typeof e.parentUuid === "string" ? e.parentUuid : null);
+      st.leaf = cur;   // newest entry = tip of the live branch (after a rewind the next turn hangs off an older one)
+    }
     const ts = e.timestamp ?? null, c = e.message?.content;
     // Typed while the agent is busy: "enqueue" is written the moment it's sent → show it there (in order),
     // marked queued until "remove" (Claude took it). The later queued_command attachment is then a duplicate.
@@ -836,10 +867,59 @@ function readIncremental(file: string, parse: LineParser): ChatItem[] {
   return st.items;
 }
 
-/** Full conversation for a Claude session. */
+/** Full conversation for a Claude session — only the branch that is live now (turns undone with rewind are left out). */
 export function claudeTranscript(sessionId: string, root?: string): ChatItem[] | null {
   const file = transcriptFile(sessionId, root);
-  return file ? readIncremental(file, parseTranscriptLines) : null;
+  if (!file) return null;
+  const items = readIncremental(file, parseTranscriptLines);
+  const st = transcripts.get(file);
+  return st ? activeBranch(st, items) : items;
+}
+
+/**
+ * Items on the path leaf → root of the uuid tree (a tail-read big file: the walk stops where the read part starts);
+ * items without a uuid (queue entries) are kept. Renumbered when something was dropped.
+ */
+export function activeBranch(st: Pick<ParseState, "parent" | "itemUuid" | "leaf">, items: ChatItem[]): ChatItem[] {
+  if (!st.leaf || !st.parent || !st.itemUuid) return items;
+  const live = new Set<string>();
+  for (let u: string | null | undefined = st.leaf; u && !live.has(u); u = st.parent.get(u)) live.add(u);
+  const keep = (x: ChatItem) => { const u = st.itemUuid![x.i]; return !u || live.has(u); };
+  if (items.every(keep)) return items;
+  const out = items.filter(keep).map((x, i) => ({ ...x, i }));
+  (out as any).dropped = items.length - out.length;
+  return out;
+}
+
+/** Text of a turn without the attached-file lines the phone adds ("[แนบไฟล์] …/.maw/uploads/…"), spaces folded. */
+const turnText = (t: string) => t.replace(/(?:\[แนบไฟล์\]\s*)?\S*\/\.maw\/uploads\/\S+/g, "").replace(/\s+/g, " ").trim();
+
+/**
+ * Right after a rewind (Esc Esc → "Restore conversation") Claude puts the undone message back in the input box but
+ * writes nothing to the transcript until the next turn. The box then holds an earlier message that got an answer,
+ * without the "History n/m" label ↑ shows → hide that turn and everything after it. Returns the index to cut at, or -1.
+ */
+export function rewindCut(screen: string, items: ChatItem[]): number {
+  const draft = inputDraft(screen);
+  if (!draft?.sure) return -1;
+  const lines = screen.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n");
+  const at = lines.findLastIndex(l => /^❯\u00a0/.test(l));
+  if (at > 0 && /History \d+\/\d+/.test(lines[at - 1])) return -1;   // ↑ recall: a copy, the conversation stays
+  // the PC wraps long lines (an attachment path breaks in the middle) → compare without any whitespace
+  const bare = (t: string) => t.replace(/\s+/g, "");
+  let unwrapped = draft.text;   // put a broken path back together (a piece without its extension yet goes on on the next line)
+  for (let k = 0; k < 4; k++) unwrapped = unwrapped.replace(/(\/\.maw\/uploads\/\S*?)\s*\n\s*(\S+)/g, (all, a, b) => /\.[A-Za-z0-9]{2,5}$/.test(a) ? all : a + b);
+  const want = bare(draft.text), wantText = bare(turnText(unwrapped));
+  if (!want) return -1;
+  let seen = 0;
+  for (let k = items.length - 1; k >= 0 && seen < 20; k--) {
+    if (items[k].role !== "user" || items[k].queued) continue;
+    seen++;
+    const have = items[k].text ?? "";
+    if (bare(have) !== want && !(wantText && bare(turnText(have)) === wantText)) continue;
+    return items.slice(k + 1).some(x => x.role === "assistant" || x.role === "tool") ? k : -1;
+  }
+  return -1;
 }
 
 // ── Codex (~/.codex/sessions/**/rollout-*.jsonl) ──
@@ -1473,13 +1553,13 @@ const MAX_DIFF = 200_000;
 /** Keys the phone may send (label → tmux key name). */
 export const QUICK_KEYS: Record<string, string> = {
   enter: "Enter", esc: "Escape", up: "Up", down: "Down", tab: "Tab", ctrlc: "C-c",
-  btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u", space: "Space",
+  btab: "BTab", left: "Left", right: "Right", ctrlu: "C-u", space: "Space", bspace: "BSpace",
   "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", y: "y", n: "n",
 };
 /** Same labels in Superset CLI key names. */
 export const SUPERSET_KEYS: Record<string, string> = {
   enter: "enter", esc: "esc", up: "up", down: "down", tab: "tab", ctrlc: "ctrl+c",
-  btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u", space: "space",
+  btab: "shift+tab", left: "left", right: "right", ctrlu: "ctrl+u", space: "space", bspace: "backspace",
   "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", y: "y", n: "n",
 };
 
@@ -1686,7 +1766,12 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         (r.channel.kind === "tmux" && ch.kind === "tmux" && r.channel.pane === ch.pane) ||
         (r.channel.kind === "superset" && ch.kind === "superset" && r.channel.terminalId === ch.terminalId)));
       const codex = !live && ch.kind === "superset" ? codexFileFor(ch.terminalId) : null;
-      const items = live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
+      let items = live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
+      let fork = (items as any)?.dropped ?? 0;
+      if (items && live) {
+        const cut = rewindCut(await readScreen(ch, 60).catch(() => ""), items);
+        if (cut >= 0) { fork += 1000 + items.length - cut; items = items.slice(0, cut); }
+      }
       if (items) {
         // Page from the end: newest `limit` messages, or the ones before `before`.
         const limit = Math.min(+(query.limit || 150), 500);
@@ -1699,7 +1784,8 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         const last = items.at(-1);
         if (live?.status === "idle" && end === items.length && last?.role === "user" && !last.queued && last.ts && Date.now() - Date.parse(last.ts) > 8000)
           page = page.map(x => (x === last ? { ...x, canceled: true } : x));
-        return { ok: true, kind: "messages", epoch: BOOT_ID, total: items.length, start, items: page };
+        // a rewind renumbers the items → a different epoch makes the phone drop what it cached and take the page fresh
+        return { ok: true, kind: "messages", epoch: fork ? `${BOOT_ID}.r${fork}` : BOOT_ID, total: items.length, start, items: page };
       }
       if (ch.kind === "superset") {
         try {
@@ -1755,15 +1841,28 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
-      if (body.key) {
+      if (body.key === "clearbox") {
+        const empty = await clearInputBox(ch);
+        snapCache.at = 0;
+        return empty ? { ok: true } : { ok: false, error: "ล้างช่องพิมพ์ไม่หมด" };
+      } else if (body.key) {
         if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
         await pressKey(ch, body.key);
       } else if (body.text) {
+        // never type onto something already sitting in the box (it would go out glued to it) unless the phone said so:
+        // clear = the phone holds that text itself (pulled back) · merge = the person chose "send together"
+        if (!body.merge) {
+          const d = inputDraft(await readScreen(ch, 60).catch(() => ""));
+          if (d?.sure) {
+            if (!body.clear) { set.status = 409; return { ok: false, code: "draft", draft: d.text, error: "ช่องพิมพ์ที่คอมมีข้อความค้าง" }; }
+            if (!(await clearInputBox(ch))) { set.status = 409; return { ok: false, code: "draft", draft: d.text, error: "ล้างช่องพิมพ์ที่คอมไม่หมด" }; }
+          }
+        }
         await typeInto(ch, body.text);
       } else { set.status = 400; return { ok: false, error: "text or key required" }; }
       snapCache.at = 0;
       return { ok: true };
-    }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()) }) })
+    }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()), clear: t.Optional(t.Boolean()), merge: t.Optional(t.Boolean()) }) })
     // Start a Superset tab that has not run since the Mac restarted: opening its workspace and focusing its pane makes the
     // desktop app start the terminal (and the agent it held — Claude/Codex continue the same chat). Its terminal id may change → answer with the id the room has now.
     .post("/workspaces/:ws/rooms/:room/wake", async ({ params, set }) => {
