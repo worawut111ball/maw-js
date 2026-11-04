@@ -132,13 +132,34 @@
       for (;;) {
         const r = await api("/docs/render", { method: "POST", body: JSON.stringify({ id: f.id }) });
         if (D.file !== f) return;
-        if (r.state === "ready") { D.meta = r; await loadMarks(); drawDoc(); return; }
+        if (r.state === "ready") {
+          if (r.mtime) { f.mtime = r.mtime; f.size = r.size ?? f.size; }
+          D.meta = r; await loadMarks(); drawDoc(); watch(); return;
+        }
         await new Promise(res => setTimeout(res, 1500));
         if (D.file !== f || !D.el?.isConnected) return;
       }
     } catch (e) { if (D.file === f) { D.meta = { error: e.message }; drawDoc(); } }
     finally { D.polling = false; }
   }
+
+  // an open document follows the file: an AI or someone at the Mac saves a new version → pages are redone in place
+  function watch() {
+    clearInterval(D.watchT);
+    const f = D.file;
+    const check = async () => {
+      if (D.file !== f || !D.el?.isConnected) return clearInterval(D.watchT);
+      if (document.hidden || D.polling || !D.meta?.mtime) return;
+      try {
+        const r = await api("/docs/render", { method: "POST", body: JSON.stringify({ id: f.id }) });
+        if (D.file !== f || !D.meta || r.mtime === D.meta.mtime || (r.state === "ready" && !r.mtime)) return;
+        D.updated = Date.now(); D.goTo = D.page; D.meta = null; drawDoc(); render();
+      } catch { /* offline — next round */ }
+    };
+    D.watchT = setInterval(check, 20_000);
+    D.watchCheck = check;
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) D.watchCheck?.(); });
 
   function freeUrls() { for (const u of D.urls) URL.revokeObjectURL(u); D.urls = []; queue.length = 0; }
   function drawDoc() {
@@ -150,9 +171,10 @@
       ${!m ? `<div class="dc-note">กำลังแปลงเอกสารเป็นภาพ… ครั้งแรกของแต่ละไฟล์ใช้ราว 10–40 วินาที ครั้งต่อไปเปิดทันที</div>`
         : m.error ? `<div class="dc-note">เปิดไม่ได้: ${esc(m.error)}</div>`
         : `${tbd.length ? `<div class="dc-list">${tbd.map((t, i) => `<div class="dc-t"><span class="pg">หน้า ${t.page}</span><span class="x" data-go="${i}">${esc(t.text)}</span><button data-fix="${i}">ตอบ</button></div>`).join("")}</div>` : `<div class="dc-note">ไม่มี [TBD] ในไฟล์นี้ ✓</div>`}
+           ${D.updated && Date.now() - D.updated < 120_000 ? `<div class="dc-note" style="color:var(--accent)">🔄 ไฟล์ถูกแก้ — แสดงฉบับใหม่ (${when(f.mtime)}) แล้ว</div>` : ""}
            <div class="dc-note">${m.pages} หน้า · แตะหน้าเพื่อซูม (โหลดภาพคมชัดตอนซูม)</div>
            <div class="dc-pages">${Array.from({ length: m.pages }, (_, i) => `<div class="dc-pg" data-n="${i + 1}" id="dc-p${i + 1}"><button class="mk" data-mk="${i + 1}">✏️ ขีด</button>${pendingOn(i + 1) ? `<span class="mc">${pendingOn(i + 1)} จุด</span>` : ""}<span class="no">${i + 1}</span></div>`).join("")}</div>`}`;
-    document.getElementById("dc-back").onclick = () => { freeUrls(); D.file = null; D.meta = null; saveView(); draw(); };
+    document.getElementById("dc-back").onclick = () => { freeUrls(); clearInterval(D.watchT); D.watchCheck = null; D.updated = 0; D.file = null; D.meta = null; saveView(); draw(); };
     saveView();
     document.getElementById("dc-say").onclick = () => fixSheet(null);
     document.getElementById("dc-dl").onclick = () => downloadSheet(f, m);
@@ -174,7 +196,7 @@
   const queue = []; let active = 0;
   async function getPage(f, n, hd) {
     const t0 = performance.now();
-    const res = await fetch(`/mobile/docs/page?id=${encodeURIComponent(f.id)}&n=${n}${hd ? "&hd=1" : ""}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+    const res = await fetch(`/mobile/docs/page?id=${encodeURIComponent(f.id)}&n=${n}&v=${Math.round(D.meta?.mtime || f.mtime)}${hd ? "&hd=1" : ""}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const url = URL.createObjectURL(await res.blob()); D.urls.push(url);
     if (typeof perfNote === "function") perfNote("/docs/page" + (hd ? "-hd" : ""), performance.now() - t0);

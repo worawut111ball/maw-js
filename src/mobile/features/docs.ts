@@ -151,6 +151,12 @@ function pruneCache(keep: Set<string>) {
     }
   } catch { /* no cache yet */ }
 }
+/** The index can be up to 2 minutes old — an edited file gets its new mtime here so it is rendered again at once. */
+export function freshen(f: DocFile, stat: (p: string) => { mtimeMs: number; size: number } | null = p => { try { return statSync(p); } catch { return null; } }): DocFile {
+  const s = stat(f.path);
+  if (s && s.mtimeMs !== f.mtime) { f.mtime = s.mtimeMs; f.size = s.size; f.tbd = null; if (process.env.NODE_ENV !== "test") ensureIndex(true); }
+  return f;
+}
 function ensureIndex(force = false): Promise<void> {
   if (!indexing && (force || Date.now() - index.at > 120_000)) indexing = refreshIndex().finally(() => { indexing = null; });
   return index.at ? Promise.resolve() : (indexing ?? Promise.resolve());
@@ -249,18 +255,18 @@ export function mount(app: any): void {
 
   app.post("/docs/render", async ({ body, set }: any) => {
     await ensureIndex();
-    const f = index.files.get(String(body?.id ?? ""));
-    if (!f) { set.status = 404; return { ok: false, error: "ไม่พบเอกสารนี้" }; }
-    const j = startRender(f);
+    const f0 = index.files.get(String(body?.id ?? ""));
+    if (!f0) { set.status = 404; return { ok: false, error: "ไม่พบเอกสารนี้" }; }
+    const f = freshen(f0), j = startRender(f);
     // answer within a few seconds (Bun drops idle requests at 10 s) — the phone polls until ready
     const r = await Promise.race([j.then(m => ({ m })).catch((e: any) => ({ e })), new Promise(res => setTimeout(() => res(null), 4_000))]) as any;
     if (!r) return { ok: true, state: "working" };
     if (r.e) { set.status = 500; return { ok: false, error: String(r.e?.message || r.e) }; }
-    return { ok: true, state: "ready", pages: r.m.pages, tbd: r.m.tbd, path: tilde(f.path) };
+    return { ok: true, state: "ready", pages: r.m.pages, tbd: r.m.tbd, path: tilde(f.path), mtime: f.mtime, size: f.size };
   });
 
   app.get("/docs/page", async ({ query, set }: any) => {
-    const f = index.files.get(String(query?.id ?? ""));
+    const f0 = index.files.get(String(query?.id ?? "")), f = f0 && freshen(f0);
     const n = Number(query?.n);
     if (!f || !Number.isInteger(n) || n < 1) { set.status = 404; return { ok: false, error: "not found" }; }
     const dir = cacheDir(f), metaFile = join(dir, "meta.json");

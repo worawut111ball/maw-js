@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "os";
 import { join } from "path";
-import { buildSets, countTbd, idOf, mount, pageFile, setLabel, tbdLines } from "../src/mobile/features/docs";
+import { buildSets, countTbd, idOf, mount, pageFile, setLabel, tbdLines, freshen, cacheDir } from "../src/mobile/features/docs";
 
 describe("docs pack", () => {
   const H = homedir();
@@ -87,5 +87,27 @@ describe("docs pen marks", () => {
     expect(msg).toContain("2 จุด");
     expect(msg).toContain("(1) หน้า 3 — เปลี่ยนเป็น 1.0.3 · ภาพ /m/a.jpg");
     expect(msg).toContain("(2) หน้า 9 · ภาพ /m/b.jpg");
+  });
+});
+
+describe("freshen — an edited file is rendered again without waiting for the 2-minute rescan", () => {
+  const base = () => ({ id: "x", path: "/p/A_V0.1.docx", name: "A_V0.1.docx", ext: "docx", size: 10, mtime: 1000, tbd: 3 as number | null });
+  test("new mtime on disk → entry updated, tbd cleared, cache dir changes", () => {
+    const f = base(), before = cacheDir(f);
+    freshen(f, () => ({ mtimeMs: 2000, size: 20 }));
+    expect(f.mtime).toBe(2000);
+    expect(f.size).toBe(20);
+    expect(f.tbd).toBeNull();
+    expect(cacheDir(f)).not.toBe(before);
+  });
+  test("same mtime → untouched", () => {
+    const f = base();
+    freshen(f, () => ({ mtimeMs: 1000, size: 10 }));
+    expect(f).toEqual(base());
+  });
+  test("file gone → keep what we had", () => {
+    const f = base();
+    freshen(f, () => null);
+    expect(f).toEqual(base());
   });
 });
