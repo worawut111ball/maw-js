@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "os";
 import { join } from "path";
-import { buildSets, countTbd, idOf, mount, pageFile, setLabel, tbdLines, freshen, cacheDir } from "../src/mobile/features/docs";
+import { buildSets, countTbd, idOf, mount, pageFile, setLabel, tbdLines, freshen, cacheDir, settling, SETTLE_MS } from "../src/mobile/features/docs";
 
 describe("docs pack", () => {
   const H = homedir();
@@ -111,3 +111,12 @@ describe("freshen — an edited file is rendered again without waiting for the 2
     expect(f).toEqual(base());
   });
 });
+
+test("settling: a file saved moments ago waits; once quiet for SETTLE_MS it renders", () => {
+  const now = 1_000_000;
+  expect(settling({ mtime: now - 1_000 }, now)).toBe(true);
+  expect(settling({ mtime: now - SETTLE_MS + 1 }, now)).toBe(true);
+  expect(settling({ mtime: now - SETTLE_MS }, now)).toBe(false);
+  expect(settling({ mtime: now - 3_600_000 }, now)).toBe(false);
+});
+

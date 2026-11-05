@@ -132,7 +132,9 @@
       for (;;) {
         const r = await api("/docs/render", { method: "POST", body: JSON.stringify({ id: f.id }) });
         if (D.file !== f) return;
+        if (r.state === "settling" && !D.settleShown) { D.settleShown = 1; const n = D.el?.querySelector(".dc-note"); if (n && !D.meta) n.textContent = "✏️ ไฟล์กำลังถูกแก้อยู่ — รอให้แก้เสร็จ (ไม่ได้บันทึกเพิ่ม 15 วินาที) แล้วจะแปลงเป็นภาพให้"; }
         if (r.state === "ready") {
+          D.settleShown = 0;
           if (r.mtime) { f.mtime = r.mtime; f.size = r.size ?? f.size; }
           D.meta = r; await loadMarks(); drawDoc(); watch(); return;
         }
@@ -145,19 +147,35 @@
 
   // an open document follows the file: an AI or someone at the Mac saves a new version → pages are redone in place
   function watch() {
-    clearInterval(D.watchT);
+    clearTimeout(D.watchT);
     const f = D.file;
     const check = async () => {
-      if (D.file !== f || !D.el?.isConnected) return clearInterval(D.watchT);
+      if (D.file !== f || !D.el?.isConnected) return clearTimeout(D.watchT);
       if (document.hidden || D.polling || !D.meta?.mtime) return;
       try {
         const r = await api("/docs/render", { method: "POST", body: JSON.stringify({ id: f.id }) });
-        if (D.file !== f || !D.meta || r.mtime === D.meta.mtime || (r.state === "ready" && !r.mtime)) return;
-        D.updated = Date.now(); D.goTo = D.page; D.meta = null; drawDoc(); render();
+        if (D.file !== f || !D.meta) return;
+        if (!r.mtime || r.mtime === D.meta.mtime) { if (D.editing) editing(0); return; }
+        if (r.state === "ready") {   // the new version is rendered → swap it in where the reader is
+          editing(0); D.updated = Date.now(); D.goTo = D.page; f.mtime = r.mtime; f.size = r.size ?? f.size; D.meta = r; drawDoc();
+          return;
+        }
+        editing(r.mtime);            // still being saved / rendered → keep the old pages, say so, look again sooner
       } catch { /* offline — next round */ }
     };
-    D.watchT = setInterval(check, 20_000);
+    const every = () => (D.editing ? 5_000 : 20_000);
+    const loop = () => { clearTimeout(D.watchT); D.watchT = setTimeout(async () => { await check(); if (D.file === f && D.el?.isConnected) loop(); }, every()); };
+    loop();
     D.watchCheck = check;
+  }
+  // "the file is being edited" note above the pages — the old version stays on screen until the new one is ready
+  function editing(mtime) {
+    D.editing = mtime || 0;
+    const top = D.el?.querySelector(".dc-pages"); if (!top) return;
+    let n = D.el.querySelector(".dc-editing");
+    if (!D.editing) { n?.remove(); return; }
+    if (!n) { n = document.createElement("div"); n.className = "dc-note dc-editing"; n.style.color = "#fbbf24"; top.before(n); }
+    n.textContent = `✏️ ไฟล์กำลังถูกแก้ (บันทึกล่าสุด ${when(mtime)}) — แสดงฉบับเดิมไว้ก่อน พอแก้เสร็จจะเปลี่ยนเป็นฉบับใหม่ให้เอง`;
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) D.watchCheck?.(); });
 
@@ -174,7 +192,7 @@
            ${D.updated && Date.now() - D.updated < 120_000 ? `<div class="dc-note" style="color:var(--accent)">🔄 ไฟล์ถูกแก้ — แสดงฉบับใหม่ (${when(f.mtime)}) แล้ว</div>` : ""}
            <div class="dc-note">${m.pages} หน้า · แตะหน้าเพื่อซูม (โหลดภาพคมชัดตอนซูม)</div>
            <div class="dc-pages">${Array.from({ length: m.pages }, (_, i) => `<div class="dc-pg" data-n="${i + 1}" id="dc-p${i + 1}"><button class="mk" data-mk="${i + 1}">✏️ ขีด</button>${pendingOn(i + 1) ? `<span class="mc">${pendingOn(i + 1)} จุด</span>` : ""}<span class="no">${i + 1}</span></div>`).join("")}</div>`}`;
-    document.getElementById("dc-back").onclick = () => { freeUrls(); clearInterval(D.watchT); D.watchCheck = null; D.updated = 0; D.file = null; D.meta = null; saveView(); draw(); };
+    document.getElementById("dc-back").onclick = () => { freeUrls(); clearTimeout(D.watchT); D.watchCheck = null; D.updated = 0; D.editing = 0; D.file = null; D.meta = null; saveView(); draw(); };
     saveView();
     document.getElementById("dc-say").onclick = () => fixSheet(null);
     document.getElementById("dc-dl").onclick = () => downloadSheet(f, m);
@@ -186,6 +204,7 @@
     el.querySelectorAll("[data-go]").forEach(x => x.onclick = e => { e.preventDefault(); D.hit = +x.dataset.go; goPage(tbd[D.hit].page); });
     el.querySelectorAll("[data-fix]").forEach(b => b.onclick = e => { e.preventDefault(); fixSheet(tbd[+b.dataset.fix]); });
     if (m && !m.error) lazyPages();
+    if (D.editing) editing(D.editing);
   }
   function goPage(n) {
     const p = document.getElementById("dc-p" + n); if (!p) return;
@@ -196,7 +215,7 @@
   const queue = []; let active = 0;
   async function getPage(f, n, hd) {
     const t0 = performance.now();
-    const res = await fetch(`/mobile/docs/page?id=${encodeURIComponent(f.id)}&n=${n}&v=${Math.round(D.meta?.mtime || f.mtime)}${hd ? "&hd=1" : ""}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+    const res = await fetch(`/mobile/docs/page?id=${encodeURIComponent(f.id)}&n=${n}&v=${D.meta?.mtime || f.mtime}${hd ? "&hd=1" : ""}`, { headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const url = URL.createObjectURL(await res.blob()); D.urls.push(url);
     if (typeof perfNote === "function") perfNote("/docs/page" + (hd ? "-hd" : ""), performance.now() - t0);

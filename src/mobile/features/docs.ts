@@ -1,7 +1,8 @@
 // Feature pack "docs" — ISO work-product documents across the repos on this Mac: folders named "WP05 …", "WP18 …"
 // (the /iso skill's layout, e.g. acme/Client/docs/WP18 Software User Documentation/CLIENT_App_SUD_V1.1.docx).
 // GET  /docs                  → { ok, sets: [{ id, name, path, wps: [{ wp, title, files: [{ id, name, ext, size, mtime, tbd }] }] }] }
-// POST /docs/render { id }    → { ok, state: "ready", pages, tbd: [{ page, text }] } | { ok, state: "working" } | { ok:false, error }
+// POST /docs/render { id }    → { ok, state: "ready", pages, tbd: [{ page, text }] } | { ok, state: "working" | "settling", mtime } | { ok:false, error }
+//                               "settling" = saved less than SETTLE_MS ago — not rendered until the file stops changing
 // GET  /docs/page?id=&n=      → JPEG of page n (1-based) once rendered
 // GET  /docs/marks?id=        → pen marks on this document (any version of it) · POST /docs/marks {id,page,note,image}
 // POST /docs/marks/delete {id, mid} · POST /docs/marks/send {id, ws, room} → one message with every unsent mark to a room
@@ -138,7 +139,7 @@ async function refreshIndex(): Promise<void> {
   index = { at: Date.now(), sets, files };
   // warm the documents people are working on (latest versions touched in the last 14 days) so they open at once
   if (process.env.NODE_ENV !== "test")
-    for (const f of [...files.values()].filter(f => !f.old && Date.now() - f.mtime < 14 * 86400e3).sort((a, b) => b.mtime - a.mtime)) startRender(f).catch(() => {});
+    for (const f of [...files.values()].filter(f => !f.old && Date.now() - f.mtime < 14 * 86400e3 && !settling(f)).sort((a, b) => b.mtime - a.mtime)) startRender(f).catch(() => {});
   pruneCache(new Set([...files.values()].map(f => basename(cacheDir(f)))));
 }
 /** Drop rendered pages of document versions that no longer exist (edited or removed) after 3 days — it's only a cache. */
@@ -165,6 +166,10 @@ function ensureIndex(force = false): Promise<void> {
 // ── rendering: one job at a time (LibreOffice is heavy), results cached per file version ──
 interface Meta { pages: number; tbd: { page: number; text: string }[]; pdf?: string }
 const jobs = new Map<string, Promise<Meta>>();
+/** A file saved less than this long ago is still being edited (an AI saves many times in a row) — render it once it is quiet. */
+export const SETTLE_MS = 15_000;
+export const settling = (f: { mtime: number }, now = Date.now()) => now - f.mtime < SETTLE_MS;
+const mtimeOf = (p: string) => { try { return statSync(p).mtimeMs; } catch { return -1; } };
 let chain: Promise<unknown> = Promise.resolve();
 const RENDER_V = 3;   // bump when what a render produces changes (v2: "[TBD: …]" marks · v3: 800 px pages) → old caches are redone
 export const cacheDir = (f: { path: string; mtime: number }) => join(CACHE, createHash("sha1").update(RENDER_V + "|" + f.path + "|" + f.mtime).digest("hex").slice(0, 16));
@@ -182,6 +187,8 @@ export function tbdLines(pdfText: string): { page: number; text: string }[] {
 async function render(f: DocFile): Promise<Meta> {
   const dir = cacheDir(f), metaFile = join(dir, "meta.json");
   if (existsSync(metaFile)) return JSON.parse(readFileSync(metaFile, "utf-8"));
+  // queued behind other renders while the file was saved again → this version is gone, don't spend LibreOffice on it
+  if (mtimeOf(f.path) !== f.mtime) throw new Error("superseded");
   mkdirSync(dir, { recursive: true });
   let pdf = f.path;
   if (f.ext !== "pdf") {
@@ -198,7 +205,8 @@ async function render(f: DocFile): Promise<Meta> {
   writeFileSync(metaFile, JSON.stringify(meta));
   return meta;
 }
-function startRender(f: DocFile): Promise<Meta> {
+function startRender(f0: DocFile): Promise<Meta> {
+  const f = { ...f0 };   // this version — the index entry is updated in place when the file changes
   const key = cacheDir(f);
   let j = jobs.get(key);
   if (!j) {
@@ -257,10 +265,14 @@ export function mount(app: any): void {
     await ensureIndex();
     const f0 = index.files.get(String(body?.id ?? ""));
     if (!f0) { set.status = 404; return { ok: false, error: "ไม่พบเอกสารนี้" }; }
-    const f = freshen(f0), j = startRender(f);
+    const f = freshen(f0);
+    if (settling(f) && !existsSync(join(cacheDir(f), "meta.json")))
+      return { ok: true, state: "settling", mtime: f.mtime, waitMs: Math.max(0, SETTLE_MS - (Date.now() - f.mtime)) };
+    const j = startRender(f);
     // answer within a few seconds (Bun drops idle requests at 10 s) — the phone polls until ready
     const r = await Promise.race([j.then(m => ({ m })).catch((e: any) => ({ e })), new Promise(res => setTimeout(() => res(null), 4_000))]) as any;
-    if (!r) return { ok: true, state: "working" };
+    if (!r) return { ok: true, state: "working", mtime: f.mtime };
+    if (r.e && /superseded/.test(String(r.e?.message))) return { ok: true, state: "settling", mtime: f.mtime, waitMs: SETTLE_MS };
     if (r.e) { set.status = 500; return { ok: false, error: String(r.e?.message || r.e) }; }
     return { ok: true, state: "ready", pages: r.m.pages, tbd: r.m.tbd, path: tilde(f.path), mtime: f.mtime, size: f.size };
   });
@@ -269,7 +281,9 @@ export function mount(app: any): void {
     const f0 = index.files.get(String(query?.id ?? "")), f = f0 && freshen(f0);
     const n = Number(query?.n);
     if (!f || !Number.isInteger(n) || n < 1) { set.status = 404; return { ok: false, error: "not found" }; }
-    const dir = cacheDir(f), metaFile = join(dir, "meta.json");
+    // ?v = the version the phone is showing — while a newer save is still settling its pages keep coming from that one
+    const v = Number(query?.v), asked = Number.isFinite(v) && v > 0 ? cacheDir({ path: f.path, mtime: v }) : "";
+    const dir = asked && existsSync(join(asked, "meta.json")) ? asked : cacheDir(f), metaFile = join(dir, "meta.json");
     if (!existsSync(metaFile)) { set.status = 409; return { ok: false, error: "ยังไม่ได้แปลง" }; }
     const meta = JSON.parse(readFileSync(metaFile, "utf-8")) as Meta, { pages } = meta;
     const p = query?.hd === "1" && n <= pages ? await hdPage(dir, meta, n) ?? pageFile(dir, n, pages) : pageFile(dir, n, pages);
