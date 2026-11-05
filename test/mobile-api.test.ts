@@ -560,6 +560,28 @@ test("rewind: the turn undone with Esc Esc → Restore is left out once the next
   expect((live as any).dropped).toBe(2);
 });
 
+test("/compact: replies before the compact point stay (the chain goes on through logicalParentUuid), summary is a short note", () => {
+  const L = (o: any) => JSON.stringify(o);
+  const u = (uuid: string, parentUuid: string | null, text: string, extra: any = {}) => L({ type: "user", uuid, parentUuid, timestamp: "2026-11-05T04:00:00Z", message: { role: "user", content: text }, ...extra });
+  const a = (uuid: string, parentUuid: string, text: string) => L({ type: "assistant", uuid, parentUuid, timestamp: "2026-11-05T04:00:01Z", message: { role: "assistant", content: [{ type: "text", text }] } });
+  const st: any = { size: 0, partial: "", items: [], tools: new Map() };
+  parseTranscriptLines(st, [
+    u("u1", null, "ก่อน compact"), a("a1", "u1", "คำตอบก่อน compact"),
+    L({ type: "system", subtype: "compact_boundary", uuid: "cb", parentUuid: null, logicalParentUuid: "a1", timestamp: "2026-11-05T04:51:00Z" }),
+    u("sum", "cb", "This session is being continued from a previous conversation…", { isCompactSummary: true }),
+    u("cmd", "sum", "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"),
+    u("u2", "cmd", "หลัง compact"), a("a2", "u2", "คำตอบหลัง compact"),
+  ]);
+  const live = activeBranch(st, st.items);
+  expect(live.map((x: any) => `${x.role}:${x.text}`)).toEqual([
+    "user:ก่อน compact", "assistant:คำตอบก่อน compact", "user:/compact", "system:🗜 บีบบทสนทนาแล้ว (compact) — ข้อความด้านบน Claude เห็นเป็นสรุป", "user:หลัง compact", "assistant:คำตอบหลัง compact",
+  ]);
+  // a link that is missing from the file (--resume, a tail read) hides nothing
+  const st2: any = { size: 0, partial: "", items: [], tools: new Map() };
+  parseTranscriptLines(st2, [u("x1", "not-in-file", "เริ่ม"), a("x2", "x1", "ตอบ"), u("x3", "gone", "ต่อ"), a("x4", "x3", "ตอบอีก")]);
+  expect(activeBranch(st2, st2.items).length).toBe(4);
+});
+
 test("rewind before the next turn: the box holds an answered message without the ↑ History label → cut there", () => {
   const items: any[] = [
     { i: 0, role: "user", ts: null, text: "ตอบ หนึ่ง" }, { i: 1, role: "assistant", ts: null, text: "หนึ่ง" },

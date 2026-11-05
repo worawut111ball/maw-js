@@ -729,7 +729,9 @@ function userMessage(raw: string): { role: "user" | "system"; text: string } | n
 interface ParseState {
   size: number; partial: string; items: ChatItem[]; tools: Map<string, ChatItem>; sentQ?: ChatItem[]; removedQ?: ChatItem[]; skipFirst?: boolean;
   /** Claude rewind forks the conversation: the next turn's parentUuid points back, the old turns stay in the file */
-  parent?: Map<string, string | null>; itemUuid?: (string | undefined)[]; leaf?: string;
+  parent?: Map<string, string | null>; itemUuid?: (string | undefined)[]; leaf?: string; turns?: Set<string>;
+  /** entries linked through logicalParentUuid (a /compact boundary) — a continuation, never a fork */
+  logical?: Set<string>;
 }
 const transcripts = new Map<string, ParseState>();
 const BOOT_ID = Date.now().toString(36);
@@ -755,7 +757,10 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
     if (e.isSidechain) continue;
     cur = typeof e.uuid === "string" ? e.uuid : undefined;
     if (cur) {
-      (st.parent ??= new Map()).set(cur, typeof e.parentUuid === "string" ? e.parentUuid : null);
+      // /compact starts a new chain (compact_boundary: parentUuid null) and links back through logicalParentUuid
+      const up = typeof e.parentUuid === "string" ? e.parentUuid : typeof e.logicalParentUuid === "string" ? e.logicalParentUuid : null;
+      (st.parent ??= new Map()).set(cur, up);
+      if (typeof e.parentUuid !== "string" && up) (st.logical ??= new Set()).add(cur);
       st.leaf = cur;   // newest entry = tip of the live branch (after a rewind the next turn hangs off an older one)
     }
     const ts = e.timestamp ?? null, c = e.message?.content;
@@ -775,6 +780,7 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
     // a tool_result can sit between "remove" and the queued_command (message sent while a tool was running) —
     // only a real reply or a new typed turn proves the removed message was deleted instead
     const realTurn = e.type === "assistant" || (e.type === "user" && !(Array.isArray(c) && c.every((b: any) => b?.type === "tool_result")));
+    if (cur && e.type === "user" && realTurn && !e.isMeta && !e.isCompactSummary) (st.turns ??= new Set()).add(cur);   // a turn the person sent
     if (st.removedQ?.length && realTurn) {
       for (const it of st.removedQ) { it.canceled = true; st.sentQ = st.sentQ?.filter(x => x !== it); }
       st.removedQ = [];
@@ -788,6 +794,10 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
       const seen = st.sentQ?.findIndex(x => x.text === m?.text) ?? -1;
       if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; st.removedQ = st.removedQ?.filter(x => x !== it); if (images.length) it.images = images; continue; } // already shown at enqueue time
       if (m) push({ role: m.role, ts: e.attachment.timestamp ?? ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
+      continue;
+    }
+    if (e.type === "user" && e.isCompactSummary) {   // the summary Claude reads after /compact — not something the person typed
+      push({ role: "system", ts, text: "🗜 บีบบทสนทนาแล้ว (compact) — ข้อความด้านบน Claude เห็นเป็นสรุป" });
       continue;
     }
     if (e.type === "user") {
@@ -804,6 +814,13 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
           const seen = m.role === "user" ? st.sentQ?.findIndex(x => x.text === m.text) ?? -1 : -1;
           if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; if (!owner) owner = it; continue; } // shown when it was queued
           const it = push({ role: m.role, ts, text: m.text }); if (m.role === "user" && !owner) owner = it;
+          // "/compact" is written after the summary it produced → show the command first, then the note
+          const prev = st.items[it.i - 1];
+          if (m.role === "user" && /^\/compact\b/.test(m.text.trim()) && prev?.role === "system" && /^🗜/.test(prev.text ?? "")) {
+            st.items[it.i - 1] = { ...it, i: prev.i }; st.items[it.i] = { ...prev, i: it.i };
+            const iu = st.itemUuid!; [iu[prev.i], iu[it.i]] = [iu[it.i], iu[prev.i]];
+            if (owner === it) owner = st.items[prev.i];
+          }
         }
         if (b.type === "tool_result") {
           const t = st.tools.get(b.tool_use_id);
@@ -880,11 +897,25 @@ export function claudeTranscript(sessionId: string, root?: string): ChatItem[] |
  * Items on the path leaf → root of the uuid tree (a tail-read big file: the walk stops where the read part starts);
  * items without a uuid (queue entries) are kept. Renumbered when something was dropped.
  */
-export function activeBranch(st: Pick<ParseState, "parent" | "itemUuid" | "leaf">, items: ChatItem[]): ChatItem[] {
+export function activeBranch(st: Pick<ParseState, "parent" | "itemUuid" | "leaf" | "turns" | "logical">, items: ChatItem[]): ChatItem[] {
   if (!st.leaf || !st.parent || !st.itemUuid) return items;
-  const live = new Set<string>();
-  for (let u: string | null | undefined = st.leaf; u && !live.has(u); u = st.parent.get(u)) live.add(u);
-  const keep = (x: ChatItem) => { const u = st.itemUuid![x.i]; return !u || live.has(u); };
+  // Only drop what a rewind really abandoned: at a fork on the path leaf → root, a sibling branch that holds a turn the
+  // person sent. Links can be missing (--resume, compaction, a tail-read file) — those parts stay, never hidden by guess.
+  const kids = new Map<string, string[]>();
+  for (const [u, p] of st.parent) if (p && !st.logical?.has(u)) { const k = kids.get(p); if (k) k.push(u); else kids.set(p, [u]); }
+  const path: string[] = [], onPath = new Set<string>(), dead = new Set<string>();
+  for (let u: string | null | undefined = st.leaf; u && !onPath.has(u); u = st.parent.get(u)) { path.push(u); onPath.add(u); }
+  const subtree = (root: string) => { const out: string[] = [], todo = [root]; while (todo.length) { const u = todo.pop()!; out.push(u); for (const k of kids.get(u) ?? []) todo.push(k); } return out; };
+  for (const u of path) {
+    const p = st.parent.get(u); if (!p || st.logical?.has(u)) continue;   // across a /compact: what came before is the same conversation
+    for (const sib of kids.get(p) ?? []) {
+      if (sib === u || onPath.has(sib)) continue;
+      const branch = subtree(sib);
+      if (branch.some(x => st.turns?.has(x))) for (const x of branch) dead.add(x);
+    }
+  }
+  if (!dead.size) return items;
+  const keep = (x: ChatItem) => { const u = st.itemUuid![x.i]; return !u || !dead.has(u); };
   if (items.every(keep)) return items;
   const out = items.filter(keep).map((x, i) => ({ ...x, i }));
   (out as any).dropped = items.length - out.length;
