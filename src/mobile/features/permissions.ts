@@ -18,9 +18,22 @@ export interface PermissionPrompt {
   options: PromptOption[];
   /** Short hash of the dialog — lets the phone prove it answers the dialog it saw. */
   sig: string;
+  /** Seconds left before Claude Code denies it by itself (safety-check dialogs show a countdown) — not part of sig */
+  denyIn?: number;
 }
 
 const SCREEN_LINES = 160;
+/** "⚠ Claude Code will automatically deny this request in 1:42, to avoid blocking …" — ticks every second */
+const COUNTDOWN = /will automatically deny this request in (\d+):(\d{2})/i;
+/** The countdown line is cut out of the dialog text: it changes every second, so a sig over it would never match twice. */
+export function splitCountdown(text: string): { text: string; denyIn?: number } {
+  const lines = text.split("\n");
+  const k = lines.findIndex(l => COUNTDOWN.test(l));
+  if (k < 0) return { text };
+  const m = COUNTDOWN.exec(lines[k])!;
+  lines.splice(k, 1);
+  return { text: lines.join("\n").replace(/\n{3,}/g, "\n\n"), denyIn: +m[1] * 60 + +m[2] };
+}
 const MAX_DETAIL_LINES = 40;
 const MAX_DETAIL_CHARS = 4000;
 
@@ -187,8 +200,9 @@ export function parsePrompt(raw: string): PermissionPrompt | null {
     detail = clipDetail(lines.slice(h + 1, q).filter(l => !RULE.test(l)));
   }
 
-  const base = { agent: codex ? "codex" as const : "claude" as const, title, detail, question, options };
-  return { ...base, sig: promptSig(base) };
+  const cd = splitCountdown(detail);
+  const base = { agent: codex ? "codex" as const : "claude" as const, title, detail: cd.text, question, options };
+  return { ...base, sig: promptSig(base), ...(cd.denyIn !== undefined ? { denyIn: cd.denyIn } : {}) };
 }
 
 /** Any other open dialog (trust folder, "Teach auto mode…", pickers): shown as text + a key pad on the phone. */
@@ -201,6 +215,7 @@ export interface MenuPrompt {
   /** Numbered rows ("1. Yes") → number buttons. */
   numbers: number[];
   sig: string;
+  denyIn?: number;
 }
 
 const MENU_RULE = /^\s*[╭┌╰└]?[─━═╌┄┈▔▁-]{6,}[╮┐╯┘]?\s*$/;
@@ -254,9 +269,9 @@ export function parseMenu(raw: string): MenuPrompt | null {
   while (rest.length && !rest[0].trim()) rest.shift();
   const numbers = rest.map(l => /^\s*[❯›>▶]?\s*(\d)[.)]\s+\S/.exec(l)).filter(Boolean).map(m => +m![1]).filter(n => n >= 1 && n <= 9);
   const footer = (lines[foot] ?? "").trim();
-  const text = rest.join("\n").slice(0, MAX_DETAIL_CHARS);
+  const cd = splitCountdown(rest.join("\n").slice(0, MAX_DETAIL_CHARS)), text = cd.text;
   const sig = createHash("sha1").update(["menu", title, text, footer].join("\u0001")).digest("hex").slice(0, 12);
-  return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], sig };
+  return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], sig, ...(cd.denyIn !== undefined ? { denyIn: cd.denyIn } : {}) };
 }
 
 /** Keys the phone may press inside an open dialog. */

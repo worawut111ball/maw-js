@@ -34,6 +34,7 @@
   .perm-k button { min-width: 44px; height: 40px; padding: 0 12px; border-radius: 10px; font: 700 14px var(--font); color: var(--text); background: var(--card2); border: 1px solid var(--line); }
   .perm-k button.go { background: #22c55e24; border-color: #22c55e77; } .perm-k button.no { background: #ef44441a; border-color: #ef444466; }
   .perm-k button.num { background: #60a5fa1c; border-color: #60a5fa66; }
+  .perm-t { margin: 2px 0 8px; font-size: 13px; color: #fbbf24; } .perm-t b { font-variant-numeric: tabular-nums; }
   .perm-k button:active { transform: scale(.96); filter: brightness(1.25); } .perm-k button:disabled { opacity: .5; }`;
   const style = document.createElement("style"); style.textContent = css; document.head.appendChild(style);
 
@@ -55,11 +56,19 @@
       <div class="perm-h"><span>🔐</span><span class="t">ขออนุญาต · ${esc(shortTitle(p.title))}</span><span class="ag">${esc(AG[p.agent] || p.agent)}</span></div>
       ${p.detail ? `<div class="perm-d">${esc(p.detail)}</div>` : ""}
       <div class="perm-q">${esc(p.question)}</div>
+      ${p.denyIn != null ? `<div class="perm-t">⏳ ถ้าไม่ตอบ ${p.agent === "codex" ? "Codex" : "Claude"} จะปฏิเสธเองใน <b>${fmtLeft(p.denyIn)}</b></div>` : ""}
       <div class="perm-o">${p.options.map(o => `<button class="${esc(o.kind)}" data-pn="${o.n}"><span class="n">${o.n}</span><span class="l">${esc(o.label)}</span></button>`).join("")}</div>
       <div class="perm-f">กดแล้วจะส่งปุ่ม ${p.options.map(o => o.n).join("/")} ไปที่ ${p.agent === "codex" ? "Codex" : "Claude"} บน Mac ทันที</div>`;
     card.querySelectorAll("[data-pn]").forEach(b => b.onclick = () => answer(w, room, +b.dataset.pn, card));
     el.prepend(card);
+    // safety-check dialogs time out by themselves — tick the countdown on the phone (the sig no longer changes with it)
+    const t = card.querySelector(".perm-t b");
+    if (t) {
+      const end = Date.now() + p.denyIn * 1000;
+      const iv = setInterval(() => { if (!card.isConnected) return clearInterval(iv); t.textContent = fmtLeft(Math.max(0, Math.round((end - Date.now()) / 1000))); }, 1000);
+    }
   }
+  function fmtLeft(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
 
   // any other dialog (trust folder, "Teach auto mode…", question pickers): show it and give a key pad
   const MENU_KEYS = [["up", "↑"], ["down", "↓"], ["left", "←"], ["right", "→"], ["space", "␣ เลือก"], ["tab", "Tab"], ["enter", "⏎ Enter", "go"], ["esc", "Esc", "no"]];

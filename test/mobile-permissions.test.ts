@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePrompt, parseMenu, dialogPass, optionKind, stripAnsi, promptSig, mount } from "../src/mobile/features/permissions";
+import { parsePrompt, parseMenu, dialogPass, optionKind, stripAnsi, promptSig, mount, splitCountdown } from "../src/mobile/features/permissions";
 
 const E = "\x1b[";
 const dim = (s: string) => `${E}2m${s}${E}22m`;
@@ -416,3 +416,45 @@ describe("dialog watcher", () => {
     expect(JSON.stringify(sent)).not.toContain("Teach");             // no screen text leaves the Mac
   });
 });
+
+// 5 พ.ย. 69: Claude Code's built-in safety check (shows even in bypass mode) counts down "deny this request in 2:00".
+// The countdown was part of the sig → every read had a new sig → the phone's answer was always refused ("คำถามเปลี่ยนไปแล้ว").
+describe("safety-check dialog with a countdown", () => {
+  const screen = (left: string) => [
+    "─".repeat(80),
+    " Bash command",
+    "",
+    "   │ cd /tmp/lab/user-manual; python3 - <<'EOF'",
+    "   │ import json",
+    "   │ EOF",
+    "   │ S=/tmp/lab/sud2; cd $S; rm -f sud.pdf th/*; mkdir -p th; echo ok",
+    "   Run user's pasted command: update intro.json และ clean sud2 directory",
+    "",
+    " │ Dangerous rm operation on statically-unresolvable target: /tmp/lab/th/*",
+    ` ⚠ Claude Code will automatically deny this request in ${left}, to avoid blocking progress on an unattended session`,
+    "",
+    "",
+    " Do you want to proceed?",
+    " ❯ 1. Yes",
+    "   2. No",
+    "",
+    " Esc to cancel · Tab to amend",
+  ].join("\n");
+
+  test("same dialog a few seconds later → same sig; the countdown is reported apart", () => {
+    const a = parsePrompt(screen("2:00"))!, b = parsePrompt(screen("1:47"))!;
+    expect(a).not.toBeNull();
+    expect(a.sig).toBe(b.sig);
+    expect(a.denyIn).toBe(120);
+    expect(b.denyIn).toBe(107);
+    expect(a.detail).not.toContain("automatically deny");
+    expect(a.detail).toContain("Dangerous rm operation");
+    expect(a.options.map(o => o.label)).toEqual(["Yes", "No"]);
+  });
+
+  test("splitCountdown: no countdown → text untouched", () => {
+    expect(splitCountdown("a\nb")).toEqual({ text: "a\nb" });
+    expect(splitCountdown("x\n ⚠ Claude Code will automatically deny this request in 0:09, to avoid …\ny").denyIn).toBe(9);
+  });
+});
+
