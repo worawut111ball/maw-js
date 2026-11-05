@@ -1,3 +1,4 @@
+import { toMobileApp } from "../lib/toMobile";
 const VIEW_LABELS: Record<string, string> = {
   mission: "Mission",
   dashboard: "Dash",
@@ -22,15 +23,6 @@ interface MobileHeaderProps {
   muted: boolean;
   onToggleMute: () => void;
   onInbox: () => void;
-}
-
-/** Back to maw mobile (/m.html) on the node this page talks to — the one in ?host= when opened from the mobile ⋯ menu. */
-function toMobileApp() {
-  try { sessionStorage.removeItem("maw-desktop"); } catch { /* private mode */ }
-  const host = new URLSearchParams(location.search).get("host");
-  let base = location.origin;
-  try { if (host) base = new URL(/^https?:\/\//.test(host) ? host : `http://${host}`).origin; } catch { /* keep this origin */ }
-  location.href = `${base}/m.html`;
 }
 
 export function MobileHeader({ activeView, askCount, muted, onToggleMute, onInbox }: MobileHeaderProps) {

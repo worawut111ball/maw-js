@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useRef, type ReactNode } from "react";
 import { apiUrl, isRemote, activeHost } from "../lib/api";
+import { toMobileApp } from "../lib/toMobile";
 import { SOUND_PROFILES, getSoundProfile, setSoundProfile, previewSound, type SoundProfile } from "../lib/sounds";
 
 function SoundButton({ muted, onToggleMute }: { muted: boolean; onToggleMute: () => void }) {
@@ -164,6 +165,16 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
 
       {/* View-specific controls injected by parent */}
       {children}
+
+      <button
+        onClick={toMobileApp}
+        className="min-h-9 px-3 py-1.5 rounded-lg text-xs font-semibold active:scale-95 transition-all whitespace-nowrap flex-shrink-0"
+        style={{ background: "rgba(34,211,238,0.10)", color: "#a5f3fc", border: "1px solid rgba(34,211,238,0.30)" }}
+        aria-label="maw mobile"
+        title="เปิดหน้า maw แบบมือถือ (/m.html)"
+      >
+        📱 มือถือ
+      </button>
 
       {onToggleMute && <SoundButton muted={muted ?? false} onToggleMute={onToggleMute} />}
 

@@ -27,3 +27,13 @@ test("📱 มือถือ button in the desktop header goes back to /m.html"
   await page.getByRole("button", { name: "maw mobile" }).click();
   await expect(page).toHaveURL(/\/m\.html$/);
 });
+
+test("📱 มือถือ button on a computer / iPad header goes to /m.html", async ({ page }, testInfo) => {
+  test.skip(PHONES.includes(testInfo.project.name), "phones have their own header (above)");
+  await page.route("**/m.html", route => route.fulfill({ status: 200, contentType: "text/html", body: "<title>maw mobile</title>" }));
+  await page.goto("/#office");
+  const btn = page.getByRole("button", { name: "maw mobile" });
+  await expect(btn).toHaveCount(1);
+  await btn.click();
+  await expect(page).toHaveURL(/\/m\.html$/);
+});
