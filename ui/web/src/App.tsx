@@ -238,20 +238,34 @@ function Layout({ activeView, connected, reconnecting, agentCount, sessionCount,
   );
 }
 
+/**
+ * On an HTTPS origin without ?host= the page may be a static copy with no backend (e.g. a hosted demo) → connect page.
+ * But maw serves this page itself behind `tailscale serve` (https://<machine>.ts.net) — then the backend is this very
+ * origin: ask it once instead of making the person type its own address.
+ */
 export function App() {
-  useAudioUnlock();
-
-  // On hosted HTTPS origins without ?host=, there's no backend to talk to.
-  // Show the connect page instead of empty views.
-  const isHostedWithoutBackend =
+  const maybeHosted =
     !isRemote &&
     typeof location !== "undefined" &&
     location.protocol === "https:" &&
     !location.hostname.match(/^(localhost|127\.0\.0\.1)$/);
+  const [backend, setBackend] = useState<"checking" | "here" | "none">(maybeHosted ? "checking" : "here");
+  useEffect(() => {
+    if (!maybeHosted) return;
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 4000);
+    fetch("/api/sessions", { signal: ctl.signal, cache: "no-store" })
+      .then(r => setBackend(r.ok && /json/.test(r.headers.get("content-type") || "") ? "here" : "none"))
+      .catch(() => setBackend("none"))
+      .finally(() => clearTimeout(t));
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [maybeHosted]);
+  if (backend === "checking") return null;
+  if (backend === "none") return <ConnectPage />;
+  return <AppMain />;
+}
 
-  if (isHostedWithoutBackend) {
-    return <ConnectPage />;
-  }
+function AppMain() {
+  useAudioUnlock();
 
   const rawRoute = useHashRoute();
   const { view: route, agentName: hashAgent } = parseHash(rawRoute);
