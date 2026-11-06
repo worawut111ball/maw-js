@@ -91,7 +91,7 @@
 
   const fileRow = (s, f) => `<button class="dc-f ${f.old ? "old" : ""}" data-f="${esc(f.id)}" data-s="${esc(s.id)}"><span class="ext ${esc(f.ext)}">${esc(f.ext)}</span><span class="n"><b>${esc(f.name)}</b><span>${f.old ? "รุ่นเก่า · " : ""}${when(f.mtime)} · ${size(f.size)}</span></span>${f.old ? "" : tbdBadge(f.tbd)}</button>`;
   function fileRows(s, w) {
-    const cur = w.files.filter(f => !f.old), old = w.files.filter(f => f.old), key = s.id + "|" + w.wp, show = D.oldOpen?.has(key);
+    const cur = w.files.filter(f => !f.old), old = w.files.filter(f => f.old), key = s.id + "|" + w.wp + "|" + w.title, show = D.oldOpen?.has(key);
     return cur.map(f => fileRow(s, f)).join("") + (old.length ? (show ? old.map(f => fileRow(s, f)).join("") : `<div class="dc-old"><a href="#" data-old="${esc(key)}">รุ่นเก่า ${old.length} ไฟล์</a></div>`) : "");
   }
   // chips strip keeps its scroll across redraws; the chosen one stays in view

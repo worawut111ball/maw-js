@@ -120,3 +120,35 @@ test("settling: a file saved moments ago waits; once quiet for SETTLE_MS it rend
   expect(settling({ mtime: now - 3_600_000 }, now)).toBe(false);
 });
 
+test("buildSets: besides WPnn, the other folders of the docs folder and its loose files (\"อื่นๆ\", last)", () => {
+  const tree: Record<string, { name: string; size: number; mtime: number; dir: boolean }[]> = {
+    "/p/docs": [
+      { name: "WP05 Software", size: 0, mtime: 0, dir: true }, { name: "ASUS Vibration", size: 0, mtime: 0, dir: true },
+      { name: "empty", size: 0, mtime: 0, dir: true }, { name: "node_modules", size: 0, mtime: 0, dir: true },
+      { name: "plan.md", size: 1, mtime: 1, dir: false }, { name: "Master.docx", size: 2, mtime: 2, dir: false },
+    ],
+    "/p/docs/WP05 Software": [{ name: "SRS_V1.0.docx", size: 3, mtime: 3, dir: false }],
+    "/p/docs/ASUS Vibration": [{ name: "report.pdf", size: 4, mtime: 4, dir: false }, { name: "screen.txt", size: 1, mtime: 1, dir: false }],
+    "/p/docs/empty": [{ name: "notes.md", size: 1, mtime: 1, dir: false }],
+    "/p/docs/node_modules": [{ name: "x.pdf", size: 1, mtime: 1, dir: false }],
+  };
+  const [set] = buildSets(["/p/docs/WP05 Software"], d => tree[d] ?? []);
+  expect(set.wps.map(w => [w.wp, w.title, w.files.map(f => f.name)])).toEqual([
+    ["WP05", "Software", ["SRS_V1.0.docx"]],
+    ["", "📁 ASUS Vibration", ["report.pdf"]],
+    ["", "📄 อื่นๆ", ["Master.docx"]],
+  ]);
+});
+
+test("buildSets: a folder with its own WPnn folders is its own set, not also a folder group of its parent", () => {
+  const tree: Record<string, { name: string; size: number; mtime: number; dir: boolean }[]> = {
+    "/p/docs": [{ name: "WP01 A", size: 0, mtime: 0, dir: true }, { name: "_archive", size: 0, mtime: 0, dir: true }],
+    "/p/docs/WP01 A": [{ name: "a.docx", size: 1, mtime: 1, dir: false }],
+    "/p/docs/_archive": [{ name: "WP01 old", size: 0, mtime: 0, dir: true }],
+    "/p/docs/_archive/WP01 old": [{ name: "old.docx", size: 1, mtime: 1, dir: false }],
+  };
+  const sets = buildSets(["/p/docs/WP01 A", "/p/docs/_archive/WP01 old"], d => tree[d] ?? []);
+  expect(sets.find(s => s.path.endsWith("/p/docs"))!.wps.map(w => w.title)).toEqual(["A"]);
+  expect(sets.length).toBe(2);
+});
+

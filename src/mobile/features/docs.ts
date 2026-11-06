@@ -79,23 +79,35 @@ export function buildSets(wpDirs: string[], list: (dir: string) => { name: strin
   for (const d of wpDirs) { const parent = dirname(d); bySet.set(parent, [...(bySet.get(parent) ?? []), d]); }
   const sets: DocSet[] = [];
   for (const [parent, dirs] of bySet) {
-    const wps = dirs.sort((a, b) => basename(a).localeCompare(basename(b), "en", { numeric: true })).map(d => {
-      const name = basename(d), wp = name.match(WP_DIR)![0].toUpperCase();
+    // the office/PDF files of one folder (and two levels below it)
+    const filesIn = (d: string, deep = true, txt = true) => {
       const files: DocFile[] = [];
       const walk = (dir: string, depth: number) => {
         for (const e of list(dir)) {
           if (e.name.startsWith(".") || e.name.startsWith("~$")) continue;            // .DS_Store, Office lock files
           const p = join(dir, e.name);
-          if (e.dir) { if (depth < 2) walk(p, depth + 1); continue; }
-          if (!DOC_EXT.test(e.name)) continue;
+          if (e.dir) { if (deep && depth < 2 && !PRUNE.includes(e.name)) walk(p, depth + 1); continue; }
+          if (!DOC_EXT.test(e.name) || (!txt && /\.txt$/i.test(e.name))) continue;
           files.push({ id: idOf(p), path: p, name: relative(d, p), ext: e.name.split(".").pop()!.toLowerCase(), size: e.size, mtime: e.mtime, tbd: null });
         }
       };
       walk(d, 0);
       files.sort((a, b) => b.mtime - a.mtime);
       markOld(files);
-      return { wp, title: name.slice(wp.length).trim(), files };
+      return files;
+    };
+    const wps: { wp: string; title: string; files: DocFile[] }[] = dirs.sort((a, b) => basename(a).localeCompare(basename(b), "en", { numeric: true })).map(d => {
+      const name = basename(d), wp = name.match(WP_DIR)![0].toUpperCase();
+      return { wp, title: name.slice(wp.length).trim(), files: filesIn(d) };
     });
+    // the rest of the same docs folder: files lying in it, and every other (non-WP) folder — only when they hold documents
+    // outside WPnn, .txt is mostly working material (an AI's screen texts) — Word/Excel/PowerPoint/PDF only;
+    // a folder that holds WPnn folders of its own is a set of its own already
+    const others = list(parent).filter(e => e.dir && !e.name.startsWith(".") && !WP_DIR.test(e.name) && !PRUNE.includes(e.name) && !bySet.has(join(parent, e.name)))
+      .map(e => e.name).sort((a, b) => a.localeCompare(b, "th", { numeric: true }));
+    for (const o of others) { const files = filesIn(join(parent, o), true, false); if (files.length) wps.push({ wp: "", title: "📁 " + o, files }); }
+    const loose = filesIn(parent, false, false);                       // files right in the docs folder, in no folder → "อื่นๆ", last
+    if (loose.length) wps.push({ wp: "", title: "📄 อื่นๆ", files: loose });
     const home = homedir();
     const rel = relative(home, parent).split("/").filter(s => !ROOTS.includes(s)).join("/");
     sets.push({ id: idOf(parent), path: tilde(parent), name: rel.split("/").join(" / ") || basename(parent), ...setLabel(rel || basename(parent)), wps });
