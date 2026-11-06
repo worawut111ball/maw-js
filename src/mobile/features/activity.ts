@@ -2,6 +2,8 @@
 //   GET /mobile/rooms/:ws/:room/activity?sid=&agent=  →  { ok, todos, running }
 // Claude: TodoWrite (latest list) or TaskCreate/TaskUpdate (task list) · background Bash / Monitor / Agent
 //         are "running" from launch until a <task-notification> with a <status> (or TaskStop) closes them.
+//         SendMessage that wakes a finished agent ("Resuming agent …") runs it again in the background —
+//         same rule, closed by the next notice for that agent (6 พ.ย. 69: a resumed agent showed no circle).
 // Codex:  update_plan steps · exec calls with no output yet · exec sessions still running · sub-agents (see CodexActivity).
 // Transcripts reach 100 MB+: the first look scans only the tail (pre-filtered before JSON.parse),
 // after that only the bytes appended since — state is kept per (file, size).
@@ -75,15 +77,16 @@ export class ClaudeActivity {
   private source: "todo" | "task" | null = null;
   private tasks = new Map<string, Todo>();
   private creating = new Map<string, Todo>();             // TaskCreate tool_use id → task waiting for its id
-  private pending = new Map<string, Running & { until?: number; timeoutMs?: number }>(); // tool_use id → work in flight
+  private pending = new Map<string, Running & { until?: number; timeoutMs?: number; resume?: boolean }>(); // tool_use id → work in flight
   private byTask = new Map<string, string>();             // background task / agent id → tool_use id
+  private agentLabel = new Map<string, string>();         // agent id → its launch description (for SendMessage resumes)
 
   private close(id: string) { this.pending.delete(this.byTask.get(id) ?? id); }
 
   /** Cheap pre-check so a 50 MB transcript isn't JSON-parsed line by line. */
   private relevant(line: string): boolean {
     if (line.includes("<task-notification>")) return true;
-    if (line.includes('"tool_use"') && /"name":"(TodoWrite|Task\w*|Bash|Monitor|Agent|KillShell|KillBash)"/.test(line)) return true;
+    if (line.includes('"tool_use"') && /"name":"(TodoWrite|Task\w*|Bash|Monitor|Agent|SendMessage|KillShell|KillBash)"/.test(line)) return true;
     if (!line.includes('"tool_result"')) return false;
     for (const m of line.matchAll(/"tool_use_id":"([^"]+)"/g)) if (this.pending.has(m[1]) || this.creating.has(m[1])) return true;
     return false;
@@ -150,6 +153,12 @@ export class ClaudeActivity {
       case "Agent": case "Task":
         this.pending.set(b.id, { kind: "agent", label: clip(inp.description || inp.subagent_type || "agent"), since: ts });
         break;
+      case "SendMessage": {
+        // only counts once the result says it resumed an agent; a message to a teammate / a running agent is dropped there
+        const to = String(inp.to ?? inp.recipient ?? "");
+        this.pending.set(b.id, { kind: "agent", label: clip(this.agentLabel.get(to) || inp.summary || to || "agent"), since: ts, resume: true });
+        break;
+      }
       case "TaskStop": case "KillShell": case "KillBash": {
         const id = inp.task_id ?? inp.shell_id ?? inp.bash_id;
         if (id) this.close(String(id));
@@ -172,10 +181,17 @@ export class ClaudeActivity {
     if (!p) return;
     if (b.is_error) { this.pending.delete(useId); return; }
     let id: unknown;
-    if (p.kind === "agent") {
+    if (p.resume) {
+      id = tur?.resumedAgentId ?? text.match(/Resuming agent\s+(\w+)/)?.[1];
+      if (!id) { this.pending.delete(useId); return; }                 // plain message, nothing new running
+      const prev = this.byTask.get(String(id));
+      if (prev && prev !== useId) this.pending.delete(prev);           // one row per agent, the latest wake-up
+      delete p.resume;
+    } else if (p.kind === "agent") {
       const async = tur?.status === "async_launched" || /^Async agent launched/.test(text);
       if (!async) { this.pending.delete(useId); return; }              // a foreground agent returned its answer
       id = tur?.agentId ?? text.match(/agentId:\s*(\w+)/)?.[1];
+      if (id) { this.agentLabel.set(String(id), p.label); if (this.agentLabel.size > 500) this.agentLabel.delete(this.agentLabel.keys().next().value!); }
     } else if (p.kind === "shell") {
       id = tur?.backgroundTaskId ?? text.match(/running in background with ID:\s*(\w+)/)?.[1];
     } else {
@@ -192,7 +208,7 @@ export class ClaudeActivity {
     const list = this.source === "task"
       ? [...this.tasks.entries()].sort((a, b) => (+a[0] || 0) - (+b[0] || 0) || a[0].localeCompare(b[0])).map(([, t]) => ({ ...t }))
       : this.todos.map(t => ({ ...t }));
-    return finalize(list, this.todosAt, [...this.pending.values()].map(({ timeoutMs, ...r }) => ({ ...r })), now);
+    return finalize(list, this.todosAt, [...this.pending.values()].map(({ timeoutMs, resume, ...r }) => ({ ...r })), now);
   }
 }
 

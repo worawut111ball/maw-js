@@ -171,6 +171,36 @@ describe("background work", () => {
     expect(parseClaudeActivity(start, T0 + 7 * 3600_000).running).toHaveLength(0);
   });
 
+  // 6 พ.ย. 69: SendMessage woke a finished agent ("Resuming agent …") — it ran 30 min but the phone showed no circle
+  const resume = (min: number, id: string, aid: string, summary: string) => [
+    asst(min, use(id, "SendMessage", { to: aid, summary, type: "message", recipient: aid, content: "ทำต่อ…" })),
+    result(min, id, `{"success":true,"message":"Resuming agent ${aid.slice(0, 7)}"}`,
+      { success: true, message: `Resuming agent ${aid.slice(0, 7)}`, resumedAgentId: aid, pin: { id: aid, name: aid, ref: "6a8f70" } }),
+  ];
+
+  test("SendMessage that resumes an agent runs until that agent's next notification", () => {
+    const first = bgAgent(0, "toolu_r0", "a4ba0e13921120934", "Dev test: LC flow");
+    const done1 = queued(5, notif("a4ba0e13921120934", "toolu_r0", "completed", 'Agent "Dev test: LC flow" finished'));
+    const wake = resume(10, "toolu_r1", "a4ba0e13921120934", "Round 6: unpack flow");
+    const a = parseClaudeActivity([...first, done1, ...wake], T0 + 30 * 60_000);
+    expect(a.running).toEqual([{ kind: "agent", label: "Dev test: LC flow", since: at(10), id: "a4ba0e13921120934" }]);
+    const done2 = queued(40, notif("a4ba0e13921120934", "toolu_r1", "completed", 'Agent "Dev test: LC flow" finished'));
+    expect(parseClaudeActivity([...first, done1, ...wake, done2], T0 + 41 * 60_000).running).toEqual([]);
+  });
+
+  test("resume of an agent launched before the scanned tail is labelled by the message summary", () => {
+    const a = parseClaudeActivity(resume(0, "toolu_r2", "aunknown0000000001", "Round 5: mark-print"), T0 + 60_000);
+    expect(a.running).toEqual([{ kind: "agent", label: "Round 5: mark-print", since: at(0), id: "aunknown0000000001" }]);
+  });
+
+  test("SendMessage that resumed nothing (teammate / failure) doesn't linger; one row per agent", () => {
+    const plain = [asst(0, use("toolu_r3", "SendMessage", { to: "team-lead", summary: "hi", message: "x" })),
+      result(0, "toolu_r3", "Message sent to team-lead", { success: true, message: "Message sent to team-lead" })];
+    expect(parseClaudeActivity(plain, T0 + 60_000).running).toEqual([]);
+    const twice = [...bgAgent(0, "toolu_r4", "atwice000000000001", "Long job"), ...resume(1, "toolu_r5", "atwice000000000001", "more")];
+    expect(parseClaudeActivity(twice, T0 + 2 * 60_000).running).toHaveLength(1);
+  });
+
   test("sub-agent (sidechain) lines and junk are ignored", () => {
     const side = J({ type: "assistant", isSidechain: true, timestamp: at(0), message: { content: [use("toolu_sc", "Bash", { command: "x", run_in_background: true })] } });
     expect(parseClaudeActivity([side, "not json", "", "{broken"], T0).running).toEqual([]);
