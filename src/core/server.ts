@@ -252,7 +252,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
     console.warn(`[startup] peer dedup scan skipped: ${e?.message || e}`);
   }
 
-  const server = Bun.serve({ port, hostname, fetch: fetchHandler, websocket: wsHandler });
+  const server = Bun.serve({ port, hostname, idleTimeout: 120, fetch: fetchHandler, websocket: wsHandler }); // slow phone uploads (4G) took > 10 s, the default
   setBunServer(server);
   const bindNote = reason ? ` (${reason})` : "";
   console.log(`maw ${VERSION} serve → ${HTTP_URL} (${WS_URL}) [${hostname}]${bindNote}`);
@@ -262,7 +262,7 @@ export async function startServer(port = +(process.env.MAW_PORT || loadConfig().
   if (tlsCfg?.cert && tlsCfg?.key && existsSync(tlsCfg.cert) && existsSync(tlsCfg.key)) {
     const tlsPort = port + 1;
     const tls = { cert: readFileSync(tlsCfg.cert), key: readFileSync(tlsCfg.key) };
-    Bun.serve({ port: tlsPort, hostname, tls, fetch: fetchHandler, websocket: wsHandler });
+    Bun.serve({ port: tlsPort, hostname, tls, idleTimeout: 120, fetch: fetchHandler, websocket: wsHandler });
     console.log(`maw serve → https://localhost:${tlsPort} (wss://localhost:${tlsPort}/ws) [TLS]`);
   }
 
