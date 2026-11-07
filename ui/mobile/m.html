@@ -253,6 +253,18 @@
   .composer .clip:active { color: var(--text); }
   .composer .clip { width: 38px !important; height: 38px !important; border-radius: 11px !important; font-size: 17px !important; }
   .composer .clip + .clip { margin-left: 0 !important; }
+  .composer .clip.rec { color: #fff; background: #e5484d; border-color: #e5484d; animation: recpulse 1s ease-in-out infinite; }
+  .composer .clip.rec.cancel { background: var(--card2); color: var(--dim); animation: none; }
+  @keyframes recpulse { 50% { box-shadow: 0 0 0 6px #e5484d44; } }
+  .composer .clip.rec.locked { background: #e5484d; color: #fff; animation: recpulse 1.6s ease-in-out infinite; }
+  .recbar { display: flex; align-items: center; gap: 8px; margin: 0 12px 6px; padding: 8px 10px; border-radius: 12px; background: #e5484d22; border: 1px solid #e5484d66; font-size: 14px; }
+  .recbar[hidden] { display: none; }
+  .recbar .rt { flex: 1; font-variant-numeric: tabular-nums; }
+  .recbar button { padding: 6px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--card2); color: var(--text); font-size: 13px; }
+  .recbar .rstop { background: #e5484d; border-color: #e5484d; color: #fff; }
+  .upmeta { font-size: 11px; color: var(--dim); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .upaudio { display: block; width: 100%; max-width: 280px; height: 36px; margin-top: 6px; }
+  .composer .clip#mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
   .composer textarea { min-height: 38px; padding: 8px 12px; border-radius: 12px; font-size: 15px; }
   .composer .send { width: 44px !important; height: 38px !important; border-radius: 12px !important; font-size: 17px !important; }
   #act-fab .fab { width: 40px !important; height: 40px !important; font-size: 17px !important; }
@@ -672,7 +684,8 @@ function renderProject() {
       <div class="draftbar" id="draft" hidden></div>
       <div class="sugg" id="sugg" hidden></div>
       <div class="att" id="att"></div>
-      <div class="composer"><button class="clip" id="clip" aria-label="แนบไฟล์"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button><button class="clip" id="cam" aria-label="ถ่ายรูป"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg></button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden>
+      <div class="recbar" id="recbar" hidden><span class="rt"></span><button class="rdrop" aria-label="ทิ้งช่วงนี้">✕ ทิ้งช่วงนี้</button><button class="rstop" aria-label="หยุดและส่ง">■ หยุด·ส่ง</button></div>
+      <div class="composer"><button class="clip" id="clip" aria-label="แนบไฟล์"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button><button class="clip" id="cam" aria-label="ถ่ายรูป"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg></button><button class="clip" id="mic" aria-label="กดค้างเพื่ออัดเสียง · แตะเพื่อแนบไฟล์เสียง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden><input type="file" id="audIn" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm,.aac,.opus" multiple hidden>
         <textarea id="msg" rows="1" placeholder="พิมพ์ในห้องนี้…"></textarea><button class="send" id="send" disabled aria-label="ส่ง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button></div>` : ""}`
     : `<div class="empty">ยังไม่มีห้อง — กด + เพื่อเปิดห้องใหม่</div>`}`;
   document.getElementById("back").onclick = () => history.back();
@@ -728,6 +741,108 @@ function renderProject() {
     const camIn = document.getElementById("camIn");
     document.getElementById("cam").onclick = () => camIn.click();
     camIn.onchange = () => { state.files.push(...camIn.files); camIn.value = ""; drawAtt(); msg.oninput(); };
+    // voice note like IG/Messenger/WhatsApp — the files ride the normal attach path ("[แนบไฟล์] …/voice-….webm"),
+    // the agent transcribes them on the Mac (~/.maw/bin/transcribe)
+    //   hold 🎤 = record · release = send · slide ⬆ (>70px) = lock (hands-free) · slide ← / away (>90px) = cancel
+    //   tap 🎤 = attach an audio file · long recordings go out every VOICE_PART_MS so the agent transcribes while you listen
+    const mic = document.getElementById("mic"), audIn = document.getElementById("audIn"), recbar = document.getElementById("recbar");
+    if (mic) {
+      const VOICE_PART_MS = +store.get("maw-voice-part-ms") || 3 * 60 * 1000; // override only for tests
+      let stream = null, rec = null, chunks = [], t0 = 0, partT0 = 0, part = 0, tick = 0, sx = 0, sy = 0, cancel = false, locked = false, wake = null, downAt = 0, held = null;
+      // mic level (6 พ.ย. 69): a voice note came in silent (peak -56 dB) and the transcriber made up words — warn while
+      // recording, and don't send a part that never heard anything. SILENT_DB = peak below this = the mic hears nothing.
+      const SILENT_DB = -50;
+      let meter = null, peakDb = -120, partPeak = -120, warned = false;
+      const startMeter = () => {
+        try {
+          const ac = new (window.AudioContext || window.webkitAudioContext)(); ac.resume?.();
+          const an = ac.createAnalyser(); an.fftSize = 1024; ac.createMediaStreamSource(stream).connect(an);
+          const buf = new Float32Array(an.fftSize);
+          meter = { ac, iv: setInterval(() => {
+            an.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v));
+            const db = m > 0 ? 20 * Math.log10(m) : -120; peakDb = Math.max(peakDb, db); partPeak = Math.max(partPeak, db);
+          }, 100) };
+        } catch { meter = null; /* no Web Audio → no check, the voice still goes out */ }
+      };
+      const ph = msg.placeholder, pad = n => String(n).padStart(2, "0"), mmss = ms => `${Math.floor(ms / 60000)}:${pad(Math.floor(ms / 1000) % 60)}`;
+      const type = () => ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+      const sendVoice = f => {   // voice goes out alone — whatever is typed in the box stays there
+        const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI: null, text: "", files: [f], mode: "", at: Date.now(), state: "sending", note: "", pics: [], names: [f.name] };
+        pendingSends.push(pend); savePending(pend); state.follow = true; paintPending(); queueSend(pend);
+      };
+      const show = () => {
+        if (!rec) return;
+        const all = Date.now() - t0;
+        if (meter && !warned && all > 2500 && peakDb < SILENT_DB) { warned = true; navigator.vibrate?.([60, 60, 60]); toast("⚠️ ไมค์ไม่รับเสียง — ถอดหูฟัง Bluetooth / ปิดแอปที่ใช้ไมค์ / เช็คสิทธิ์ไมค์"); }
+        const quiet = meter && warned && peakDb < SILENT_DB ? " · ⚠️ ไม่ได้ยินเสียง" : "";
+        const txt = (cancel ? "ปล่อยเพื่อยกเลิก" : locked ? `🔒 อัดอยู่ ${mmss(all)}${part ? ` · ส่งแล้ว ${part} ช่วง` : ""}` : `🔴 ${mmss(all)} · ปล่อย = ส่ง · ⬆ ล็อก · ← ยกเลิก`) + quiet;
+        msg.placeholder = txt;
+        recbar.hidden = !locked; if (locked) recbar.querySelector(".rt").textContent = txt;
+      };
+      const stopAll = () => {
+        clearInterval(tick); if (meter) { clearInterval(meter.iv); meter.ac.close?.().catch?.(() => {}); } meter = null;
+        stream?.getTracks().forEach(t => t.stop()); stream = null; rec = null;
+        wake?.release?.().catch(() => {}); wake = null;
+        mic.classList.remove("rec", "cancel", "locked"); msg.placeholder = ph; recbar.hidden = true; locked = false; cancel = false;
+      };
+      // one recorder per part: a webm only has its header in the first chunk, so each part is its own recorder on the same mic
+      const startPart = () => {
+        const mt = type(); chunks = []; partT0 = Date.now(); partPeak = -120;
+        const r = new MediaRecorder(stream, mt ? { mimeType: mt, audioBitsPerSecond: 32000 } : undefined);
+        r.ondataavailable = ev => ev.data.size && chunks.push(ev.data);
+        r.onstop = () => {
+          const ms = Date.now() - partT0, m = r.mimeType || mt || "audio/webm", data = chunks, again = r._again, heard = !meter || partPeak >= SILENT_DB;
+          if (again) startPart();                    // next part starts at once — the gap is a few ms
+          else stopAll();
+          if (r._drop) return toast("ยกเลิกเสียงแล้ว");
+          if (ms < 800 && !part) return toast("สั้นไป — กดค้างไว้แล้วพูด หรือแตะเพื่อแนบไฟล์เสียง");
+          if (!heard) return toast("🔇 ไม่ได้ยินเสียงเลย — ไม่ได้ส่ง ลองอัดใหม่ (ถอดหูฟัง Bluetooth / เช็คสิทธิ์ไมค์)");
+          const ext = /mp4|aac|m4a/.test(m) ? "m4a" : /ogg/.test(m) ? "ogg" : "webm", d = new Date(t0);
+          part++;
+          const name = `voice-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${again || part > 1 ? "-p" + part : ""}-${Math.round(ms / 1000)}s.${ext}`;
+          sendVoice(new File(data, name, { type: m.split(";")[0] })); navigator.vibrate?.(30);
+        };
+        r.start(1000); rec = r;
+      };
+      const finish = drop => { if (!rec || rec.state === "inactive") return; rec._again = false; rec._drop = !!drop; rec.stop(); };
+      mic.oncontextmenu = e => e.preventDefault();
+      mic.onpointerdown = async e => {
+        e.preventDefault();
+        if (locked) return finish(false);          // locked → tap = stop and send
+        if (rec || held) return;
+        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return toast("เครื่องนี้อัดเสียงในเบราว์เซอร์ไม่ได้ — แตะเพื่อแนบไฟล์เสียงแทน");
+        sx = e.clientX; sy = e.clientY; cancel = false; locked = false; part = 0; downAt = Date.now();
+        try { mic.setPointerCapture(e.pointerId); } catch { /* old browsers */ }
+        held = { up: false }; const h = held;
+        // raw mic: Chrome noise suppression ate speech in a loud hall (6 พ.ย. 69) — Whisper copes with noise better
+        try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } }); }
+        catch (err) { held = null; stopAll(); return toast("เปิดไมค์ไม่ได้: " + (err.name === "NotAllowedError" ? "ยังไม่อนุญาตไมค์" : err.message)); }
+        held = null;
+        if (h.up) { stopAll(); return Date.now() - downAt < 350 ? audIn.click() : toast("กดค้างไว้เพื่ออัดเสียง"); } // quick tap = pick an audio file
+        t0 = Date.now(); peakDb = -120; warned = false; startMeter(); startPart(); mic.classList.add("rec"); navigator.vibrate?.(20); show();
+        tick = setInterval(() => { show(); if (rec && rec.state === "recording" && Date.now() - partT0 >= VOICE_PART_MS) { rec._again = true; rec.stop(); } }, 500);
+      };
+      mic.onpointermove = e => {
+        if (!rec || locked) return;
+        const dx = e.clientX - sx, dy = e.clientY - sy;
+        if (dy < -70 && Math.abs(dx) < 60) {         // slid up → lock: keeps recording with the finger off
+          locked = true; cancel = false; mic.classList.remove("cancel"); mic.classList.add("locked"); navigator.vibrate?.([15, 40, 15]);
+          navigator.wakeLock?.request("screen").then(l => { wake = l; }).catch(() => {}); // screen off can stop the mic on Android
+        } else { cancel = Math.hypot(dx, dy) > 90; mic.classList.toggle("cancel", cancel); }
+        show();
+      };
+      const release = () => {
+        if (held) { held.up = true; return; }
+        if (!rec || locked) return;
+        if (Date.now() - downAt < 350 && !part) { finish(true); return audIn.click(); } // quick tap = pick an audio file
+        finish(cancel);
+      };
+      mic.onpointerup = release;
+      mic.onpointercancel = () => { if (!locked) { cancel = true; release(); } };
+      recbar.querySelector(".rstop").onclick = () => finish(false);
+      recbar.querySelector(".rdrop").onclick = () => finish(true);
+      audIn.onchange = () => { const fs = [...audIn.files]; audIn.value = ""; fs.forEach(f => sendVoice(f)); if (fs.length) toast(`ส่งไฟล์เสียง ${fs.length} ไฟล์ — กำลังอัปโหลด`); };
+    }
     drawAtt();
     // Android may kill the page while the camera / gallery is open → bring back what was typed and attached
     restoreDraft(dkey, msg, drawAtt).finally(() => { drawAtt.ready = true; if (state.files.length) saveDraftFiles(dkey, state.files); });
@@ -865,6 +980,8 @@ function renderItem(m) {
     const body = esc(long && !state.open.has("u" + m.i) ? m.text.slice(0, 900) + "…" : m.text)
       .replace(/(?:\[แนบไฟล์\] )?\/\S*?\/\.maw\/uploads\/(\d{4}-\d{2}-\d{2})\/([^\s<]+)/g, (all, day, file) => /\.(png|jpe?g|gif|webp)$/i.test(file)
         ? `<img class="upimg" src="/mobile/uploads/${day}/${file}" loading="lazy" data-zoom="/mobile/uploads/${day}/${file}">`
+        : /\.(webm|m4a|mp3|ogg|oga|opus|wav|aac)$/i.test(file)
+        ? `<a class="upfile" href="/mobile/uploads/${day}/${file}" target="_blank">🎤 ${file.replace(/^[0-9a-f]{8}-/, "")}</a><audio class="upaudio" controls preload="metadata" src="/mobile/uploads/${day}/${file}"></audio><div class="upmeta" data-meta="/mobile/uploads/${day}/${file}">${(/-(\d+)s\.\w+$/.exec(file) || [])[1] ? "ยาว " + Math.floor(/-(\d+)s\.\w+$/.exec(file)[1] / 60) + ":" + String(/-(\d+)s\.\w+$/.exec(file)[1] % 60).padStart(2, "0") : ""}</div>`
         : `<a class="upfile" href="/mobile/uploads/${day}/${file}" target="_blank">📎 ${file.replace(/^[0-9a-f]{8}-/, "")}</a>`);
     const pics = (m.images || []).map(u => `<img class="upimg" src="${esc(u)}" loading="lazy" data-zoom="${esc(u)}">`).join("");
     return `<div class="msg me ${m.queued ? "queued" : ""} ${m.canceled ? "canceled" : ""}"><div class="who">${m.canceled ? "✕ ยกเลิกแล้ว · ลบจากคอม ไม่ได้ส่ง" : m.queued ? "⏳ รอส่ง · Claude จะอ่านเมื่อทำงานรอบนี้เสร็จ" : "คุณ"} · ${hhmm(m.ts)}</div><div class="bubble">${pics ? `<div class="pics">${pics}</div>` : ""}${body}${long ? `<br><a class="more" data-x="u${m.i}">${state.open.has("u" + m.i) ? "ย่อ" : "ดูทั้งหมด"}</a>` : ""}</div></div>`;
@@ -925,6 +1042,7 @@ async function loadChat(scr, older) {
   scr.innerHTML = (ch.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${ch.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list);
   rememberChatHtml(state.room, scr.innerHTML);
   reconcilePending(list); paintPending(); markLive();
+  fillAudioMeta(scr);
   scr.querySelector("#older")?.addEventListener("click", () => loadChat(scr, true));
   scr.querySelectorAll("details.tool").forEach(d => d.addEventListener("toggle", e => { e.stopPropagation(); const i = +d.dataset.i; d.open ? state.open.add(i) : state.open.delete(i); }));
   scr.querySelectorAll("details.tgroup").forEach(d => d.addEventListener("toggle", () => { const g = d.dataset.g; d.open ? state.open.add(g) : state.open.delete(g); }));
@@ -933,6 +1051,29 @@ async function loadChat(scr, older) {
   else if (state.follow || atBottom || !prev) scr.scrollTop = scr.scrollHeight;
   else if (grew) showNewPill(scr);
   return c;
+}
+// voice / audio files in the chat: small line under the player — length · size · type (size from a HEAD request, cached)
+const audioMeta = new Map();
+function fillAudioMeta(root) {
+  root.querySelectorAll(".upmeta[data-meta]").forEach(async el => {
+    const url = el.dataset.meta, a = el.previousElementSibling;
+    // MediaRecorder webm has no duration in its header → the player shows 0:00 until played; seek far once to make it compute
+    if (a?.tagName === "AUDIO" && !a._fix) { a._fix = 1; a.addEventListener("loadedmetadata", () => { if (a.duration === Infinity) { a.currentTime = 1e9; a.addEventListener("timeupdate", function f() { a.removeEventListener("timeupdate", f); a.currentTime = 0; draw(); }); } else draw(); }); }
+    const draw = () => {
+      const m = audioMeta.get(url) || {}, d = a?.duration && isFinite(a.duration) ? a.duration : m.sec;
+      const parts = [d ? `ยาว ${Math.floor(d / 60)}:${String(Math.round(d) % 60).padStart(2, "0")}` : "", m.size ? (m.size >= 1048576 ? (m.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(m.size / 1024)) + " KB") : "", m.type || "", m.size && d ? Math.round(m.size * 8 / d / 1000) + " kbps" : ""].filter(Boolean);
+      if (parts.length) el.textContent = parts.join(" · ");
+    };
+    if (!audioMeta.has(url)) {
+      const sec = +((/-(\d+)s\.\w+$/.exec(url) || [])[1] || 0) || undefined;
+      audioMeta.set(url, { sec });
+      try {
+        const r = await fetch(url, { method: "HEAD", headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+        audioMeta.set(url, { sec, size: +r.headers.get("content-length") || 0, type: (url.split(".").pop() || "").toUpperCase() });
+      } catch { /* offline — keep what the name says */ }
+    }
+    draw();
+  });
 }
 // ── optimistic send: phone bubble first, Mac second ──
 const pendingSends = []; let pendSeq = 0, sendChain = Promise.resolve();

@@ -1057,7 +1057,11 @@ export function codexTranscript(file: string): ChatItem[] {
 
 export const UPLOAD_DIR = join(homedir(), ".maw", "uploads");
 const UPLOAD_MAX = 25 * 1024 * 1024;
+/** Audio (voice notes / meeting recordings to transcribe) may be long — 1 h of phone m4a ≈ 60 MB. */
+const UPLOAD_MAX_AUDIO = 200 * 1024 * 1024;
+const AUDIO_EXT = /\.(webm|m4a|mp3|ogg|oga|opus|wav|aac)$/i;
 const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic",
+  mp4: "video/mp4", mov: "video/quicktime", webm: "audio/webm", m4a: "audio/mp4", mp3: "audio/mpeg", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", aac: "audio/aac",
   pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8", csv: "text/csv; charset=utf-8", json: "application/json" };
 
 /** Keep letters (any script), digits, dot, dash, underscore — never a path. */
@@ -1772,7 +1776,8 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     .post("/upload", async ({ request, query, set }) => {
       const buf = new Uint8Array(await request.arrayBuffer());
       if (!buf.length) { set.status = 400; return { ok: false, error: "empty file" }; }
-      if (buf.length > UPLOAD_MAX) { set.status = 413; return { ok: false, error: "ไฟล์ใหญ่เกิน 25 MB" }; }
+      const audio = AUDIO_EXT.test(String(query.name ?? ""));
+      if (buf.length > (audio ? UPLOAD_MAX_AUDIO : UPLOAD_MAX)) { set.status = 413; return { ok: false, error: audio ? "ไฟล์เสียงใหญ่เกิน 200 MB" : "ไฟล์ใหญ่เกิน 25 MB" }; }
       const path = saveUpload(String(query.name ?? "file"), buf);
       return { ok: true, path, url: "/mobile/uploads/" + path.slice(UPLOAD_DIR.length + 1) };
     }, { parse: "none" })
