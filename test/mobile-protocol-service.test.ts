@@ -4,7 +4,7 @@ import {afterEach,expect,test} from 'bun:test';
 import {mkdtempSync,realpathSync,rmSync,readFileSync,statSync,chmodSync,mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createProtocolContinuityService,type ProtocolServiceOptions,type ProtocolLiveEvidence} from '../src/mobile/continuity/protocol/service';
+import {createProtocolContinuityService,type ProtocolServiceOptions,type ProtocolLiveEvidence,type ProtocolAcceptanceAuthority,type ProtocolAcceptancePermit,type ProtocolAcceptanceOperation,protocolAcceptanceProfile} from '../src/mobile/continuity/protocol/service';
 import type {ProtocolEntryCandidateV2} from '../src/mobile/continuity/protocol/entry';
 import type {Room,RoomEvent} from '../src/mobile/continuity/types';
 import type {ProtocolIdentity,StagedNativeProtocolSession} from '../src/mobile/continuity/protocol/types';
@@ -12,12 +12,12 @@ const sid='00000000-0000-4000-8000-000000000001',tid='00000000-0000-4000-8000-00
 const dirs:string[]=[],services:ReturnType<typeof createProtocolContinuityService>[]=[];
 afterEach(async()=>{for(const s of services.splice(0))await s.close().catch(()=>{});for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
 function frozen<T>(v:T):T{if(v&&typeof v==='object'){for(const x of Object.values(v))frozen(x);Object.freeze(v);}return v;}
-function fixture(){
+function fixture(extra:{acceptancePermit?:ProtocolAcceptanceAuthority;now?:()=>number}={}){
  const root=realpathSync(mkdtempSync(join(tmpdir(),'protocol-service-')));dirs.push(root);
  const effects:string[]=[];const aliases=new Map([[JSON.stringify(['fixture-w','fixture-p']),'room']]);const exitFailures=new Set<string>();const cleanupHooks=new Map<string,()=>Promise<void>>();let admitHook:((request:{phase:string})=>Promise<void>)|undefined;let preflight:any={ready:true};let evidenceHook:(()=>Promise<void>)|undefined;let live:ProtocolLiveEvidence|null=null,failOpen=false,failTurn=false,turnHook:(()=>Promise<void>)|undefined,historyHook:(()=>Promise<void>)|undefined,readCount=0;
  let records:Omit<RoomEvent,'seq'>[]=[{sourceId:'goal',agent:'codex',nativeId:sid,role:'user',text:JSON.stringify({kind:'continuity-facts',version:1,facts:{goal:'ตรวจงาน synthetic fixture'}})}];
  const candidate=(agent:'codex'|'claude',existingId?:string):ProtocolEntryCandidateV2=>frozen({version:2,tool:agent,model:'fixture-model',route:'direct',cwd:root,binary:'/fixture/native',session:existingId?{mode:'resume',id:existingId}:{mode:'fresh'},eligibility:{candidateOnly:true,liveEligible:false},binding:{version:2,kind:agent==='codex'?'codex-app-server-stdio':'claude-stream-json',route:'direct',model:'fixture-model',provider:agent==='codex'?'openai':'anthropic',endpoint:null,home:root,effectiveToolHome:root,homeEnvironment:{state:'absent'},cwd:root,nativeBinary:'/fixture/native',nativeSha256:'a'.repeat(64),nativeVersion:agent==='codex'?'0.164.0':'2.1.220',sessionId:existingId??null}});
- const options:ProtocolServiceOptions={privateRoot:join(root,'private'),actorId:'trusted-fixture-owner',timeoutMs:1000,
+ const options:ProtocolServiceOptions={now:extra.now,privateRoot:join(root,'private'),actorId:'trusted-fixture-owner',timeoutMs:1000,
   runtime:{admit:async r=>{await admitHook?.(r);return {source:'trusted-protocol-admission',binding:structuredClone(r.binding),externalWriter:'absent',...(r.launchReceipt?{launchReceipt:r.launchReceipt}:{})};},supervisor:{launch:async(c:any,p)=>{
    effects.push('launch:'+c.tool);let alive=true;const wire={messages:{async *[Symbol.asyncIterator](){}},send:async()=>{effects.push('wire:'+c.tool);},close:async()=>{alive=false;}};
    return {...p,wire,runtimeBirth:'fixture-'+p.launchId,assertRunning:async()=>{if(!alive)throw Error('dead');},cleanup:async()=>{effects.push('exit:'+c.tool);await cleanupHooks.get(c.tool)?.();alive=false;},observeExit:async expected=>{effects.push('exit-proof:'+c.tool);if(exitFailures.has(c.tool))throw Error('fixture private exit diagnostic');return {...expected,source:'owned-process-supervisor' as const,exit:{code:0,signal:null},inputClosed:true as const,outputClosed:true as const,pendingWork:false as const};},diagnostics:()=>({stderrBytes:0,stderrTruncated:false,stderr:''})};
@@ -30,7 +30,7 @@ function fixture(){
     prepare:async()=>{await wire.send({method:'initialize'});},startTurn:async(op,text)=>{effects.push('context:'+text);await wire.send({method:'first-user'});observed={agent:c.tool,nativeId,model:c.model,cwd:root};ready=true;return {identity,turn:completed(op)};},
     turn:async(op)=>{effects.push('turn:'+op);await wire.send({method:'turn'});await turnHook?.();if(failTurn)throw Error('lost native ACK');return completed(op);},close:async()=>{ready=false;await wire.close();}};return driver;
   }},
-  host:{resolveRoomId:async(ws,room)=>aliases.get(JSON.stringify([ws,room]))??null,liveEvidence:async()=>{await evidenceHook?.();return live;},
+  host:{acceptancePermit:extra.acceptancePermit,resolveRoomId:async(ws,room)=>aliases.get(JSON.stringify([ws,room]))??null,liveEvidence:async()=>{await evidenceHook?.();return live;},
    preflight:async()=>preflight,candidate:async(_r,target,existing)=>candidate(target,existing?.nativeId),
    history:async()=>{readCount++;await historyHook?.();return structuredClone(records);},
    verifyContext:async(_r,b,c,start)=>{effects.push('verify-context');expect(start.firstTurn?.operationId).toBe(c.id+':context');return {state:'acknowledged',nativeId:b.nativeId,hash:c.hash,throughSeq:c.throughSeq};}},
@@ -271,4 +271,82 @@ test('shutdown revokes a deferred native admission before the next wire frame, w
  await expect(h.service.close()).rejects.toMatchObject({code:'protocol_service_cleanup_failed'});
  expect(h.effects).toContain('exit-proof:claude');release();expect((await work).state).toBe('uncertain');expect(h.effects.filter(x=>x==='wire:codex')).toHaveLength(wireCount);
  const reopened=h.create();expect((await reopened.owned.turn(roomA,input)).state).toBe('uncertain');expect(h.effects.filter(x=>x==='wire:codex')).toHaveLength(wireCount);expect(h.effects.filter(x=>x.startsWith('launch:'))).toHaveLength(2);
+});
+
+function acceptanceFixture(){
+ let clock=Date.now(),revoked=false,mismatch=false;const permits:ProtocolAcceptancePermit[]=[],allowed=new Set<string>(),calls:ProtocolAcceptanceOperation[]=[];
+ const authority:ProtocolAcceptanceAuthority={advertise:async()=>structuredClone(permits),authorize:async operation=>{
+  calls.push(structuredClone(operation));if(revoked||!allowed.has(operation.kind+':'+operation.id))return null;
+  const permit=permits.find(p=>p.scope.room.id===operation.room.id&&p.scope.profile.hash===operation.profile.hash&&p.scope.operations.includes(operation.kind));if(!permit)return null;
+  return {permit:structuredClone(permit),operation:mismatch?{...structuredClone(operation),payloadHash:'0'.repeat(64)}:structuredClone(operation)};
+ }};
+ const h=fixture({acceptancePermit:authority,now:()=>clock});
+ const grant=(room:Room,agent:'codex'|'claude',kinds:('switch'|'text-turn')[],maxOperations=1,permitId='accept-'+agent)=>{
+  const permit:ProtocolAcceptancePermit={source:'trusted-bounded-acceptance',permitId,expiresAt:clock+10_000,maxOperations,scope:{room:{id:room.id,backend:room.backend,workspace:room.workspace,room:room.room,cwd:room.cwd},profile:protocolAcceptanceProfile(h.candidate(agent).binding),operations:kinds}};permits.push(permit);return permit;
+ };
+ return {...h,permits,calls,grant,allow:(kind:string,id:string)=>allowed.add(kind+':'+id),expire:()=>{clock+=20_000;},revoke:()=>{revoked=true;},mismatch:()=>{mismatch=true;}};
+}
+function acceptanceClaims(h:ReturnType<typeof fixture>){const db=new Database(join(h.options.privateRoot,'owned-turns.sqlite'),{readonly:true});try{return db.query('SELECT * FROM protocol_acceptance_claims').all() as {kind:string;permit_id:string;operation_hash:string}[];}finally{db.close();}}
+test('bounded acceptance is separate from production and advertisements never consume budget',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'codex',['text-turn'],1);h.allow('text-turn','bounded-one');
+ for(let i=0;i<3;i++){const caps:any=await h.service.featureOptions.capabilities();expect(caps.ready).toBe(true);expect(caps.authorization.purpose).toBe('bounded-acceptance');expect(caps.authorization.permits[0].remaining).toBe(1);}
+ expect(acceptanceClaims(h)).toEqual([]);expect((await h.service.owned.status(room)).capabilities.textTurn).toBe(true);
+ expect((await h.service.owned.turn(room,request(room,'bounded-one'))).state).toBe('completed');expect(acceptanceClaims(h)).toHaveLength(1);expect(h.calls.length).toBeGreaterThan(1);
+ const caps:any=await h.service.featureOptions.capabilities();expect(caps.ready).toBe(false);expect(caps.authorization.permits[0].remaining).toBe(0);
+});
+test('exact historical turn bypasses expired permit/budget but changed payload conflicts first',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'codex',['text-turn']);h.allow('text-turn','one');const input=request(room,'one');await h.service.owned.turn(room,input);h.expire();h.revoke();
+ const effects=h.effects.length,calls=h.calls.length;expect((await h.service.owned.turn(room,input)).source).toBe('historical');await expect(h.service.owned.turn(room,{...input,text:'changed'})).rejects.toMatchObject({code:'protocol_turn_id_conflict'});expect(h.calls.length).toBe(calls);expect(h.effects.length).toBe(effects);expect(acceptanceClaims(h)).toHaveLength(1);
+});
+test('room A permit never authorizes room B on same backend; action and profile are exact',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap(),b=await secondOwnedRoom(h);h.grant(room,'codex',['switch']);h.allow('text-turn','wrong-action');
+ expect((await h.service.owned.status(room)).capabilities.textTurn).toBe(false);expect((await h.service.owned.status(b)).capabilities.textTurn).toBe(false);
+ await expect(h.service.owned.turn(room,request(room,'wrong-action'))).rejects.toMatchObject({code:'bounded_acceptance_denied'});
+ await expect(h.service.owned.turn(b,request(b,'wrong-room'))).rejects.toMatchObject({code:'bounded_acceptance_denied'});expect(acceptanceClaims(h)).toEqual([]);expect(h.effects.filter(x=>x.startsWith('turn:'))).toEqual([]);
+});
+test('wrong full payload hash and host revocation reject before claim/effect',async()=>{
+ for(const wrong of ['payload','revoke']){const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'codex',['text-turn']);h.allow('text-turn','one');if(wrong==='payload')h.mismatch();else h.revoke();await expect(h.service.owned.turn(room,request(room,'one'))).rejects.toMatchObject({code:'bounded_acceptance_denied'});expect(acceptanceClaims(h)).toEqual([]);expect(h.effects.filter(x=>x.startsWith('turn:'))).toEqual([]);}
+});
+test('expiry after claim cannot reset uncertainty or replay on reopen with a replacement permit',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'codex',['text-turn']);h.allow('text-turn','lost');h.turnHook(async()=>{h.expire();});
+ expect((await h.service.owned.turn(room,request(room,'lost'))).state).toBe('uncertain');expect(acceptanceClaims(h)).toHaveLength(1);const next=h.create();expect((await next.owned.turn(room,request(room,'lost'))).state).toBe('uncertain');
+ h.grant(room,'codex',['text-turn'],5,'replacement');h.allow('text-turn','new');await expect(h.service.owned.turn(room,request(room,'new'))).rejects.toMatchObject({code:'protocol_turn_reconciliation_required'});expect(h.effects.filter(x=>x.startsWith('turn:'))).toHaveLength(1);expect(acceptanceClaims(h)).toHaveLength(1);
+});
+test('durable budget remains spent across independent service connections and definition changes fail closed',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap(),p=h.grant(room,'codex',['text-turn']);h.allow('text-turn','spent');await h.service.owned.turn(room,request(room,'spent'));
+ const next=h.create();const caps:any=await next.featureOptions.capabilities();expect(caps.authorization.permits[0].remaining).toBe(0);expect(caps.ready).toBe(false);
+ p.maxOperations=100;expect((await next.featureOptions.capabilities()).ready).toBe(false);expect(acceptanceClaims(h)).toHaveLength(1);
+});
+test('failed owned request transaction rolls acceptance budget back before any native effect',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'codex',['text-turn']);h.allow('text-turn','rollback');await h.service.owned.turnStatus(room,'unknown');
+ const db=new Database(join(h.options.privateRoot,'owned-turns.sqlite'));db.exec("CREATE TRIGGER acceptance_owned_insert_failure BEFORE INSERT ON protocol_owned_turns BEGIN SELECT RAISE(ABORT,'fixture failure'); END");db.close();
+ await expect(h.service.owned.turn(room,request(room,'rollback'))).rejects.toBeDefined();expect(acceptanceClaims(h)).toEqual([]);expect(h.effects.filter(x=>x.startsWith('turn:'))).toEqual([]);
+});
+test('bounded switch consumes once before source close and target launch, with no production live evidence',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'claude',['switch']);h.allow('switch','switch-op');await approve(h,room);await h.service.engine.request(room.id,{id:'switch-op',target:'claude',model:'fixture-model',expectedRevision:0,factsSelectionId:'switch-op'});
+ const op=await h.service.engine.advance('switch-op');expect(op.state).toBe('ready-awaiting-user');expect(acceptanceClaims(h)).toHaveLength(1);expect(h.effects.indexOf('exit:codex')).toBeLessThan(h.effects.indexOf('launch:claude'));expect(h.calls.filter(c=>c.kind==='switch').length).toBeGreaterThan(2);
+ h.expire();const before=h.effects.length;expect((await h.service.engine.request(room.id,{id:'switch-op',target:'claude',model:'fixture-model',expectedRevision:0,factsSelectionId:'switch-op'})).state).toBe('ready-awaiting-user');expect(h.effects.length).toBe(before);
+});
+for(const mutation of ['expiry','revoke'] as const)test(`deferred last source inspection ${mutation} blocks close and target launch without consuming twice`,async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'claude',['switch']);h.allow('switch','switch-op');await approve(h,room);
+ let fired=false;
+ h.admitHook(async request=>{if(!fired&&request.phase==='inspect'&&acceptanceClaims(h).length){fired=true;await Promise.resolve();if(mutation==='expiry')h.expire();else h.revoke();}});
+ await h.service.engine.request(room.id,{id:'switch-op',target:'claude',expectedRevision:0,factsSelectionId:'switch-op'});const op=await h.service.engine.advance('switch-op');expect(fired).toBe(true);expect(op.state).toBe('uncertain');expect(h.effects).not.toContain('exit:codex');expect(h.effects).not.toContain('launch:claude');expect(acceptanceClaims(h)).toHaveLength(1);
+});
+
+test('production evidence deferred at last source-close gate rechecks actual room revision after await',async()=>{
+ const h=fixture(),{room}=await h.bootstrap();h.certify();await approve(h,room);let count=0,entered!:()=>void,release!:()=>void;const waiting=new Promise<void>(r=>entered=r),gate=new Promise<void>(r=>release=r);
+ h.evidenceHook(async()=>{if(++count===4){entered();await gate;}});
+ await h.service.engine.request(room.id,{id:'switch-op',target:'claude',expectedRevision:0,factsSelectionId:'switch-op'});const advancing=h.service.engine.advance('switch-op');await waiting;
+ const op=h.service.store.operation('switch-op')!;expect(op.state).toBe('delivering-context');h.service.store.complete(op.id,{agent:'claude',nativeId:tid,generation:'concurrent-completion',model:'fixture-model',route:'direct',cursor:op.checkpointSeq!});
+ release();await advancing;expect(h.service.store.room(room.id)?.revision).toBe(1);expect(h.effects).not.toContain('exit:codex');expect(h.effects).not.toContain('launch:claude');
+});
+
+test('atomic switch budget is idempotent across two independent service connections racing the same full operation',async()=>{
+ const h=acceptanceFixture(),{room}=await h.bootstrap();h.grant(room,'claude',['switch']);h.allow('switch','race-switch');const next=h.create();
+ await h.service.engine.request(room.id,{id:'race-switch',target:'claude',expectedRevision:0});const current=h.service.store.room(room.id)!;
+ const context={id:'race-switch',text:'context',hash:createHash('sha256').update('context').digest('hex'),throughSeq:0};
+ const first=h.service.engine.adapters.herdr.launchWithContext!(current,'claude',context);
+ const second=next.engine.adapters.herdr.launchWithContext!(current,'claude',context);
+ const results=await Promise.allSettled([first,second]);expect(results.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect(acceptanceClaims(h)).toHaveLength(1);expect(h.effects.filter(x=>x==='exit:codex')).toHaveLength(1);expect(h.effects.filter(x=>x==='launch:claude')).toHaveLength(1);
 });

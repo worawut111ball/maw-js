@@ -10,8 +10,8 @@ import {FactsSelectionStore,createFactsProvider} from '../facts-selection';
 import {FactsUIService} from '../facts-ui';
 import {factsBindingHash,type Snapshot} from '../facts-resolver';
 import {EffectJournal} from '../effect-journal';
-import {ContinuityError,type Room,type RoomEvent,type Backend,type Binding} from '../types';
-import {ProtocolContinuityAdapter,protocolRoomBinding,type ProtocolAdapterPorts} from './adapter';
+import {ContinuityError,type Room,type RoomEvent,type Backend,type Binding,type AgentKind,type Adapter} from '../types';
+import {ProtocolContinuityAdapter,protocolRoomBinding,protocolNamespace,type ProtocolAdapterPorts} from './adapter';
 import {protocolRuntimePolicy,type ProtocolRuntimeCandidate} from './entry';
 import {ProtocolRuntimeHost,type RuntimeHostOptions,type RuntimeStartReceipt} from './runtime-host';
 import type {ProtocolTurn} from './types';
@@ -24,6 +24,30 @@ export interface ProtocolLiveEvidence {
   backends:{backend:Backend;runId:string}[];
   models:ContinuityCapabilities['models'];
 }
+export type ProtocolAcceptanceKind='switch'|'text-turn';
+export interface ProtocolAcceptanceProfile {
+  hash:string;namespace:string;agent:AgentKind;model:string;route:string;
+}
+export interface ProtocolAcceptancePermit {
+  source:'trusted-bounded-acceptance';permitId:string;expiresAt:number;maxOperations:number;
+  scope:{room:Pick<Room,'id'|'backend'|'workspace'|'room'|'cwd'>;profile:ProtocolAcceptanceProfile;operations:ProtocolAcceptanceKind[]};
+}
+export interface ProtocolAcceptanceOperation {
+  kind:ProtocolAcceptanceKind;id:string;payloadHash:string;
+  room:Pick<Room,'id'|'backend'|'workspace'|'room'|'cwd'|'revision'>;profile:ProtocolAcceptanceProfile;
+}
+export interface ProtocolAcceptanceAuthority {
+  advertise():Promise<ProtocolAcceptancePermit[]>;
+  authorize(operation:Readonly<ProtocolAcceptanceOperation>):Promise<{permit:ProtocolAcceptancePermit;operation:ProtocolAcceptanceOperation}|null>;
+}
+export function protocolAcceptanceProfile(binding:import('./entry').ProtocolRuntimeBinding):ProtocolAcceptanceProfile {
+  const {sessionId:_session,...profile}=binding;
+  return {hash:createHash('sha256').update(canonical(profile)).digest('hex'),namespace:protocolNamespace(binding),agent:binding.kind==='codex-app-server-stdio'?'codex':'claude',model:binding.model,route:binding.route};
+}
+export interface ProtocolAcceptanceAdvertisement extends ProtocolAcceptancePermit {remaining:number}
+export interface ProtocolServiceCapabilities extends ContinuityCapabilities {
+  authorization?:{purpose:'production'}|{purpose:'bounded-acceptance';permits:ProtocolAcceptanceAdvertisement[]};
+}
 export interface ProtocolServiceOptions {
   /** Private durable directory; never a public share/web root. Host owns its placement. */
   privateRoot:string;
@@ -35,8 +59,11 @@ export interface ProtocolServiceOptions {
     resolveRoomId(workspace:string,room:string):Promise<string|null>;
     /** Absent/null/error/malformed evidence means capabilities remain off. */
     liveEvidence?():Promise<ProtocolLiveEvidence|null>;
+    acceptancePermit?:ProtocolAcceptanceAuthority;
   };
   maxContextBytes?:number;
+  /** Trusted clock DI only; never a request/environment value. */
+  now?:()=>number;
 }
 export interface ProtocolBootstrapRequest {
   scope:Pick<Room,'id'|'backend'|'workspace'|'room'|'cwd'>;
@@ -89,14 +116,15 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
   if(lstatSync(root).isSymbolicLink()||!lstatSync(root).isDirectory()||realpathSync(root)!==root||(lstatSync(root).mode&0o077)!==0)fail('protocol_service_root_not_private',400);
   const host={preflight:options.host.preflight.bind(options.host),candidate:options.host.candidate.bind(options.host),
     history:options.host.history.bind(options.host),verifyContext:options.host.verifyContext.bind(options.host),
-    resolveRoomId:options.host.resolveRoomId.bind(options.host),liveEvidence:options.host.liveEvidence?.bind(options.host)};
+    resolveRoomId:options.host.resolveRoomId.bind(options.host),liveEvidence:options.host.liveEvidence?.bind(options.host),acceptancePermit:options.host.acceptancePermit&&typeof options.host.acceptancePermit.advertise==='function'&&typeof options.host.acceptancePermit.authorize==='function'?{advertise:options.host.acceptancePermit.advertise.bind(options.host.acceptancePermit),authorize:options.host.acceptancePermit.authorize.bind(options.host.acceptancePermit)}:undefined};
+  const now=options.now??Date.now;
   const store=new ContinuityStore(join(root,'rooms.sqlite'));
   const archive=new ContinuityArchive(join(root,'archive'));
   const selections=new FactsSelectionStore(join(root,'selections'));
   const journal=new EffectJournal(join(root,'effects.sqlite'));
   const trustedAdmit=options.runtime.admit.bind(options.runtime);
   const runtimeOptions={supervisor:options.runtime.supervisor,admit:async(request:Parameters<typeof trustedAdmit>[0])=>{
-    open();const evidence=await trustedAdmit(request);open();return evidence;
+    open();await recheckAcceptanceBoundary(request);const evidence=await trustedAdmit(request);open();await recheckAcceptanceBoundary(request);return evidence;
   },hooks:options.runtime.hooks,driverFactory:options.runtime.driverFactory};
   const registry=new Map<string,ProtocolRuntimeHost>();
   const candidatePins=new Map<string,ReturnType<ProtocolAdapterPorts['candidate']>>();
@@ -115,16 +143,17 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
       events.push(...rows);if(events.length>100_000)fail('history_too_large_for_checkpoint');cursor=rows.at(-1)!.seq;
     }return fail('history_too_large_for_checkpoint');
   };
-  const capabilities=async():Promise<ContinuityCapabilities>=>{
+  const capabilities=async():Promise<ProtocolServiceCapabilities>=>{
     open();let e:ProtocolLiveEvidence|null;
-    try{e=await host.liveEvidence?.()??null;}catch{open();return inactive();}open();
+    try{e=await host.liveEvidence?.()??null;}catch{open();e=null;}open();
     if(!e||e.source!=='trusted-live-continuity-evidence'||!['all-backends','room-backend'].includes(e.scope)
       ||!Array.isArray(e.backends)||!e.backends.length||e.backends.length>3
       ||e.backends.some(x=>!x||!backends.includes(x.backend)||!text(x.runId))
       ||new Set(e.backends.map(x=>x.backend)).size!==e.backends.length||!Array.isArray(e.models)
-      ||e.models.some(x=>!x||!['codex','claude'].includes(x.agent)||!text(x.id)||!text(x.label)))return inactive();
+      ||e.models.some(x=>!x||!['codex','claude'].includes(x.agent)||!text(x.id)||!text(x.label)))return acceptanceCapabilities();
     const ready=e.scope==='all-backends'?e.backends.length===3:e.backends.length>0;
-    return {ready,scope:e.scope,factsSelectionAvailable:true,models:ready?structuredClone(e.models):[],
+    if(!ready)return acceptanceCapabilities();
+    return {ready,scope:e.scope,authorization:{purpose:'production'},factsSelectionAvailable:true,models:ready?structuredClone(e.models):[],
       backends:backends.map(backend=>({backend,ready:ready&&e!.backends.some(x=>x.backend===backend),
         ...(!ready||!e!.backends.some(x=>x.backend===backend)?{reason:'live_continuity_not_certified'}:{})}))};
   };
@@ -144,18 +173,7 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     if(records.some(e=>!e||Object.hasOwn(e,'seq')||e.agent!==binding.agent||e.nativeId!==binding.nativeId))fail('history_identity_changed');
     await verifyOwned(room);return records;
   };
-  const adapter=new ProtocolContinuityAdapter({
-    runtime:id=>registry.get(id),install:(id,runtime)=>{open();registry.set(id,runtime);},create,
-    timeoutMs,history,verifyContext:host.verifyContext,
-    preflight:async(room,target,model)=>{
-      current(room);const caps=await capabilities();current(room);
-      if(!caps.ready||!caps.backends.some(b=>b.backend===room.backend&&b.ready))return {ready:false,reason:'live_continuity_not_certified'};
-      if(model&&!caps.models.some(m=>m.agent===target&&m.id===model))return {ready:false,reason:'model_unavailable'};
-      const result=await host.preflight(structuredClone(room),target,model);current(room);
-      if(result?.ready===true)return {ready:true};
-      return {ready:false,reason:typeof result?.reason==='string'&&/^[a-z][a-z0-9_]{0,127}$/.test(result.reason)?result.reason:'protocol_preflight_unverified'};
-    },
-    candidate:async(room,target,existing,model)=>{
+  const selectCandidate:ProtocolAdapterPorts['candidate']=async(room,target,existing,model)=>{
       current(room);const key=room.operationId?canonical([room.id,room.operationId,target,existing??null,model??null]):undefined;
       if(key&&candidatePins.has(key))return candidatePins.get(key)!;
       if(key&&candidatePins.size>=1024)fail('protocol_candidate_pin_limit');
@@ -165,8 +183,49 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
         return candidate;
       })();
       if(key)candidatePins.set(key,selected);return selected;
+  };
+  const baseAdapter=new ProtocolContinuityAdapter({
+    runtime:id=>registry.get(id),install:(id,runtime)=>{open();registry.set(id,runtime);},create,
+    timeoutMs,history,verifyContext:host.verifyContext,
+    preflight:async(room,target,model)=>{
+      current(room);const caps=await capabilities();current(room);
+      if(!productionAllowed(caps,room)){
+        const scopes=caps.authorization?.purpose==='bounded-acceptance'?caps.authorization.permits:[];
+        const prior=room.operationId?acceptanceRow('switch',room.id,room.operationId):null;
+        if(!prior&&!scopes.some(p=>scopeRoomMatches(p,room)&&p.scope.operations.includes('switch')&&p.scope.profile.agent===target&&(model===undefined||p.scope.profile.model===model)&&p.remaining>0))return {ready:false,reason:host.acceptancePermit?'bounded_acceptance_required':'live_continuity_not_certified'};
+        const candidate=await selectCandidate(room,target,room.bindings[target],model),profile=protocolAcceptanceProfile(candidate.binding);current(room);
+        if(prior){await recheckAcceptance(prior,room,profile);}
+        else if(!scopes.some(p=>permitMatches(p,room,profile,'switch')&&p.remaining>0))return {ready:false,reason:'bounded_acceptance_scope_mismatch'};
+      }else if(model&&!caps.models.some(m=>m.agent===target&&m.id===model))return {ready:false,reason:'model_unavailable'};
+      const result=await host.preflight(structuredClone(room),target,model);current(room);
+      if(result?.ready===true)return {ready:true};
+      return {ready:false,reason:typeof result?.reason==='string'&&/^[a-z][a-z0-9_]{0,127}$/.test(result.reason)?result.reason:'protocol_preflight_unverified'};
+    },
+    candidate:selectCandidate,
+    beforeSourceClose:async(room,target,context,candidate)=>{
+      const saved=acceptanceRow('switch',room.id,context.id);
+      if(!saved){const caps=await capabilities();current(room);if(!productionAllowed(caps,room))fail('bounded_acceptance_required');return;}
+      const intent=store.operation(context.id);
+      if(!intent||intent.roomId!==room.id||room.operationId!==intent.id||intent.target!==target||intent.expectedRevision!==room.revision)fail('acceptance_operation_conflict');
+      const operation=switchAcceptanceOperation(room,target,context,candidate,room.bindings[target],intent.model);
+      if(sha(canonical(operation))!==saved.operation_hash)fail('acceptance_operation_conflict');
+      await recheckAcceptance(saved,room,operation.profile);current(room);
     },
   });
+  const switchAcceptanceOperation=(room:Room,target:AgentKind,context:import('../types').ContextDelivery,candidate:import('./entry').ProtocolRuntimeCandidate,existing?:Binding,model?:string)=>
+    makeAcceptanceOperation('switch',context.id,room,protocolAcceptanceProfile(candidate.binding),sha(canonical({room,target,context,existing:existing??null,model:model??null,binding:candidate.binding,session:candidate.session,launchReceipt:candidate.version===3?candidate.finalArgvHash:null})));
+  const adapter:Adapter={inspect:baseAdapter.inspect.bind(baseAdapter),preflight:baseAdapter.preflight.bind(baseAdapter),checkpoint:baseAdapter.checkpoint.bind(baseAdapter),targetPolicy:baseAdapter.targetPolicy.bind(baseAdapter),launch:baseAdapter.launch.bind(baseAdapter),deliver:baseAdapter.deliver.bind(baseAdapter),
+    launchWithContext:async(room,target,context,existing,model)=>{
+      const caps=await capabilities();current(room);
+      if(!productionAllowed(caps,room)){
+        const candidate=await selectCandidate(room,target,existing,model),profile=protocolAcceptanceProfile(candidate.binding);
+        const operation=switchAcceptanceOperation(room,target,context,candidate,existing,model);
+        const grant=await authorizeAcceptance(operation);current(room);
+        turns().transaction(()=>consumeAcceptance(operation,grant,[sha(canonical(context.text))])).immediate();
+      }
+      return baseAdapter.launchWithContext(room,target,context,existing,model);
+    },
+  };
   const snapshot=async(room:Room):Promise<Snapshot>=>{
     current(room);if(room.operationId)fail('operation_in_progress');
     const records=await history(room,room.bindings[room.active]!);current(room);
@@ -245,6 +304,12 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     try{fchmodSync(fd,0o600);}finally{closeSync(fd);}
     const db=new Database(path);
     try{db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
+      CREATE TABLE IF NOT EXISTS protocol_acceptance_permits (
+        permit_id TEXT PRIMARY KEY,definition_hash TEXT NOT NULL,body TEXT NOT NULL,last_seen INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS protocol_acceptance_claims (
+        kind TEXT NOT NULL,room_id TEXT NOT NULL,operation_id TEXT NOT NULL,permit_id TEXT NOT NULL,
+        operation_hash TEXT NOT NULL,body TEXT NOT NULL,text_hashes TEXT NOT NULL,
+        PRIMARY KEY(kind,room_id,operation_id));
       CREATE TABLE IF NOT EXISTS protocol_owned_rooms (
         room_id TEXT PRIMARY KEY,backend TEXT NOT NULL,workspace TEXT NOT NULL,runtime_room TEXT NOT NULL,scope TEXT NOT NULL,
         UNIQUE(backend,workspace,runtime_room));
@@ -269,6 +334,62 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
       return {...receipt,source:'historical'};
     }catch{return fail('protocol_turn_ledger_corrupt');}
   };
+  const roomScope=(room:Room)=>({id:room.id,backend:room.backend,workspace:room.workspace,room:room.room,cwd:room.cwd});
+  const scopeRoomMatches=(permit:ProtocolAcceptancePermit,room:Room)=>canonical(permit.scope.room)===canonical(roomScope(room));
+  const permitMatches=(permit:ProtocolAcceptancePermit,room:Room,profile:ProtocolAcceptanceProfile,kind:ProtocolAcceptanceKind)=>scopeRoomMatches(permit,room)&&canonical(permit.scope.profile)===canonical(profile)&&permit.scope.operations.includes(kind);
+  const productionAllowed=(caps:ProtocolServiceCapabilities,room:Room)=>caps.authorization?.purpose==='production'&&caps.ready&&caps.backends.some(b=>b.backend===room.backend&&b.ready);
+  const time=()=>{const value=now();if(!Number.isSafeInteger(value)||value<0)fail('acceptance_clock_unverified');return value;};
+  const validPermit=(p:ProtocolAcceptancePermit):boolean=>{
+    try{return !!p&&Object.keys(p).sort().join(',')==='expiresAt,maxOperations,permitId,scope,source'&&p.source==='trusted-bounded-acceptance'&&text(p.permitId)&&Number.isSafeInteger(p.expiresAt)&&p.expiresAt>time()
+      &&Number.isSafeInteger(p.maxOperations)&&p.maxOperations>=1&&p.maxOperations<=1000&&!!p.scope&&Object.keys(p.scope).sort().join(',')==='operations,profile,room'
+      &&canonical(Object.keys(p.scope.room).sort())===canonical(['backend','cwd','id','room','workspace'])&&Object.values(p.scope.room).every(text)&&backends.includes(p.scope.room.backend)&&isAbsolute(p.scope.room.cwd)
+      &&!!p.scope.profile&&Object.keys(p.scope.profile).sort().join(',')==='agent,hash,model,namespace,route'&&/^[a-f0-9]{64}$/.test(p.scope.profile.hash)&&/^[a-f0-9]{64}$/.test(p.scope.profile.namespace)&&['codex','claude'].includes(p.scope.profile.agent)&&text(p.scope.profile.model)&&text(p.scope.profile.route)
+      &&Array.isArray(p.scope.operations)&&p.scope.operations.length>0&&p.scope.operations.length<=2&&new Set(p.scope.operations).size===p.scope.operations.length&&p.scope.operations.every(k=>k==='switch'||k==='text-turn');}catch{return false;}
+  };
+  interface AcceptanceRow {kind:ProtocolAcceptanceKind;room_id:string;operation_id:string;permit_id:string;operation_hash:string;body:string;text_hashes:string}
+  const acceptanceRow=(kind:ProtocolAcceptanceKind,roomId:string,id:string)=>turns().query('SELECT * FROM protocol_acceptance_claims WHERE kind=? AND room_id=? AND operation_id=?').get(kind,roomId,id) as AcceptanceRow|null;
+  const permitRemaining=(p:ProtocolAcceptancePermit)=>{
+    const old=turns().query('SELECT definition_hash,last_seen FROM protocol_acceptance_permits WHERE permit_id=?').get(p.permitId) as {definition_hash:string;last_seen:number}|null;
+    if(old&&(old.definition_hash!==sha(canonical(p))||time()<old.last_seen))fail('acceptance_permit_conflict');
+    const used=(turns().query('SELECT count(*) AS n FROM protocol_acceptance_claims WHERE permit_id=?').get(p.permitId) as {n:number}).n;
+    if(used>p.maxOperations)fail('acceptance_ledger_corrupt');return p.maxOperations-used;
+  };
+  const acceptanceCapabilities=async():Promise<ProtocolServiceCapabilities>=>{
+    if(!host.acceptancePermit)return inactive();let advertised:ProtocolAcceptancePermit[];
+    try{advertised=structuredClone(await host.acceptancePermit.advertise());}catch{open();return inactive();}open();
+    if(!Array.isArray(advertised)||advertised.length>100||new Set(advertised.map(p=>p?.permitId)).size!==advertised.length)return inactive();
+    const permits:ProtocolAcceptanceAdvertisement[]=[];
+    for(const p of advertised){if(!validPermit(p))continue;try{permits.push({...p,remaining:permitRemaining(p)});}catch{/* Conflicting IDs never grant authority. */}}
+    const available=permits.filter(p=>p.remaining>0),models=new Map<string,ContinuityCapabilities['models'][number]>();
+    for(const p of available)models.set(canonical([p.scope.profile.agent,p.scope.profile.model]),{agent:p.scope.profile.agent,id:p.scope.profile.model,label:p.scope.profile.model});
+    return {ready:available.length>0,scope:'room-backend',factsSelectionAvailable:true,models:[...models.values()],backends:backends.map(backend=>({backend,ready:available.some(p=>p.scope.room.backend===backend),...(!available.some(p=>p.scope.room.backend===backend)?{reason:'bounded_acceptance_unavailable'}:{})})),authorization:{purpose:'bounded-acceptance',permits}};
+  };
+  const makeAcceptanceOperation=(kind:ProtocolAcceptanceKind,id:string,room:Room,profile:ProtocolAcceptanceProfile,payloadHash:string):ProtocolAcceptanceOperation=>({kind,id,room:{...roomScope(room),revision:room.revision},profile,payloadHash});
+  const authorizeAcceptance=async(operation:ProtocolAcceptanceOperation)=>{
+    if(!host.acceptancePermit)fail('bounded_acceptance_required');let granted:Awaited<ReturnType<ProtocolAcceptanceAuthority['authorize']>>;
+    try{granted=structuredClone(await host.acceptancePermit.authorize(Object.freeze(structuredClone(operation))));}catch{return fail('bounded_acceptance_denied');}open();
+    const permit=granted?.permit;
+    if(!permit||!validPermit(permit)||canonical(granted!.operation)!==canonical(operation)||!permitMatches(permit,{...operation.room} as Room,operation.profile,operation.kind))fail('bounded_acceptance_denied');
+    permitRemaining(permit);return permit;
+  };
+  const consumeAcceptance=(operation:ProtocolAcceptanceOperation,permit:ProtocolAcceptancePermit,textHashes:string[])=>{
+    if(!validPermit(permit))fail('bounded_acceptance_expired');const db=turns(),fingerprint=sha(canonical(operation)),prior=acceptanceRow(operation.kind,operation.room.id,operation.id);
+    if(prior){if(prior.operation_hash!==fingerprint||prior.permit_id!==permit.permitId||prior.text_hashes!==canonical(textHashes))fail('acceptance_operation_conflict');return true;}
+    if(permitRemaining(permit)<1)fail('acceptance_budget_exhausted');
+    db.query('INSERT OR IGNORE INTO protocol_acceptance_permits(permit_id,definition_hash,body,last_seen) VALUES(?,?,?,?)').run(permit.permitId,sha(canonical(permit)),canonical(permit),time());
+    db.query('UPDATE protocol_acceptance_permits SET last_seen=? WHERE permit_id=?').run(time(),permit.permitId);
+    db.query('INSERT INTO protocol_acceptance_claims(kind,room_id,operation_id,permit_id,operation_hash,body,text_hashes) VALUES(?,?,?,?,?,?,?)').run(operation.kind,operation.room.id,operation.id,permit.permitId,fingerprint,canonical(operation),canonical(textHashes));return false;
+  };
+  const recheckAcceptance=async(saved:AcceptanceRow,room:Room,profile:ProtocolAcceptanceProfile,textHash?:string)=>{
+    let operation:ProtocolAcceptanceOperation;try{operation=JSON.parse(saved.body);if(sha(canonical(operation))!==saved.operation_hash||operation.kind!==saved.kind||operation.id!==saved.operation_id||operation.room.id!==saved.room_id||operation.room.revision!==room.revision||canonical(roomScope(room))!==canonical(roomScope(operation.room as Room))||canonical(operation.profile)!==canonical(profile)||textHash&&!JSON.parse(saved.text_hashes).includes(textHash))fail('acceptance_operation_conflict');}catch{return fail('acceptance_operation_conflict');}
+    const permit=await authorizeAcceptance(operation);if(permit.permitId!==saved.permit_id)fail('acceptance_operation_conflict');return permit;
+  };
+  const recheckAcceptanceBoundary=async(request:Parameters<typeof trustedAdmit>[0])=>{
+    if(!host.acceptancePermit)return;
+    const direct=acceptanceRow('text-turn',request.roomId,request.operationId),room=store.room(request.roomId);
+    if(!room)return;const source=direct??(room.operationId===request.launchOperationId?acceptanceRow('switch',request.roomId,request.launchOperationId):null);
+    if(source)await recheckAcceptance(source,room,protocolAcceptanceProfile(request.binding),request.textHash);
+  };
   const owned:ProtocolOwnedService={
     inventory:async()=>{
       open();const rows=turns().query('SELECT room_id,scope FROM protocol_owned_rooms ORDER BY room_id LIMIT 1025').all() as {room_id:string;scope:string}[];
@@ -283,21 +404,21 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     },
     status:async room=>{
       current(room);const caps=await capabilities();current(room);const binding=structuredClone(room.bindings[room.active]!);
-      let state:ProtocolOwnedStatus['state']='unavailable';
+      let state:ProtocolOwnedStatus['state']='unavailable',profile:ProtocolAcceptanceProfile|undefined;
       const pending=turns().query("SELECT id FROM protocol_owned_turns WHERE room_id=? AND state IN ('dispatching','uncertain')").get(room.id);
       if(pending)state=activeTurns.has(room.id)?'busy':'uncertain';
       else if(registry.has(room.id)){
         if(activeTurns.has(room.id))state='busy';
         else try{const observed=await registry.get(room.id)!.inspect();current(room);
           if(observed.identity.cwd!==room.cwd||canonical(protocolRoomBinding(observed.identity,observed.generation,observed.binding,binding.cursor))!==canonical(binding))state='uncertain';
-          else state=observed.idle&&!observed.pendingApproval?'idle':'busy';
+          else {state=observed.idle&&!observed.pendingApproval?'idle':'busy';profile=protocolAcceptanceProfile(observed.binding);}
         }catch(e){state=(e as any)?.code==='runtime_session_busy'?'busy':'uncertain';}
       }
       current(room);
       const stillPending=turns().query("SELECT id FROM protocol_owned_turns WHERE room_id=? AND state IN ('dispatching','uncertain')").get(room.id);
       if(stillPending)state=activeTurns.has(room.id)?'busy':'uncertain';
       return {kind:'owned-protocol',roomId:room.id,revision:room.revision,binding,state,
-        capabilities:{textTurn:state==='idle'&&!room.operationId&&caps.ready&&caps.backends.some(b=>b.backend===room.backend&&b.ready),attachments:false,keys:false}};
+        capabilities:{textTurn:state==='idle'&&!room.operationId&&(productionAllowed(caps,room)||!!profile&&caps.authorization?.purpose==='bounded-acceptance'&&caps.authorization.permits.some(p=>p.expiresAt>time()&&p.remaining>0&&permitMatches(p,room,profile!,'text-turn'))),attachments:false,keys:false}};
     },
     turnStatus:async(room,id)=>{
       current(room);if(!text(id))fail('protocol_turn_invalid',400);const r=row(id);
@@ -315,15 +436,18 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
       if(room.operationId)fail('operation_in_progress');
       if(turns().query("SELECT id FROM protocol_owned_turns WHERE room_id=? AND state IN ('dispatching','uncertain')").get(room.id))fail('protocol_turn_reconciliation_required');
       const caps=await capabilities();current(room);
-      if(!caps.ready||!caps.backends.some(b=>b.backend===room.backend&&b.ready))fail('live_continuity_not_certified',503);
+      if(!productionAllowed(caps,room)&&!host.acceptancePermit)fail('live_continuity_not_certified',503);
       const concurrent=row(request.id);if(concurrent){if(concurrent.room_id!==room.id||concurrent.request_hash!==fingerprint)fail('protocol_turn_id_conflict');return recorded(concurrent);}
       const before=await verifyOwned(room);current(room);
+      const acceptanceOperation=makeAcceptanceOperation('text-turn',request.id,room,protocolAcceptanceProfile(before.binding),fingerprint);
+      const acceptanceGrant=productionAllowed(caps,room)?undefined:await authorizeAcceptance(acceptanceOperation);current(room);
       const db=turns();
       const claimed=db.transaction(()=>{
         const prior=row(request.id);
         if(prior){if(prior.room_id!==room.id||prior.request_hash!==fingerprint)fail('protocol_turn_id_conflict');return prior;}
         current(room);
         if(db.query("SELECT id FROM protocol_owned_turns WHERE room_id=? AND state IN ('dispatching','uncertain')").get(room.id))fail('protocol_turn_reconciliation_required');
+        if(acceptanceGrant&&consumeAcceptance(acceptanceOperation,acceptanceGrant,[sha(canonical(request.text))]))fail('acceptance_turn_reconciliation_required');
         db.query("INSERT INTO protocol_owned_turns(id,room_id,request_hash,body,state) VALUES(?,?,?,?,'dispatching')").run(request.id,room.id,fingerprint,canonical(payload));return null;
       }).immediate();
       if(claimed)return recorded(claimed);

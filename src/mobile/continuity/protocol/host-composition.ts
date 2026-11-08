@@ -4,7 +4,7 @@ import {constants,openSync,closeSync,fstatSync,readFileSync,realpathSync} from '
 import {isAbsolute} from 'node:path';
 import {PinnedProtocolEntryLoader,type PinnedProtocolModule} from './entry-loader';
 import {ProtocolProcessSupervisor,type ProcessSupervisorOptions,type OwnedProtocolProcess,type ProcessLaunchPermit} from './process-supervisor';
-import {createProtocolContinuityService,type ProtocolContinuityService,type ProtocolLiveEvidence,type ProtocolBootstrapReceipt} from './service';
+import {createProtocolContinuityService,type ProtocolContinuityService,type ProtocolLiveEvidence,type ProtocolBootstrapReceipt,type ProtocolAcceptanceAuthority,protocolAcceptanceProfile} from './service';
 import {protocolRuntimeDriver,type ProtocolRuntimeCandidate,type ProtocolRuntimeBinding,type HomeEnvironment} from './entry';
 import {readProtocolNativeHistory} from './native-history-reader';
 import {protocolNamespace} from './adapter';
@@ -19,6 +19,11 @@ export interface ProtocolHostProfile {
   agent:AgentKind;version:2|3;model:string;route:'mind'|'direct';provider:string;endpoint:string|null;
   home:string;effectiveToolHome:string;homeEnvironment:HomeEnvironment;
   native:{binary:string;sha256:string;version:string;versionEvidence:{version:string;sha256:string}};
+}
+/** Pure advertisement fingerprint only, not native/policy/launch authority. */
+export function protocolHostAcceptanceProfile(scope:Pick<ProtocolHostScope,'cwd'>,profile:ProtocolHostProfile){
+  const binding={version:profile.version,kind:profile.agent==='codex'?'codex-app-server-stdio' as const:'claude-stream-json' as const,route:profile.route,model:profile.model,provider:profile.provider,endpoint:profile.endpoint,home:profile.home,effectiveToolHome:profile.effectiveToolHome,homeEnvironment:profile.homeEnvironment,cwd:scope.cwd,nativeBinary:profile.native.binary,nativeSha256:profile.native.sha256,nativeVersion:profile.native.version,sessionId:null};
+  return protocolAcceptanceProfile(profile.version===3?{...binding,version:3,pilotPolicy:{kind:'claude-context-only-safe',version:1},policyArgvHash:sha(JSON.stringify(['--safe-mode','--tools','']))}:{...binding,version:2});
 }
 export interface ProtocolHostScope {
   id:string;backend:Room['backend'];workspace:string;room:string;cwd:string;profiles:ProtocolHostProfile[];
@@ -51,6 +56,7 @@ export interface ProtocolHostAuthority {
   readHistory?(request:{room:Room;binding:Binding}):Promise<ProtocolHistoryAttestation>;
   verifyContext?(room:Room,binding:Binding,context:ContextDelivery,start:ProtocolBootstrapReceipt['start']):Promise<DeliveryReceipt>;
   liveEvidence?():Promise<ProtocolLiveEvidence|null>;
+  acceptancePermit?:ProtocolAcceptanceAuthority;
   hooks?:ProtocolHooks;
 }
 export interface ProtocolHostMechanisms {
@@ -142,7 +148,7 @@ type LaunchRecord={scope:ProtocolHostScope;profile:ProtocolHostProfile;candidate
 export function loadProtocolHostComposition(config?:ProtocolHostConfig,authority:ProtocolHostAuthority={},mechanisms:ProtocolHostMechanisms={}):ProtocolHostComposition {
   if(config===undefined)return {kind:'disabled',featureOptions:undefined,close:async()=>{}};
   validateConfig(config);if(!config.activation||config.activation.mode==='disabled')return {kind:'disabled',featureOptions:undefined,close:async()=>{}};
-  const cfg=freeze(structuredClone(config)),ports={attestNative:authority.attestNative?.bind(authority),connection:authority.connection?.bind(authority),resumeBinding:authority.resumeBinding?.bind(authority),readHistory:authority.readHistory?.bind(authority),verifyContext:authority.verifyContext?.bind(authority),liveEvidence:authority.liveEvidence?.bind(authority),hooks:authority.hooks};
+  const cfg=freeze(structuredClone(config)),ports={attestNative:authority.attestNative?.bind(authority),connection:authority.connection?.bind(authority),resumeBinding:authority.resumeBinding?.bind(authority),readHistory:authority.readHistory?.bind(authority),verifyContext:authority.verifyContext?.bind(authority),liveEvidence:authority.liveEvidence?.bind(authority),hooks:authority.hooks,acceptancePermit:authority.acceptancePermit};
   const loader=new PinnedProtocolEntryLoader(cfg.modulePin!),records=new Map<string,Promise<LaunchRecord>>(),candidates=new WeakMap<object,LaunchRecord>();
   const scopeFor=(room:Pick<Room,'id'|'backend'|'workspace'|'room'|'cwd'>)=>{
     const s=cfg.scopes!.find(s=>s.id===room.id);if(!s||['backend','workspace','room','cwd'].some(k=>(s as any)[k]!==(room as any)[k]))fail('protocol_host_scope_unverified');return s;
@@ -190,6 +196,7 @@ export function loadProtocolHostComposition(config?:ProtocolHostConfig,authority
     const r=await records.get(canonical([request.roomId,request.launchOperationId]));if(!r||canonical(request.binding)!==canonical(r.candidate.binding)||canonical(request.selection)!==canonical(r.candidate.session)||r.candidate.version===3&&canonical(request.launchReceipt)!==canonical(receipt(r)))fail('protocol_host_launch_unverified');
     return attest(r,request.phase,request.operationId,request.textHash);
   }},host:{
+    acceptancePermit:cfg.activation!.mode==='pilot'?ports.acceptancePermit:undefined,
     resolveRoomId:async(ws,room)=>cfg.scopes!.find(s=>s.workspace===ws&&s.room===room)?.id??null,
     candidate:async(room,target,existing,model)=>(await recordFor(scopeFor(room),profileFor(scopeFor(room),target,model),room.operationId??fail('protocol_host_operation_unverified'),existing)).candidate,
     preflight:async(room,target,model)=>{const r=await recordFor(scopeFor(room),profileFor(scopeFor(room),target,model),room.operationId??fail('protocol_host_operation_unverified'),room.bindings[target]);await attest(r,'target-preflight',r.launchOperationId);return {ready:true};},

@@ -3,8 +3,9 @@ import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,readFileSync,rmSync,chm
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
-import {loadProtocolHostComposition,readProtocolHostConfig,normalizeProtocolNativeHistory,type ProtocolHostConfig,type ProtocolHostAuthority,type ProtocolHostMechanisms,type ProtocolNativeAttestationRequest} from '../src/mobile/continuity/protocol/host-composition';
+import {loadProtocolHostComposition,readProtocolHostConfig,normalizeProtocolNativeHistory,type ProtocolHostConfig,type ProtocolHostAuthority,type ProtocolHostMechanisms,type ProtocolNativeAttestationRequest,protocolHostAcceptanceProfile} from '../src/mobile/continuity/protocol/host-composition';
 import {parseNativeRecords,type NativeRecords} from '../src/mobile/continuity/native-records';
+import {protocolAcceptanceProfile,type ProtocolAcceptancePermit} from '../src/mobile/continuity/protocol/service';
 import type {Room,Binding,RoomEvent} from '../src/mobile/continuity/types';
 import type {StagedNativeProtocolSession} from '../src/mobile/continuity/protocol/types';
 const roots:string[]=[],apps:Extract<ReturnType<typeof loadProtocolHostComposition>,{kind:'configured'}>[]=[];
@@ -81,4 +82,19 @@ test('late older bootstrap history cannot be appended after an already persisted
  const rows=nativeRows('claude',cwd);const later=nativeRows('claude',cwd,'00000000-0000-4000-8000-000000000099','00000000-0000-4000-8000-000000000098');(later[0] as any).parentUuid=(rows[1] as any).uuid;
  const records=parseNativeRecords('claude',nativeId,jsonl([...rows,...later]));const lateOnly=records.events.slice(2).map((e,i)=>({seq:i+1,sourceId:e.sourceId,agent:'claude' as const,nativeId,role:e.role,text:e.text,metadata:e.metadata}));
  expect(()=>normalizeProtocolNativeHistory(room,binding,records,lateOnly)).toThrow('protocol_history_order_unverified');
+});
+
+test('pilot configured acceptance authority opens scoped internal text gate without calling production evidence',async()=>{
+ const f=fixture('absent',3),profile=protocolHostAcceptanceProfile(f.config.scopes![0],f.profile);let permit:ProtocolAcceptancePermit|undefined;
+ f.authority.acceptancePermit={advertise:async()=>permit?[structuredClone(permit)]:[],authorize:async operation=>{
+  if(!permit||operation.id!=='bounded-text'||operation.kind!=='text-turn'||operation.room.id!=='A'||operation.profile.hash!==profile.hash)return null;
+  return {permit:structuredClone(permit),operation:structuredClone(operation)};
+ }};
+ const app=f.create(),result=await app.bootstrapOwned({scopeId:'A',operationId:'boot',agent:'claude',firstTurn:{operationId:'first',text:'authorized bootstrap'}});
+ expect(profile).toEqual(protocolAcceptanceProfile(f.attestations[0].binding));
+ permit={source:'trusted-bounded-acceptance',permitId:'pilot-text',expiresAt:Date.now()+60_000,maxOperations:1,scope:{room:{id:'A',backend:'herdr',workspace:'fixture-w',room:'A',cwd:f.root},profile,operations:['text-turn']}};
+ const caps:any=await app.featureOptions.capabilities();expect(caps.authorization.purpose).toBe('bounded-acceptance');expect(caps.authorization.permits[0].remaining).toBe(1);expect((await app.featureOptions.owned!.status(result.room)).capabilities.textTurn).toBe(true);
+ const request={id:'bounded-text',text:'synthetic bounded text',expectedRevision:0,binding:result.room.bindings.claude!};
+ expect((await app.featureOptions.owned!.turn(result.room,request)).state).toBe('completed');await app.service.snapshot(result.room);expect(app.service.store.events('A')).toHaveLength(4);
+ const after:any=await app.featureOptions.capabilities();expect(after.ready).toBe(false);expect(after.authorization.permits[0].remaining).toBe(0);expect((await app.featureOptions.owned!.turn(result.room,request)).source).toBe('historical');expect(f.launches).toBe(1);
 });

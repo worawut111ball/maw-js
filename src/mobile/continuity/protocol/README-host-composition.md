@@ -45,7 +45,7 @@ roomId+launchOperationId มาจาก runtime seam ของ Root โดย�
 
 `verifyContext(room,binding,context,start)` ต้องเป็น actual exact native turn/context verifier คืน matching acknowledged receipt เท่านั้น ถ้าขาด production capability ยังปิด ไม่อ่านข้อความ model ACK แล้ว claim memory/retrieval
 
-`liveEvidence()` เป็น Root-reviewed production backend/model acceptance references ไม่ใช่ fixture หรือ config boolean Mode pilot ไม่เรียก provider นี้และยัง gate off แม้ native bootstrap ทำได้ ตาม scope freeze รอบนี้
+`liveEvidence()` เป็น Root-reviewed production backend/model acceptance references ไม่ใช่ fixture หรือ config boolean Mode pilot ไม่เรียก production evidence provider นี้ สามารถเปิดเฉพาะ scoped bounded acceptance ผ่าน constructor authority แยกตามส่วนด้านล่าง ไม่มีการ promote เป็น production certification
 
 ## Actual native history และ order
 
@@ -61,11 +61,25 @@ Existing source history ต้องเป็น prefix ของ projected nati
 
 **ขอบเขตที่ยังทำไม่ได้:** เมื่อ proven owned pair มี native intermediate public/tool events ระหว่าง user กับ final แต่ Store append-only บันทึก pair ไปแล้ว โมดูล reject protocol_history_intermediate_events_require_projection แทน drop/reorder/fabricate events ต้อง Root ตัดสิน ordered event projection/atomic ingest seam ภายหลัง ไม่แก้ parser/Store/service ในรอบนี้
 
-## Pilot acceptance permit — proposal เท่านั้น
+## Pilot acceptance permit — implemented
 
-V3 pilot ใช้งาน explicit bootstrap/history ได้ แต่ engine/UI mutation ยัง gate off จึงยังทดสอบ switch จริงผ่าน UI ใน mode นี้ไม่ได้ ไม่เปลี่ยน fixture ให้เป็น production liveEvidence
+`ProtocolHostAuthority.acceptancePermit?: ProtocolAcceptanceAuthority` ส่งผ่านให้ service เฉพาะ config mode pilot ไม่อยู่ใน config JSON หรือ browser input Production mode ยังคงใช้ actual liveEvidence เดิม ไม่เปิดจาก permit
 
-เสนอให้ Root เพิ่ม optional service seam สำหรับ host-owned bounded acceptance permit แยก production certification (purpose/permit ID/exact room+profile+operation scope และ budget/expiry ที่ authority ตรวจ) เพื่อให้ internal service preflight/text gate กับ UI เห็นฐานการอนุญาตเดียวกัน ห้าม override แค่ UI capabilities เพราะ internal service ยังปิดอยู่ งานนี้ยังไม่ implement permit หรือแก้ service/API
+```ts
+acceptancePermit: {
+  advertise(): Promise<ProtocolAcceptancePermit[]>;
+  authorize(op: Readonly<ProtocolAcceptanceOperation>):
+    Promise<{permit:ProtocolAcceptancePermit;operation:ProtocolAcceptanceOperation}|null>;
+}
+```
+
+Schema เต็มอยู่ exported types ของ service.ts และ README-service.md Capabilities แยก authorization.purpose production/bounded-acceptance ชัดเจน Permit มี exact room/profile/action, expiresAt, maxOperations และ service-derived remaining Advertisement ไม่ consume และไม่ใช่ authority จาก browser
+
+`protocolHostAcceptanceProfile(scope, profile)` เป็น pure helper ให้ fingerprint ตรง `protocolAcceptanceProfile(candidate.binding)` ของ actual candidate ไม่ grant native trust ไม่จำลอง native proof Profile namespace เทียบกับ Room generation namespace ได้ ส่วน full hash ตรวจ pins/context/policy เพิ่มใน internal gate
+
+Service authorize exact operation ID/full payload hash แล้ว consume durable budget atomically ก่อน effects ทุก admission/last source-close recheck expiry/revoke/scope โดยไม่ consume ซ้ำ Historical exact receipts ตรวจ full-key ก่อน new permit เพื่อไม่เกิด replay/gate-dependent history User/assistant pair ยังคง atomic และ uncertain ไม่ถูก reset ด้วย permit ใหม่
+
+Host callback ต้องตรวจ owner policy และ operation จริงก่อนคืน grant ไม่ใช้ unconditional echo authorize หรือ fixture มาทำ liveEvidence ดู API และ guarantees/limits ที่ README-service.md
 
 ## การตรวจและข้อจำกัด
 
@@ -78,4 +92,4 @@ Attestation callbacks เป็น trusted host authority ไม่ใช่ก�
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม pinned host config/owner-policy composition, concrete loader/supervisor/service และ actual Root history-reader default |
-| 8 พ.ย. 69 | Codex ensure | เพิ่ม exact native-turn normalization/order guards และบันทึก acceptance-permit proposal โดยคง production gate |
+| 8 พ.ย. 69 | Codex ensure | เพิ่ม exact native-turn normalization/order guards และแยก bounded acceptance authority พร้อม durable service budget โดยคง production gate |

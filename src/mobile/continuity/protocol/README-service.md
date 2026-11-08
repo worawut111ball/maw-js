@@ -55,11 +55,51 @@ interface ProtocolLiveEvidence {
 }
 ```
 
-ไม่มี callback/null/error/malformed evidence ทำให้ gate ปิด `all-backends` ต้องครบทั้งสาม; `room-backend` เปิดเฉพาะ backend ที่มีหลักฐาน ชื่อ models มาจาก host ไม่ hardcode การให้ source tag ไม่ได้ตรวจ acceptance artifact ให้อัตโนมัติ Host เป็นผู้ตรวจหลักฐานจริง
+ไม่มี callback/null/error/malformed production evidence ทำให้ production gate ปิด หากไม่มี explicit bounded acceptance authority แยกต่างหากจะไม่มี fresh effects `all-backends` ต้องครบทั้งสาม; `room-backend` เปิดเฉพาะ backend ที่มีหลักฐาน ชื่อ models มาจาก host ไม่ hardcode การให้ source tag ไม่ได้ตรวจ acceptance artifact ให้อัตโนมัติ Host เป็นผู้ตรวจหลักฐานจริง
 
 `factsSelectionAvailable:true` หมายถึงมี concrete selection service ไม่ใช่ live continuity readiness Fresh engine preflight และ owned text dispatch ตรวจ gate ใน service ด้วย ไม่พึ่ง HTTP ready guard เพียงชั้นเดียว
 
 การเปิด/ปิดทำผ่าน trusted host DI และหลักฐาน ไม่ใช่ UI toggle ในโมดูลนี้ ไม่มี production enablement ในรอบ implementation นี้
+
+### Bounded acceptance — implemented แยกจาก production
+
+Trusted constructor `host.acceptancePermit` มี `advertise()` และ `authorize(operation)` ไม่อยู่ใน browser body/config JSON และไม่แปลง permit เป็น liveEvidence:
+
+```ts
+interface ProtocolAcceptanceProfile {
+  hash:string; namespace:string; agent:'claude'|'codex'; model:string; route:string;
+}
+interface ProtocolAcceptancePermit {
+  source:'trusted-bounded-acceptance'; permitId:string;
+  expiresAt:number; maxOperations:number;
+  scope:{
+    room:{id:string;backend:'herdr'|'tmux'|'superset';workspace:string;room:string;cwd:string};
+    profile:ProtocolAcceptanceProfile; operations:('switch'|'text-turn')[];
+  };
+}
+interface ProtocolAcceptanceOperation {
+  kind:'switch'|'text-turn'; id:string; payloadHash:string;
+  room:{id:string;backend:'herdr'|'tmux'|'superset';workspace:string;room:string;cwd:string;revision:number};
+  profile:ProtocolAcceptanceProfile;
+}
+// authorize(op) => {permit,operation:exact op} | null
+// capabilities.authorization:
+// {purpose:'production'} | {purpose:'bounded-acceptance',permits:[{...permit,remaining}]}
+```
+
+Expiry เป็น Unix milliseconds จาก trusted clock Budget เป็นจำนวน operation 1–1000 ต่อ immutable permit definition ไม่ใช่จำนวน frames Default ไม่มี callback จึงปิด ไม่มี default acceptance on
+
+Advertisement ไม่ consume และ remaining คำนวณจาก SQLite จริง UI ใช้ exact room/action/profile/expiry/remaining ร่วมกับ ready/backends ไม่ override ready Backend advertisement เพียงอย่างเดียวไม่ให้ room อื่นมีสิทธิ์ Internal service ตรวจ full scope/hash และ explicit host authorization ก่อน effects เสมอ
+
+`protocolAcceptanceProfile(candidate.binding)` ให้ exact hash/namespace โดยตัด sessionId เท่านั้น ไม่ตัด native pins/context/policy ไม่อ่าน env/argv การคำนวณ fingerprint ไม่ใช่ native/launch authority Operation payloadHash มาจาก actual full text request หรือ full staged switch room/context/candidate/selection ไม่รับ hash ที่ browser กำหนด
+
+Private SQLite เพิ่ม protocol_acceptance_permits/claims แบบ additive Full permit definition immutable ตาม permitId และ claim key(kind,room,id) ผูก full operation fingerprint/text hashes Text claim อยู่ transaction เดียวกับ owned request Switch claim persist ก่อน source close/target launch ทุก admission reauthorize/expiry check แต่ไม่ consume ซ้ำ Budget ไม่ refund/reset เมื่อ expired/revoked/uncertain/close
+
+Hook beforeSourceClose ตรวจ exact durable switch intent/profile/payload อีกครั้งหลัง last source.inspect await ก่อน cleanup หาก expiry/revoke ระหว่างรอ ต้อง source close0/target launch0 Production branch ตรวจ actual Room ใหม่หลัง awaited evidence เช่นกัน
+
+Historical exact request lookup/full-key conflict มาก่อน new expiry/budget จึงอ่าน receipt ได้แม้หมดอายุ แต่ไม่ให้สิทธิ์ dispatch ใหม่ Unknown/uncertain ไม่ replay ไม่มี automatic claim recovery/uncertain unlock Authority ต้องตรวจ host policy/operation จริง ไม่ echo request กลับโดยไม่พิจารณา
+
+`now?:()=>number` เป็น trusted clock DI สำหรับ tests เท่านั้น ไม่รับ browser timestamp เวลาถอยหลังเทียบ persisted consume timestamp หรือ permit ID เปลี่ยนนิยามทำให้ fail closed
 
 ## Facts snapshot เดียวกับ engine
 
@@ -125,4 +165,5 @@ Root เป็นเจ้าของ native preflight, evidence certification,
 |---|---|---|
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม concrete service, exact facts snapshot, explicit bootstrap, default-off capabilities และ focused tests |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม durable owned text/status/inventory ผ่าน featureOptions พร้อม provenance pair, restart/ACK/race negatives |
+| 8 พ.ย. 69 | Codex ensure | เพิ่ม bounded acceptance แยก liveEvidence, scoped authority/durable atomic budget, historical-first และ last-await source-close guard |
 | 8 พ.ย. 69 | Codex ensure | ปิด P2 close หลายห้อง: ลองทุก owned runtime, sanitize failure, คง failed guards และ shutdown latch รวม awaited admission |
