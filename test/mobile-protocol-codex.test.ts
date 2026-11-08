@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CodexProtocolSession } from '../src/mobile/continuity/protocol/codex';
+import { CodexProtocolSession, projectCodexDiagnosticFrame } from '../src/mobile/continuity/protocol/codex';
 import { ProtocolError, type ProtocolPolicy, type ProtocolWire, type ProtocolHooks } from '../src/mobile/continuity/protocol/types';
 // Fixture fields/enum spellings follow the 0.164.0 generated schema, not transcript/TUI formats.
 const threadId='00000000-0000-4000-8000-000000000001',turnId='00000000-0000-4000-8000-000000000002',other='00000000-0000-4000-8000-000000000003';
@@ -398,4 +398,97 @@ describe('Exact active-turn native retry errors',()=>{
   const h=fixture(),{pending}=await running(h);h.wire.onSend=()=>{};event(h.wire,'turn/completed',{threadId,turn:{...turn('completed',[finalItem()]),itemsView:'summary'}});await tick();event(h.wire,'error',retry());await expect(pending).rejects.toMatchObject({code:'native_turn_error',uncertain:true});expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);
  });
  test.skipIf(!existsSync(schemaRoot))('retry fixture conforms to generated pinned ErrorNotification schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/ErrorNotification.json'),'utf8'));expect(schemaCheck(retry(),s,s)).toBe(true);});
+});
+
+describe('Pure value-free Codex telemetry projection',()=>{
+ const secret='SYNTHETIC_PRIVATE_HEADER_BODY_TOKEN';
+ const error=(over:any={})=>({method:'error',params:{threadId,turnId,willRetry:true,error:{message:secret,codexErrorInfo:'serverOverloaded',additionalDetails:secret},...over}});
+ test('pure projection is deterministic, does not mutate input or expose message/body/header/token/UUID',()=>{
+  const frame=error({[secret]:secret,headers:{Authorization:secret},body:secret});const original=structuredClone(frame);
+  const d=projectCodexDiagnosticFrame(frame,{threadId,turnId});expect(d).toMatchObject({method:'error',threadScope:'matches',turnScope:'matches',willRetry:'true',errorClass:'serverOverloaded',unknownKeys:3});
+  expect(projectCodexDiagnosticFrame(frame,{threadId,turnId})).toEqual(d);expect(frame).toEqual(original);
+  const encoded=JSON.stringify(d);for(const value of [secret,threadId,turnId,'Authorization','headers','body'])expect(encoded).not.toContain(value);
+ });
+ test.each([[true,'true'],[false,'false'],[undefined,'invalid'],['true','invalid'],[secret,'invalid']] as const)('willRetry %j maps only to enum %s',(value,expected)=>{
+  expect(projectCodexDiagnosticFrame(error({willRetry:value})).willRetry).toBe(expected);
+ });
+ test('missing/null/foreign/unbound IDs are scope categories only, never identity evidence',()=>{
+  expect(projectCodexDiagnosticFrame(error(),{threadId:other,turnId:other})).toMatchObject({threadScope:'foreign',turnScope:'foreign'});
+  expect(projectCodexDiagnosticFrame(error())).toMatchObject({threadScope:'unbound',turnScope:'unbound'});
+  expect(projectCodexDiagnosticFrame({method:'error',params:{threadId:null,turnId:null}})).toMatchObject({threadScope:'null',turnScope:'null',willRetry:'absent'});
+  expect(projectCodexDiagnosticFrame({method:'error',params:{}})).toMatchObject({threadScope:'absent',turnScope:'absent'});
+ });
+ for(const [info,expected]of [['unauthorized','unauthorized'],[secret,'[other]'],[null,'null'],[{responseStreamDisconnected:{httpStatusCode:503}},'responseStreamDisconnected'],[{responseStreamDisconnected:{httpStatusCode:secret}},'[other]'],[{responseStreamDisconnected:{headers:secret}},'[other]'],[{[secret]:{message:secret}},'[other]'],[{responseStreamDisconnected:{},httpConnectionFailed:{}},'[other]'],[{activeTurnNotSteerable:{turnKind:'compact'}},'activeTurnNotSteerable'],[{activeTurnNotSteerable:{turnKind:secret}},'[other]']]as const)test('class projects fixed enum only '+String(expected),()=>{
+  const d=projectCodexDiagnosticFrame(error({error:{message:secret,codexErrorInfo:info}}));expect(d.errorClass).toBe(expected);expect(JSON.stringify(d)).not.toContain(secret);
+ });
+ test('nested terminal status/itemsView/error and systemError status have bounded projections',()=>{
+  const d=projectCodexDiagnosticFrame({method:'turn/completed',params:{threadId,turn:{id:turnId,status:'completed',itemsView:'summary',items:[{text:secret}],error:{message:secret,codexErrorInfo:'internalServerError'}}}},{threadId,turnId});
+  expect(d).toMatchObject({turnScope:'matches',status:'completed',itemsView:'summary',errorClass:'internalServerError'});expect(JSON.stringify(d)).not.toContain(secret);
+  expect(projectCodexDiagnosticFrame({method:'thread/status/changed',params:{threadId,status:{type:'systemError',message:secret}}},{threadId}).status).toBe('systemError');
+  expect(projectCodexDiagnosticFrame({method:secret,params:{status:secret,turn:{status:secret,itemsView:secret}}}).status).toBe('[other]');
+ });
+ test('session preserves safe lastError through final completion; cloned output cannot mutate internal telemetry',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'error',error().params);await tick();
+  expect(h.session.diagnostics().lastError).toMatchObject({threadScope:'matches',turnScope:'matches',willRetry:'true',errorClass:'serverOverloaded'});
+  complete(h.wire);await pending;const d=h.session.diagnostics();expect(d.lastTerminal).toMatchObject({status:'completed',itemsView:'full',turnScope:'matches'});expect(d.timeout).toBe('none');
+  d.lastError!.paramsKeys.push(secret);expect(JSON.stringify(h.session.diagnostics())).not.toContain(secret);expect(JSON.stringify(h.session.diagnostics())).not.toContain(threadId);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('foreign error remains rejected and is labelled foreign, never upgraded to an accepted retry',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'error',error({threadId:other,turnId:other}).params);await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.session.diagnostics().lastError).toMatchObject({threadScope:'foreign',turnScope:'foreign',willRetry:'true'});
+ });
+ test('systemError retains safe status and rejects; no raw error output',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/status/changed',{threadId,status:{type:'systemError',message:secret}});await expect(pending).rejects.toThrow('native_thread_error');expect(h.session.diagnostics().lastTerminal?.status).toBe('systemError');expect(JSON.stringify(h.session.diagnostics())).not.toContain(secret);
+ });
+ test('turn and RPC timeout categories contain no error text and do not change timeout behavior',async()=>{
+  const h=fixture({}, {timeoutMs:25}),{pending}=await running(h);await expect(pending).rejects.toThrow('turn_timeout');expect(h.session.diagnostics().timeout).toBe('turn');
+  const opening=fixture({}, {timeoutMs:25});opening.wire.onSend=()=>{};await expect(opening.session.open()).rejects.toThrow('protocol_timeout');expect(opening.session.diagnostics().timeout).toBe('rpc');
+ });
+});
+
+test('current-turn diagnostics reset historical error/terminal only when a new turn is admitted',async()=>{
+ const h=fixture(),{pending}=await running(h);event(h.wire,'error',{threadId,turnId,willRetry:true,error:{message:'synthetic',codexErrorInfo:'serverOverloaded'}});complete(h.wire);await pending;
+ expect(h.session.diagnostics().lastError?.errorClass).toBe('serverOverloaded');expect(h.session.diagnostics().lastTerminal?.status).toBe('completed');
+ await expect(h.session.turn('op-one','replay')).rejects.toThrow('operation_replay');expect(h.session.diagnostics().lastError).toBeDefined();
+ h.wire.onSend=()=>{};const next=h.session.turn('second-turn','next');next.catch(()=>{});
+ expect(h.session.diagnostics().lastError).toBeUndefined();expect(h.session.diagnostics().lastTerminal).toBeUndefined();expect(h.session.diagnostics().lastFrame).toBeUndefined();
+ await tick();const request=h.wire.frames.at(-1)!;h.wire.push({id:request.id,result:{turn:turn()}});await tick();complete(h.wire);await next;
+ expect(h.session.diagnostics().lastError).toBeUndefined();expect(h.session.diagnostics().lastTerminal?.status).toBe('completed');expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(2);
+});
+
+describe('Full pinned notification names are diagnostic-only',()=>{
+ test.skipIf(!existsSync(schemaRoot))('every actual ServerNotification method enum projects without granting support',()=>{
+  const schema=JSON.parse(readFileSync(join(schemaRoot,'ServerNotification.json'),'utf8'));const methods=schema.oneOf.flatMap((v:any)=>v.properties?.method?.enum??[]);
+  expect(methods).toHaveLength(85);for(const method of methods)expect(projectCodexDiagnosticFrame({method,params:{threadId}},{threadId}).method).toBe(method);
+  expect(projectCodexDiagnosticFrame({method:'unregistered-secret-method',params:{}}).method).toBe('[unsupported]');
+ });
+ test.each(['thread/archived','thread/deleted','thread/closed','thread/reverted','thread/goal/cleared','thread/queue/changed'])('recognizing %s in telemetry does not accept it after turn/start',async method=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,method,{threadId});await expect(pending).rejects.toMatchObject({code:'unsupported_notification',uncertain:true});
+  const d=h.session.diagnostics();expect(d.lastFrame).toMatchObject({method,threadScope:'matches',turnScope:'absent'});expect(JSON.stringify(d)).not.toContain(threadId);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('known lifecycle method with foreign scope is still observed as foreign and rejected',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/queue/changed',{threadId:other});await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.session.diagnostics().lastFrame).toMatchObject({method:'thread/queue/changed',threadScope:'foreign'});
+ });
+});
+
+describe('Strict informational unarchived lifecycle',()=>{
+ test('verified exact-thread unarchived after turn/start does not grant completion or clear pending work',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'item/started',{threadId,turnId,item:{type:'mcpToolCall',id:'pending-lifecycle'}});const before=structuredClone(h.wire.frames);
+  event(h.wire,'thread/unarchived',{threadId});await tick();expect(h.session.diagnostics().broken).toBe(false);expect(h.session.idle).toBe(false);expect(h.wire.frames).toEqual(before);
+  complete(h.wire);await expect(pending).rejects.toThrow('turn_not_safely_completed');
+ });
+ test('pending exact resume permits matching unarchived without establishing identity; all response identity checks remain',async()=>{
+  const h=fixture();let resume:any;h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/resume')resume=f;};
+  const opening=h.session.open(threadId);await tick();event(h.wire,'thread/unarchived',{threadId});await tick();expect(h.session.idle).toBe(false);expect(h.session.diagnostics().broken).toBe(false);
+  h.wire.push({id:resume.id,result:{...opened(),thread:{...thread(),id:other}}});await expect(opening).rejects.toThrow('thread_identity_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+ });
+ test('unarchived observation after open permits normal exact final only',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/unarchived',{threadId});await tick();complete(h.wire);expect((await pending).state).toBe('completed');expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const params of [{},{threadId:null},{threadId:7},{threadId:'not-uuid'},{threadId:other},{threadId,turnId},{threadId,approvalPolicy:'never'}])test('unarchived malformed/foreign/scope fields fail closed '+JSON.stringify(params),async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/unarchived',params);await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.session.idle).toBe(false);
+ });
+ test('no identity may be established by an event before initialize or on fresh startup before response',async()=>{
+  for(const early of [true,false]){const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize'){if(early)event(h.wire,'thread/unarchived',{threadId});h.wire.push({id:f.id,result:init});}if(f.method==='thread/start')event(h.wire,'thread/unarchived',{threadId});};await expect(h.session.open()).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);}
+ });
+ test.skipIf(!existsSync(schemaRoot))('informational fixture validates pinned unarchived schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/ThreadUnarchivedNotification.json'),'utf8'));expect(schemaCheck({threadId},s,s)).toBe(true);});
 });

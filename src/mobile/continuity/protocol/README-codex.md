@@ -4,7 +4,7 @@
 
 ## API
 
-`new CodexProtocolSession(wire, policy, hooks?)` implements `NativeProtocolSession` จาก `types.ts` มี `open(nativeId?)`, `turn(operationId,text)`, `idle`, `pendingApproval`, `close()`, `diagnostics()` (concrete Codex instance เท่านั้น)
+`new CodexProtocolSession(wire, policy, hooks?)` implements `NativeProtocolSession` จาก `types.ts` มี `open(nativeId?)`, `turn(operationId,text)`, `idle`, `pendingApproval`, `close()`, `diagnostics()` (concrete Codex instance เท่านั้น) และ pure `projectCodexDiagnosticFrame(frame, {threadId?,turnId?})`
 
 `policy.agent` ต้อง codex; cwd/home ต้อง normalized absolute paths; model/route ต้องมีค่า และ **Codex require modelProvider** เพื่อเทียบ expected provider จริง timeout1..300000ms Policyเป็น trusted host snapshot ไม่รับจาก HTTP/model และไม่ส่ง raw config/caller overrides
 
@@ -76,20 +76,38 @@ Intermediateหมายถึงnativeกำลังretryเดิม ไม�
 
 Root run1794153986102 safe traceเดิมไม่มีactualwillRetry value จึงไม่อ้างpatchแก้rootcauseของrunนั้น Rootเพิ่มsafeprojectionสำหรับfuturefreshoperationเอง ไม่มีnative/replayในงานนี้
 
+## Pure safe telemetry และ current-turn scope
+
+8 พ.ย. 69 `projectCodexDiagnosticFrame(frame, expected?)` เป็น pure projection ไม่มีI/O/write/inputmutation คืนเฉพาะknownmethod/keynames+unknowncount, thread/turn equalitycategories absent/null/unbound/matches/foreign, willRetry absent/true/false/invalid, fixederrorclassificationจากcodexErrorInfo, nestedterminal/systemError status, itemsView enums Unknownextension/string/object/fieldsไม่ถูกecho; structuredclassต้องrecognizedkeyหนึ่งอันและvalid bounded HTTPstatus shape หรือ known turnKindก่อน classify ไม่คืนHTTPstatusvalue/rawmessage/headers/body/token/UUID
+
+`diagnostics()` เพิ่ม timeout none/turn/rpc จากknownfailurecode, cloned lastError/lastTerminal observations แยกจากlastFrameเพื่อไม่ถูกpassiveframeทับ lastTerminalครอบterminalnotificationและsystemError observation **ไม่ใช่proofว่าcompleted/accepted** ค่าforeign/unboundและmalformedframeยังรายงานเป็นobservationได้ แต่guardเดิมยังreject ไม่ใช้telemetryเป็นauthority
+
+เมื่อadmitturnใหม่หลังvalidation/replaychecks ก่อนturn/start ให้resetเฉพาะlastError/lastTerminal/lastFrame ไม่clearpending/approval/nativeworkstate Invalid/replayedrequestไม่resetหลักฐาน ข้อมูลเป็นcurrentturnเท่านั้น ไม่ใช่sessionhistoricalarchive ไม่มีlogเองและไม่มีการเก็บrequestID/header/rawpayloadหรือเปลี่ยนprovider/env/args
+
+## Pinned notification diagnostic names และ unarchived lifecycle
+
+8 พ.ย. 69 diagnosticMethods รู้จักครบ85 method enums จาก saved exact0.164 `ServerNotification.json` แบบstaticallowlist ไม่มีI/Oตอนimport ไม่ใช้รายการนี้เป็นguardallowlist Unknownmethodนอกpinยังmasked Unsupportedknownmethodแสดงชื่อenumได้แต่ยังpoisonตามเดิม ไม่มีblanketpass
+
+รองรับเฉพาะ `thread/unarchived` informational shape `{threadId:string}` closedkeys/validUUID ต้องตรงverifiedidentity หรือ pendingexactthread/resumeที่ผ่านinitializeresponseและมีexpectedNativeId ไม่สร้างidentityจากeventเอง Fresh startupก่อนidentity/foreign/malformed/extrascopefields reject ระหว่างactiveturnไม่clearitems/approval ไม่grantready/completion ไม่ส่งwire Sourceปกติemitหลังunarchiveสำเร็จในthread_processor.rs806–818; ไม่ได้พิสูจน์ว่าทุกresume/firstturnต้องemit Closed/deleted/reverted/archived/queuechanged/goalcleared/unknownยังfailclosed
+
+Rootแก้ข้อมูลrun1794156282776แล้ว: resumeมีopenACKและturnclaimsuncertainสองระดับ/locks2 **phaseopenจากdiagnosticsหลังpoisonไม่ใช่หลักฐานว่ายังไม่ส่งuser** เพราะactiveถูกclearได้ ต้องดูexactnative/trace ไม่resendoldturnหรือclearoldlocks ผู้เขียนไม่native runนี้และไม่ฟันธงว่าunknownคือunarchivedจากkeysอย่างเดียว
+
 ## Tests
 
-`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด189pass/0fail/591expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
+`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด232pass/0fail/800expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
 
 Fixturesใช้shapeจากschemaที่ทีม2generateด้วยpinnedbinary0.164.0 และมีoptionaltestตรวจactualgeneratedschemasในvault เมื่อartifactไม่มีจะskipschema-artifacttestหนึ่งเคส ไม่อ้างschema-artifactcoverageบนเครื่องที่ไม่มีไฟล์นั้น Validatorสำหรับfixturesครอบrequired/type/enum/refs/unions/arrayitems ไม่ใช่JSONSchemaengineเต็มรูปแบบ
 
-รายงาน/commands/logs/hash ล่าสุด: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX-WILLRETRY-20261108.md`
+รายงาน/commands/logs/hash ล่าสุด: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX-LIFECYCLE-20261108.md`
 
-Independent review ก่อน willRetry delta p4: `PROTOCOL-CODEX-HYDRATION-REVIEW.md` ปิด latest notice delta source5a28172/tests881c1271 ไม่มี new blocker ตามรายงาน p4; P1 immutable terminal/P2 optional model closure คงอยู่ การ review นั้นไม่ใช่ native acceptance ส่วน willRetry delta189testsอยู่ระหว่างส่งp4review ไม่อ้างว่าปิดแล้ว
+Independent review ก่อน telemetry delta p4: `PROTOCOL-CODEX-HYDRATION-REVIEW.md` ปิด latest notice delta source5a28172/tests881c1271 ไม่มี new blocker ตามรายงาน p4; P1 immutable terminal/P2 optional model closure คงอยู่ การ review นั้นไม่ใช่ native acceptance willRetry delta8f304452/8ebf022f p4closedตาม `PROTOCOL-CODEX-TRANSIENT-ERROR-REVIEW.md` telemetrydelta401277c1/684f3187/d0a6a72f p4closedตาม `PROTOCOL-CODEX-OBSERVED-REVIEW.md` ส่วน lifecycledelta232testsนี้ส่งreviewใหม่ ไม่อ้างclosureเก่าครอบdeltaใหม่
 
 ## ประวัติ
 
 | วันที่ | ผู้ทำ | รายการ |
 |---|---|---|
+| 8 พ.ย. 69 | Codex ensure | เพิ่ม diagnosticknownnotifications85enums และ strict scoped informational unarchived พร้อม232DItests |
+| 8 พ.ย. 69 | Codex ensure | เพิ่ม pure safe error/terminal/systemError/timeout telemetry และresetcurrentturn snapshots พร้อม212DItests/negativeleakage/exactscope |
 | 8 พ.ย. 69 | Codex ensure | รองรับ scoped bounded native willRetry true โดยไม่resetdeadline/clear pending/resend พร้อม189DItests |
 | 8 พ.ย. 69 | Codex ensure | จำกัด deprecationNotice เพิ่มเฉพาะ pending exact resume พร้อม outside-window/duplicate/scope/wrong-response negatives 153 tests |
 | 8 พ.ย. 69 | Codex ensure | รองรับ bounded exact-pin informational deprecationNotice เฉพาะ pending hydration read พร้อม negative tests |

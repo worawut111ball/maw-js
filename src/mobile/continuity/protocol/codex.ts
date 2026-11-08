@@ -15,11 +15,47 @@ const toolTypes=new Set(['commandExecution','fileChange','mcpToolCall','dynamicT
 const passive=new Set(['thread/started','thread/name/updated','thread/tokenUsage/updated','account/rateLimits/updated','item/agentMessage/delta','item/reasoning/textDelta','item/reasoning/summaryTextDelta','item/reasoning/summaryPartAdded','item/commandExecution/outputDelta','item/fileChange/outputDelta','item/mcpToolCall/progress','turn/diff/updated','turn/plan/updated']);
 export interface CodexProtocolDiagnostics {
   phase:'new'|'opening'|'open'|'turn';broken:boolean;idle:boolean;pendingApproval:boolean;code?:string;
+  timeout:'none'|'turn'|'rpc';lastError?:CodexDiagnosticFrame;lastTerminal?:CodexDiagnosticFrame;
   lastFrame?:{kind:'notification'|'request'|'response'|'invalid';method:string;paramsKeys:string[];unknownKeys:number;
-    threadScope:'absent'|'null'|'unbound'|'matches'|'foreign';status:string;errorType:string;failureReasonType:string};
+    threadScope:'absent'|'null'|'unbound'|'matches'|'foreign';turnScope:'absent'|'null'|'unbound'|'matches'|'foreign';status:string;errorType:string;failureReasonType:string;
+    willRetry:'absent'|'true'|'false'|'invalid';errorClass:string;itemsView:'absent'|'full'|'summary'|'notLoaded'|'[other]'};
 }
-const diagnosticMethods=new Set([...passive,'remoteControl/status/changed','mcpServer/startupStatus/updated','thread/status/changed','error','model/rerouted','turn/started','turn/completed','item/started','item/completed','item/commandExecution/requestApproval','item/fileChange/requestApproval']);
+export type CodexDiagnosticFrame=NonNullable<CodexProtocolDiagnostics['lastFrame']>;
+// Exact 0.164 ServerNotification method enums: diagnostic recognition only, never a notification guard allowlist.
+const diagnosticNotificationMethods=new Set(["error","thread/started","thread/status/changed","thread/readState/changed","thread/archived","thread/deleted","thread/unarchived","thread/closed","thread/reverted","skills/changed","thread/name/updated","thread/attachment/updated","thread/goal/updated","thread/prediction/updated","thread/goal/cleared","thread/queue/changed","project/changed","thread/project/updated","thread/environment/connected","thread/environment/disconnected","thread/settings/updated","thread/tokenUsage/updated","turn/started","hook/started","turn/completed","hook/completed","turn/diff/updated","turn/plan/updated","item/started","item/autoApprovalReview/started","item/autoApprovalReview/completed","autoApprovalReview/strictReviewRequired","item/completed","item/agentMessage/delta","item/plan/delta","command/exec/outputDelta","process/outputDelta","process/exited","item/commandExecution/outputDelta","item/commandExecution/terminalInteraction","item/fileChange/outputDelta","item/fileChange/patchUpdated","serverRequest/resolved","item/mcpToolCall/progress","mcpServer/oauthLogin/completed","mcpServer/startupStatus/updated","mcpServer/event/stream/notification","account/updated","account/gatewayOAuth/changed","account/rateLimits/updated","app/list/updated","remoteControl/status/changed","externalAgentConfig/import/progress","externalAgentConfig/import/completed","fs/changed","item/reasoning/summaryTextDelta","item/reasoning/summaryPartAdded","item/reasoning/textDelta","thread/compacted","model/rerouted","model/verification","modelProvider/authRecoveryStarted","modelProvider/authRecoveryCompleted","turn/moderationMetadata","model/safetyBuffering/updated","warning","guardianWarning","deprecationNotice","configWarning","fuzzyFileSearch/sessionUpdated","fuzzyFileSearch/sessionCompleted","thread/realtime/started","thread/realtime/itemAdded","thread/realtime/item/started","thread/realtime/item/transcript/delta","thread/realtime/item/completed","thread/realtime/transcript/delta","thread/realtime/transcript/done","thread/realtime/outputAudio/delta","thread/realtime/sdp","thread/realtime/error","thread/realtime/closed","windows/worldWritableWarning","windowsSandbox/setupCompleted","account/login/completed"]);
+const diagnosticMethods=new Set([...diagnosticNotificationMethods,'item/commandExecution/requestApproval','item/fileChange/requestApproval']);
 const diagnosticCodes=new Set(['approval_capacity','approval_replay','approval_scope_mismatch','approval_write_failed','final_text_missing','initialize_identity_mismatch','invalid_native_item','invalid_protocol_frame','invalid_request_id','invalid_response','invalid_response_id','invalid_startup_notification','invalid_mcp_startup_notification','native_mcp_startup_failed','native_item_failed','native_item_limit','native_thread_error','native_turn_error','model_rerouted','notification_scope_mismatch','permission_policy_unverified','protocol_closed','protocol_disconnected','protocol_timeout','protocol_write_failed','thread_identity_mismatch','tool_identity_mismatch','turn_identity_mismatch','turn_not_safely_completed','turn_timeout','turn_start_failed','protocol_open_failed','unexpected_response','unsupported_notification','unsupported_server_request']);
+const errorClasses=new Set(['contextWindowExceeded','sessionBudgetExceeded','usageLimitExceeded','rateLimitExceeded','flexUnavailable','serverOverloaded','cyberPolicy','misalignmentPolicyViolation','tooManyDenials','internalServerError','unauthorized','badRequest','threadRollbackFailed','sandboxError','other']);
+const structuredErrorClasses=new Set(['httpConnectionFailed','responseStreamConnectionFailed','responseStreamDisconnected','responseTooManyFailedAttempts','activeTurnNotSteerable']);
+/** Pure enum projection. Input/expected IDs stay private; no body/header/message/unknown key or value is returned. */
+export function projectCodexDiagnosticFrame(frame:unknown,expected:{threadId?:string;turnId?:string}={}):CodexDiagnosticFrame {
+  const f=object(frame)?frame:undefined,p=object(f?.params)?f.params:undefined;
+  const allowed=['threadId','turnId','status','name','error','failureReason','serverName','installationId','environmentId','item','turn','willRetry'];
+  const keys=p?Object.keys(p):[],scope=(value:any,present:boolean,id?:string):CodexDiagnosticFrame['threadScope']=>!present?'absent':value===null?'null':!id?'unbound':value===id?'matches':'foreign';
+  const turn=object(p?.turn)?p.turn:undefined,turnId=p&&Object.hasOwn(p,'turnId')?p.turnId:turn?.id;
+  const status=p?.status??turn?.status,statusValue=object(status)?status.type:status;
+  const e=object(p?.error)?p.error:object(turn?.error)?turn.error:undefined,info=e?.codexErrorInfo;
+  let errorClass='absent';
+  if(e&&Object.hasOwn(e,'codexErrorInfo')){
+    errorClass=info===null?'null':typeof info==='string'&&errorClasses.has(info)?info:'[other]';
+    if(object(info)){
+      const names=Object.keys(info),name=names[0],detail=info[name];
+      if(names.length===1&&structuredErrorClasses.has(name)&&object(detail)){
+        const valid=name==='activeTurnNotSteerable'?Object.keys(detail).every(k=>k==='turnKind')&&['review','compact'].includes(detail.turnKind)
+          :Object.keys(detail).every(k=>k==='httpStatusCode')&&(detail.httpStatusCode==null||Number.isInteger(detail.httpStatusCode)&&detail.httpStatusCode>=0&&detail.httpStatusCode<=65535);
+        if(valid)errorClass=name;
+      }
+    }
+  }
+  return {kind:!f?'invalid':typeof f.method==='string'?(f.id===undefined?'notification':'request'):'response',
+    method:typeof f?.method==='string'?(diagnosticMethods.has(f.method)?f.method:'[unsupported]'):'[response]',paramsKeys:keys.filter(k=>allowed.includes(k)),unknownKeys:keys.filter(k=>!allowed.includes(k)).length,
+    threadScope:scope(p?.threadId,!!p&&Object.hasOwn(p,'threadId'),expected.threadId),turnScope:scope(turnId,!!p&&(Object.hasOwn(p,'turnId')||!!turn&&Object.hasOwn(turn,'id')),expected.turnId),
+    status:['disabled','connecting','connected','errored','starting','ready','failed','cancelled','idle','active','systemError','notLoaded','inProgress','completed','interrupted'].includes(statusValue)?statusValue:'[other]',
+    errorType:!p||!Object.hasOwn(p,'error')?'absent':p.error===null?'null':typeof p.error,
+    failureReasonType:!p||!Object.hasOwn(p,'failureReason')?'absent':p.failureReason===null?'null':p.failureReason==='reauthenticationRequired'?'reauthenticationRequired':'[other]',
+    willRetry:!p||!Object.hasOwn(p,'willRetry')?'absent':p.willRetry===true?'true':p.willRetry===false?'false':'invalid',errorClass,
+    itemsView:!turn||!Object.hasOwn(turn,'itemsView')?'absent':['full','summary','notLoaded'].includes(turn.itemsView)?turn.itemsView:'[other]'};
+}
 export class CodexProtocolSession implements NativeProtocolSession {
   private readonly policy:ProtocolPolicy;
   private readonly hooks:ProtocolHooks;
@@ -32,6 +68,8 @@ export class CodexProtocolSession implements NativeProtocolSession {
   private resumeDeprecationSeen=false;
   private lastFrame?:CodexProtocolDiagnostics['lastFrame'];
   private failureFrame?:CodexProtocolDiagnostics['lastFrame'];
+  private lastError?:CodexDiagnosticFrame;
+  private lastTerminal?:CodexDiagnosticFrame;
   private pumping=false;
   private closing?:Promise<void>;
   private serial=0;
@@ -49,17 +87,14 @@ export class CodexProtocolSession implements NativeProtocolSession {
   /** Value-free snapshots only. No wire writes, raw method/IDs/names/body/error text or readiness grants. */
   diagnostics():CodexProtocolDiagnostics {
     return {phase:this.active?'turn':this.identity?'open':this.opening?'opening':'new',broken:!!this.broken,idle:this.idle,pendingApproval:this.pendingApproval,
+      timeout:this.broken?.code==='turn_timeout'?'turn':this.broken?.code==='protocol_timeout'?'rpc':'none',
+      ...(this.lastError?{lastError:structuredClone(this.lastError)}:{}),...(this.lastTerminal?{lastTerminal:structuredClone(this.lastTerminal)}:{}),
       ...(this.broken?{code:diagnosticCodes.has(this.broken.code)?this.broken.code:'[unclassified]'}:{}),...(this.failureFrame??this.lastFrame?{lastFrame:structuredClone(this.failureFrame??this.lastFrame)}:{})};
   }
   private observeFrame(frame:any){
-    const p=object(frame?.params)?frame.params:undefined,allowed=['threadId','turnId','status','name','error','failureReason','serverName','installationId','environmentId','item','turn'];
-    const keys=p?Object.keys(p):[],thread=this.identity?.nativeId??this.openingThreadId??this.expectedNativeId;
-    this.lastFrame={kind:!object(frame)?'invalid':typeof frame.method==='string'?(frame.id===undefined?'notification':'request'):'response',
-      method:typeof frame?.method==='string'?(diagnosticMethods.has(frame.method)?frame.method:'[unsupported]'):'[response]',paramsKeys:keys.filter(k=>allowed.includes(k)),unknownKeys:keys.filter(k=>!allowed.includes(k)).length,
-      threadScope:!p||!Object.hasOwn(p,'threadId')?'absent':p.threadId===null?'null':!thread?'unbound':p.threadId===thread?'matches':'foreign',
-      status:['disabled','connecting','connected','errored','starting','ready','failed','cancelled'].includes(p?.status)?p.status:'[other]',
-      errorType:!p||!Object.hasOwn(p,'error')?'absent':p.error===null?'null':typeof p.error,
-      failureReasonType:!p||!Object.hasOwn(p,'failureReason')?'absent':p.failureReason===null?'null':p.failureReason==='reauthenticationRequired'?'reauthenticationRequired':'[other]'};
+    this.lastFrame=projectCodexDiagnosticFrame(frame,{threadId:this.identity?.nativeId??this.openingThreadId??this.expectedNativeId,turnId:this.active?.turnId});
+    if(frame?.method==='error')this.lastError=structuredClone(this.lastFrame);
+    if(frame?.method==='turn/completed'||frame?.method==='thread/status/changed'&&frame?.params?.status?.type==='systemError')this.lastTerminal=structuredClone(this.lastFrame);
   }
   private poison(code:string,uncertain=!!this.active||this.opening){
     if(this.broken)return this.broken;
@@ -102,6 +137,7 @@ export class CodexProtocolSession implements NativeProtocolSession {
     if(!token(operationId,128)||typeof text!=='string'||!text.trim()||text.includes('\0')||Buffer.byteLength(text)>32_000)throw new ProtocolError('invalid_turn');
     if(this.operations.has(operationId))throw new ProtocolError('operation_replay');
     if(this.operations.size>=10_000)throw new ProtocolError('operation_capacity');
+    this.lastError=undefined;this.lastTerminal=undefined;this.lastFrame=undefined; // Current admitted-turn telemetry only; no native work state is cleared.
     this.operations.add(operationId);
     const promise=new Promise<ProtocolTurn>((resolve,reject)=>{this.active={operationId,acked:false,pending:new Map(),items:new Map(),resolve,reject,timer:setTimeout(()=>this.poison('turn_timeout',true),this.policy.timeoutMs)};});
     const active=this.active!;
@@ -143,6 +179,12 @@ export class CodexProtocolSession implements NativeProtocolSession {
     return active;
   }
   private notification(method:string,p:any){
+    if(method==='thread/unarchived'){
+      const selected=this.identity?.nativeId??(this.opening&&this.initializeResultSeen&&[...this.rpc.values()].some(v=>v.method==='thread/resume')?this.expectedNativeId:undefined);
+      if(!object(p)||Object.keys(p).length!==1||!Object.hasOwn(p,'threadId')||typeof p.threadId!=='string'||!UUID.test(p.threadId))throw this.poison('invalid_protocol_frame');
+      if(!selected||p.threadId!==selected)throw this.poison('notification_scope_mismatch');
+      return; // Exact-thread informational lifecycle only; no identity, readiness or turn-state change.
+    }
     if(method==='deprecationNotice'){
       // Exact 0.164 informational schema, limited to one notice per specific deprecated RPC window.
       const active=this.active;
