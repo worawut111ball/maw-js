@@ -461,7 +461,7 @@ describe('Full pinned notification names are diagnostic-only',()=>{
   expect(methods).toHaveLength(85);for(const method of methods)expect(projectCodexDiagnosticFrame({method,params:{threadId}},{threadId}).method).toBe(method);
   expect(projectCodexDiagnosticFrame({method:'unregistered-secret-method',params:{}}).method).toBe('[unsupported]');
  });
- test.each(['thread/archived','thread/deleted','thread/closed','thread/reverted','thread/goal/cleared','thread/queue/changed'])('recognizing %s in telemetry does not accept it after turn/start',async method=>{
+ test.each(['thread/archived','thread/deleted','thread/closed','thread/reverted','thread/queue/changed'])('recognizing %s in telemetry does not accept it after turn/start',async method=>{
   const h=fixture(),{pending}=await running(h);event(h.wire,method,{threadId});await expect(pending).rejects.toMatchObject({code:'unsupported_notification',uncertain:true});
   const d=h.session.diagnostics();expect(d.lastFrame).toMatchObject({method,threadScope:'matches',turnScope:'absent'});expect(JSON.stringify(d)).not.toContain(threadId);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
  });
@@ -491,4 +491,45 @@ describe('Strict informational unarchived lifecycle',()=>{
   for(const early of [true,false]){const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize'){if(early)event(h.wire,'thread/unarchived',{threadId});h.wire.push({id:f.id,result:init});}if(f.method==='thread/start')event(h.wire,'thread/unarchived',{threadId});};await expect(h.session.open()).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);}
  });
  test.skipIf(!existsSync(schemaRoot))('informational fixture validates pinned unarchived schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/ThreadUnarchivedNotification.json'),'utf8'));expect(schemaCheck({threadId},s,s)).toBe(true);});
+});
+
+describe('Strict informational goal cleared lifecycle',()=>{
+ test('observed post-resume goal-cleared frame preserves verified identity and sends no user input',async()=>{
+  const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/resume'){h.wire.push({id:f.id,result:opened()});event(h.wire,'thread/goal/cleared',{threadId});}};
+  const identity=await h.session.open(threadId);await tick();expect(identity.nativeId).toBe(threadId);expect(h.session.diagnostics().broken).toBe(false);expect(h.session.idle).toBe(true);expect(h.session.diagnostics().lastFrame).toMatchObject({method:'thread/goal/cleared',threadScope:'matches'});
+  expect(h.wire.frames.map(f=>f.method)).toEqual(['initialize','initialized','thread/resume']);
+ });
+ test('pending exact-resume goal-cleared is not an open ACK and cannot establish identity or waive native mismatch',async()=>{
+  const h=fixture();let request:any,done=false;h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/resume')request=f;};
+  const opening=h.session.open(threadId);opening.catch(()=>{});void opening.then(()=>{done=true;},()=>{});await tick();event(h.wire,'thread/goal/cleared',{threadId});await tick();expect(done).toBe(false);expect(h.session.idle).toBe(false);expect(h.session.diagnostics().broken).toBe(false);
+  h.wire.push({id:request.id,result:{...opened(),thread:{...thread(),id:other}}});await expect(opening).rejects.toThrow('thread_identity_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+ });
+ test('active goal-cleared changes neither deadline, pending tools, wire nor completion',async()=>{
+  const h=fixture(),{pending}=await running(h);let done=false;void pending.then(()=>{done=true;},()=>{});event(h.wire,'item/started',{threadId,turnId,item:{type:'mcpToolCall',id:'still-pending'}});await tick();const before=structuredClone(h.wire.frames),timer=(h.session as any).active.timer;
+  event(h.wire,'thread/goal/cleared',{threadId});await tick();expect(done).toBe(false);expect(h.session.idle).toBe(false);expect((h.session as any).active.timer).toBe(timer);expect(h.wire.frames).toEqual(before);
+  complete(h.wire);await expect(pending).rejects.toThrow('turn_not_safely_completed');
+ });
+ test('goal-cleared cannot clear an outstanding approval or grant an approval',async()=>{
+  const h=fixture({approve:()=>new Promise(()=>{})}),{pending}=await running(h);approval(h.wire);await tick();event(h.wire,'thread/goal/cleared',{threadId});await tick();expect(h.session.pendingApproval).toBe(true);expect(h.wire.frames.some(f=>f.result?.decision==='accept')).toBe(false);complete(h.wire);await expect(pending).rejects.toThrow('turn_not_safely_completed');
+ });
+ test('goal-cleared alone has no final authority; normal exact terminal still required',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/goal/cleared',{threadId});await tick();expect(h.session.idle).toBe(false);complete(h.wire);expect((await pending).text).toBe(finalItem().text);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const params of [{},{threadId:null},{threadId:3},{threadId:'not-uuid'},{threadId:other},{threadId,turnId},{threadId,goal:{state:'completed'}},{threadId,ready:true},{threadId,result:'completed'},{threadId,approvalPolicy:'never'}])test('malformed/foreign/authority-bearing goal-cleared rejects '+JSON.stringify(params),async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'thread/goal/cleared',params);await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.session.idle).toBe(false);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('before-initialize and unbound fresh-start windows reject goal-cleared',async()=>{
+  for(const early of [true,false]){const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize'){if(early)event(h.wire,'thread/goal/cleared',{threadId});h.wire.push({id:f.id,result:init});}if(f.method==='thread/start')event(h.wire,'thread/goal/cleared',{threadId});};await expect(h.session.open()).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);}
+ });
+ test('unsupported goal update/unknown notifications remain rejected',async()=>{
+  for(const method of ['thread/goal/updated','thread/goal/unknown']){const h=fixture(),{pending}=await running(h);event(h.wire,method,{threadId});await expect(pending).rejects.toThrow('unsupported_notification');}
+ });
+ test.skipIf(!existsSync(schemaRoot))('goal-cleared fixture validates the actual saved exact-pin schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/ThreadGoalClearedNotification.json'),'utf8'));expect(schemaCheck({threadId},s,s)).toBe(true);});
+});
+
+test('goal-cleared queued after a matching resume UUID response cannot bypass response permission/model verification',async()=>{
+ for(const field of ['model','approvalPolicy']){
+  const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/resume'){const r:any=opened();r[field]=field==='model'?'wrong-model':'never';h.wire.push({id:f.id,result:r});event(h.wire,'thread/goal/cleared',{threadId});}};
+  await expect(h.session.open(threadId)).rejects.toThrow(field==='model'?'thread_identity_mismatch':'permission_policy_unverified');expect(h.session.idle).toBe(false);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+ }
 });

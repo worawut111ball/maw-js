@@ -88,17 +88,25 @@ Root run1794153986102 safe traceเดิมไม่มีactualwillRetry value
 
 8 พ.ย. 69 diagnosticMethods รู้จักครบ85 method enums จาก saved exact0.164 `ServerNotification.json` แบบstaticallowlist ไม่มีI/Oตอนimport ไม่ใช้รายการนี้เป็นguardallowlist Unknownmethodนอกpinยังmasked Unsupportedknownmethodแสดงชื่อenumได้แต่ยังpoisonตามเดิม ไม่มีblanketpass
 
-รองรับเฉพาะ `thread/unarchived` informational shape `{threadId:string}` closedkeys/validUUID ต้องตรงverifiedidentity หรือ pendingexactthread/resumeที่ผ่านinitializeresponseและมีexpectedNativeId ไม่สร้างidentityจากeventเอง Fresh startupก่อนidentity/foreign/malformed/extrascopefields reject ระหว่างactiveturnไม่clearitems/approval ไม่grantready/completion ไม่ส่งwire Sourceปกติemitหลังunarchiveสำเร็จในthread_processor.rs806–818; ไม่ได้พิสูจน์ว่าทุกresume/firstturnต้องemit Closed/deleted/reverted/archived/queuechanged/goalcleared/unknownยังfailclosed
+รองรับเฉพาะ `thread/unarchived` และ `thread/goal/cleared` informational shape `{threadId:string}` closedkeys/validUUID ต้องตรงverifiedidentity หรือ pendingexactthread/resumeที่ผ่านinitializeresponseและมีexpectedNativeId ไม่สร้างidentityจากeventเอง Fresh startupก่อนidentity/foreign/malformed/extrascopefields reject ระหว่างactiveturnไม่clearitems/approval ไม่grantready/completion ไม่ส่งwire Sourceปกติemitหลังunarchiveสำเร็จในthread_processor.rs806–818; ไม่ได้พิสูจน์ว่าทุกresume/firstturnต้องemit Closed/deleted/reverted/archived/queuechanged/goalupdated/unknownยังfailclosed
 
 Rootแก้ข้อมูลrun1794156282776แล้ว: resumeมีopenACKและturnclaimsuncertainสองระดับ/locks2 **phaseopenจากdiagnosticsหลังpoisonไม่ใช่หลักฐานว่ายังไม่ส่งuser** เพราะactiveถูกclearได้ ต้องดูexactnative/trace ไม่resendoldturnหรือclearoldlocks ผู้เขียนไม่native runนี้และไม่ฟันธงว่าunknownคือunarchivedจากkeysอย่างเดียว
 
+## Goal-cleared informational lifecycle — 9 พ.ย. 69
+
+Exact-pin `ThreadGoalClearedNotification` มีrequired threadId:string เพียงfieldเดียว Handlerใช้closedkeys/validUUIDตรงselectedidentityเหมือนunarchived ไม่เก็บgoal ไม่แก้goal/resultauthority ไม่clearitems/approval ไม่resetdeadline ไม่ส่งwire ไม่grantready/completion Goalupdated/unknownยังunsupported
+
+Selectedscopeคือverifiedidentity หรือopening exactresumeหลังinitializeที่pendingrequestอยู่ รวมresponsequeuedก่อนopencontinuation: responseUUIDต้องตรงexpectedNativeIdก่อนรับinformationalevent แต่ยังต้องverifyresponsemodel/provider/cwd/permissionsทั้งหมดก่อนคืนidentity ไม่รับfreshstartupก่อนverifiedidentity ไม่มีfallbackจากeventหรือเดาUUID
+
+Actualobserved1794159662698 boundarydiagnosticยืนยัน method thread/goal/cleared/params threadId/threadmatches/unsupportednotificationเท่านั้น Rootแจ้งjournalมีuncertainturnrecords/locks จึงห้ามอ้างว่าไม่ส่งresumeuserจากphaseopen/runtime_start_uncertain Nativeactualturnเป็นของRoot/ทีม2ตรวจ ไม่มีreplay/clearlocksในpatchนี้
+
 ## Tests
 
-`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด232pass/0fail/800expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
+`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด250pass/0fail/860expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
 
 Fixturesใช้shapeจากschemaที่ทีม2generateด้วยpinnedbinary0.164.0 และมีoptionaltestตรวจactualgeneratedschemasในvault เมื่อartifactไม่มีจะskipschema-artifacttestหนึ่งเคส ไม่อ้างschema-artifactcoverageบนเครื่องที่ไม่มีไฟล์นั้น Validatorสำหรับfixturesครอบrequired/type/enum/refs/unions/arrayitems ไม่ใช่JSONSchemaengineเต็มรูปแบบ
 
-รายงาน/commands/logs/hash ล่าสุด: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX-LIFECYCLE-20261108.md`
+รายงาน/commands/logs/hash ล่าสุด: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX-GOAL-CLEARED-20261109.md`
 
 Independent review ก่อน telemetry delta p4: `PROTOCOL-CODEX-HYDRATION-REVIEW.md` ปิด latest notice delta source5a28172/tests881c1271 ไม่มี new blocker ตามรายงาน p4; P1 immutable terminal/P2 optional model closure คงอยู่ การ review นั้นไม่ใช่ native acceptance willRetry delta8f304452/8ebf022f p4closedตาม `PROTOCOL-CODEX-TRANSIENT-ERROR-REVIEW.md` telemetrydelta401277c1/684f3187/d0a6a72f p4closedตาม `PROTOCOL-CODEX-OBSERVED-REVIEW.md` ส่วน lifecycledelta232testsนี้ส่งreviewใหม่ ไม่อ้างclosureเก่าครอบdeltaใหม่
 
@@ -106,6 +114,7 @@ Independent review ก่อน telemetry delta p4: `PROTOCOL-CODEX-HYDRATION-RE
 
 | วันที่ | ผู้ทำ | รายการ |
 |---|---|---|
+| 9 พ.ย. 69 | Codex ensure | รองรับstrict informational goal-cleared และqueued exactresume-response gap;250DItests ส่งp4reviewก่อนfinalfreeze |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม diagnosticknownnotifications85enums และ strict scoped informational unarchived พร้อม232DItests |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม pure safe error/terminal/systemError/timeout telemetry และresetcurrentturn snapshots พร้อม212DItests/negativeleakage/exactscope |
 | 8 พ.ย. 69 | Codex ensure | รองรับ scoped bounded native willRetry true โดยไม่resetdeadline/clear pending/resend พร้อม189DItests |

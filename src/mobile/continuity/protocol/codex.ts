@@ -179,8 +179,11 @@ export class CodexProtocolSession implements NativeProtocolSession {
     return active;
   }
   private notification(method:string,p:any){
-    if(method==='thread/unarchived'){
-      const selected=this.identity?.nativeId??(this.opening&&this.initializeResultSeen&&[...this.rpc.values()].some(v=>v.method==='thread/resume')?this.expectedNativeId:undefined);
+    if(method==='thread/unarchived'||method==='thread/goal/cleared'){
+      // A queued event may follow the resume response before open's continuation verifies it.
+      const resuming=this.opening&&this.initializeResultSeen&&!!this.expectedNativeId
+        &&([...this.rpc.values()].some(v=>v.method==='thread/resume')||this.openingThreadId===this.expectedNativeId);
+      const selected=this.identity?.nativeId??(resuming?this.expectedNativeId:undefined);
       if(!object(p)||Object.keys(p).length!==1||!Object.hasOwn(p,'threadId')||typeof p.threadId!=='string'||!UUID.test(p.threadId))throw this.poison('invalid_protocol_frame');
       if(!selected||p.threadId!==selected)throw this.poison('notification_scope_mismatch');
       return; // Exact-thread informational lifecycle only; no identity, readiness or turn-state change.
