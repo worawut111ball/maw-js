@@ -14,6 +14,8 @@ export interface ProtocolAdapterPorts {
   history(room:Room,binding:Binding):Promise<Omit<RoomEvent,'seq'>[]>;
   /** Exact native turn verification, never inferred from a model's acknowledgement text. */
   verifyContext(room:Room,binding:Binding,context:ContextDelivery,start:RuntimeStartReceipt):Promise<DeliveryReceipt>;
+  /** Revalidate trusted switch authority after awaited inspection, before closing the source. */
+  beforeSourceClose?(room:Room,target:AgentKind,context:ContextDelivery,candidate:ProtocolRuntimeCandidate):Promise<void>;
   timeoutMs:number;
 }
 export function protocolNamespace(b:ProtocolRuntimeBinding):string {
@@ -64,6 +66,7 @@ export class ProtocolContinuityAdapter implements Adapter {
     const source=this.host(room),before=await this.inspect(room);
     if(!room.bindings[room.active]||!same(before.binding,room.bindings[room.active]!)||!before.idle||before.pendingPermission)
       throw new ContinuityError('source_not_safe');
+    await this.ports.beforeSourceClose?.(structuredClone(room),target,structuredClone(context),candidate);
     // close waits for trusted exact owned exit; never infer exit from screen/EOF.
     await source.close();
     const next=this.ports.create();this.ports.install(room.id,next);

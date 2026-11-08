@@ -17,6 +17,19 @@ function fixture(){
  return {room,ports,order,entry,targetEntry,adapter:new ProtocolContinuityAdapter(ports),mismatch:()=>mismatch=true,exitFail:()=>exitFails=true};
 }
 const context={id:'op',text:'context',hash:'fixture-hash',throughSeq:0};
+test('revoked switch authority after deferred source inspection preserves the source',async()=>{
+ const h=fixture(),source=h.ports.runtime('r')!,inspect=source.inspect.bind(source);
+ let release!:()=>void,entered!:()=>void,revoked=false;
+ const waiting=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
+ source.inspect=async()=>{entered();await gate;return inspect();};
+ h.ports.beforeSourceClose=async(room,target,delivery,candidate)=>{
+  expect(room.id).toBe('r');expect(target).toBe('claude');expect(delivery.id).toBe(context.id);expect(candidate.tool).toBe('claude');
+  if(revoked)throw Error('permit revoked');
+ };
+ const running=h.adapter.launchWithContext(h.room,'claude',context);
+ await waiting;revoked=true;release();
+ await expect(running).rejects.toThrow('permit revoked');expect(h.order).toEqual([]);
+});
 test('owned source exits before target starts; receipt requires separate trusted verification',async()=>{
  const h=fixture();const result=await h.adapter.launchWithContext(h.room,'claude',context);
  expect(h.order).toEqual(['exit','install','start','verify']);expect(result.binding.generation).toMatch(/^protocol:claude:[a-f0-9]{64}:2$/);expect(result.receipt.state).toBe('acknowledged');
