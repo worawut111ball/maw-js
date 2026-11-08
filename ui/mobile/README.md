@@ -102,6 +102,14 @@ Lost ACK/reload ไม่มี auto-send/re-ID/retarget; ผู้ใช้ต�
 
 Working source เท่านั้น ห้าม copy `m.html` นี้ทั้งไฟล์ขึ้น dist แทน scoped production candidate; ไม่ได้ deploy ในงานรอบนี้
 
+### Bounded host acceptance purpose — 8 พ.ย. 69
+
+`capabilities.authorization` มาจาก host เท่านั้น: `purpose:production` ใช้ evidence gate เดิม; `purpose:bounded-acceptance` แสดง “โหมดทดสอบจำกัดขอบเขต” พร้อมห้อง/โมเดล/route/คงเหลือ/หมดอายุ (GMT+7) จาก API; actions ใช้ป้าย “สลับโมเดล”/“ส่งข้อความ” และ production ใช้ “โหมดใช้งานจริง”. Permit ID/opaque hash ใช้ guard ภายใน ไม่แสดง implementation metadata ใน product flow. Advertisement อ่านได้โดยไม่ consume ไม่ใช่ production certification และ UI ไม่ override ready/backends
+
+Fresh switch ต้องมี exact room/action และ advertised profile ที่ unique สำหรับ agent/model; text turn ต้องตรง agent/model/route และ namespace ของ `binding.generation` เพิ่มเติม Full opaque profile hash ให้ service ตรวจ. Missing/expired/revoked/exhausted/wrong-scope/ambiguous profile ปิด POST guards; modal stamp รวม authorization/ready/backends และ local expiry ปิด confirm เก่า โดยยัง revalidate API ก่อน effects จริง
+
+Read-only current/progress/events/exact operation/turn receipt แยกจากสิทธิ์ fresh switch/text: ห้อง managed ยังอ่านได้เมื่อ budget0 หรือ readyfalse ไม่ล้างประวัติเพียงเพราะ permit หมด. Switch0 แต่ text1 ส่ง text ได้เฉพาะ profile ที่ API อนุญาต; หมดทุก permit ยังอ่านผลเดิมได้โดยไม่ grant current delivery. ถ้า permit หมดระหว่างรอ ACK จะคง original draft ตาม guard แม้ exact receipt completed แล้ว ไม่ส่งซ้ำ
+
 ## ประวัติ
 
 | วันที่ | ใคร | แก้อะไร |
@@ -123,3 +131,4 @@ Status/capability changes ใน session เดิมอัปเดต controls
 | 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม header switch UI, explicit facts API, scoped capability, immutable intent/lookup และ regressions โดยไม่ deploy working source |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ optional owned transport/text turn/status, ปิด TUI fallback, เก็บไฟล์/draft และแก้ facts reference 1024 พร้อม browser fixtures |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | แก้ P1 cached room protocol identity ของ header switch; เพิ่ม actual owned inventory header/stale confirm regression และทวน acceptance fixtures โดยไม่รัน native |
+| 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ bounded authorization purpose/profile/action/expiry/budget guards แยก read-only state/history และเพิ่ม actual API/composition DI browser integration |

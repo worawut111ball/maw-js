@@ -35,6 +35,7 @@ export interface ProtocolAcceptanceScenario {
   facts:FactPick[];
   text:string;
   timeoutMs?:number;
+  purpose?:'production'|'bounded-acceptance';
 }
 export interface ApiObservation {
   method:string;path:string;status:number;requestHash:string;responseHash:string;
@@ -47,6 +48,9 @@ export interface ProtocolAcceptanceResult {
   /** Hashes only, to avoid putting native IDs/facts/context/prompt/auth in public artifacts. */
   switchIdHash:string;turnIdHash:string;roomIdHash:string;
   acceptance:'ui-api-completed'|'fixture-only';
+  nativeExecutionVerified:false;productionCertified:false;
+  draftOutcome:'cleared'|'retained-original';
+  authorizationPurpose?:'production'|'bounded-acceptance';
 }
 const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 const origin='https://maw-acceptance.invalid';
@@ -128,7 +132,9 @@ export async function acceptProtocolSwitch(page:Page,host:ProtocolAcceptanceHost
     const workspaceChip=page.locator('[data-ws]');if(await workspaceChip.count())await clickAttribute('[data-ws]','data-ws',host.workspace);
     await clickAttribute('[data-r]','data-r',host.room);
     const switchButton=page.locator('header [data-continuity-switch]');await switchButton.waitFor({state:'visible',timeout});
-    await waiting(()=>switchButton.isEnabled(),timeout,'switch-enabled');await switchButton.click();
+    await waiting(()=>switchButton.isEnabled(),timeout,'switch-enabled');
+    if(scenario.purpose){const c=replies.findLast(r=>r.path==='/mobile/continuity/capabilities'&&r.status===200)?.response;assert.equal(c?.authorization?.purpose,scenario.purpose,'API purpose mismatch');if(scenario.purpose==='bounded-acceptance')assert(await page.locator('.continuity-purpose').first().isVisible(),'bounded purpose missing from UI');}
+    await switchButton.click();
     await page.locator('[data-continuity-provider]').waitFor({state:'visible',timeout});
     await page.locator('[data-continuity-provider]').selectOption(scenario.target);
     await page.locator('[data-continuity-model]').selectOption(scenario.model);
@@ -163,11 +169,11 @@ export async function acceptProtocolSwitch(page:Page,host:ProtocolAcceptanceHost
     assert.equal(replies.filter(r=>r.method==='POST'&&r.path===prefix+'/turns').length,1,'duplicate UI turn dispatch');
     assert.equal(replies.filter(r=>r.method==='POST'&&r.path===prefix+'/switch').length,1,'duplicate switch dispatch');
     assert(!blocked.some(x=>/^(POST|PUT|PATCH|DELETE) /.test(x)),'unexpected mutation attempted');
-    await waiting(async()=>await page.locator('#msg').inputValue()==='',timeout,'acknowledged-draft-clear');
+    const draftOutcome=await waiting(async()=>{const value=await page.locator('#msg').inputValue();if(value==='')return 'cleared' as const;if(value===scenario.text&&await page.locator('#screen .pend.continuity-completed').count()>0)return 'retained-original' as const;return null;},timeout,'acknowledged-draft-outcome');
     // The real stored transcript must be observed after the turn, including user + native final.
     await waiting(()=>replies.slice(afterTurn).some(r=>r.path===prefix+'/events'&&r.status===200&&r.response?.items?.some((e:any)=>e.role==='assistant'&&e.nativeId===receipt.turn.nativeId&&e.text===receipt.turn.text&&e.metadata?.operationId===turn.body.id&&e.metadata?.turnId===receipt.turn.turnId&&e.metadata?.generation===turn.body.binding.generation)),timeout,'actual-stored-assistant');
     assert(replies.slice(afterTurn).some(r=>r.path===prefix+'/events'&&r.status===200&&r.response?.items?.some((e:any)=>e.role==='user'&&e.nativeId===receipt.turn.nativeId&&e.text===scenario.text&&e.metadata?.operationId===turn.body.id&&e.metadata?.turnId===receipt.turn.turnId)),'actual stored user missing');
     await waiting(async()=>(await page.locator('#screen pre').allTextContents()).includes(receipt.turn.text),timeout,'visible-stored-native-final');
-    return {routeEvidence:evidence,uiHashes,setupHash,runtime:host.setup.runtime,switchIdHash:sha(operationId),turnIdHash:sha(turn.body.id),roomIdHash:sha(preview.roomId),acceptance:host.setup.runtime==='native'&&host.setup.apiKind==='createMobileApi'?'ui-api-completed':'fixture-only'};
+    return {draftOutcome,routeEvidence:evidence,uiHashes,setupHash,runtime:host.setup.runtime,switchIdHash:sha(operationId),turnIdHash:sha(turn.body.id),roomIdHash:sha(preview.roomId),nativeExecutionVerified:false,productionCertified:false,authorizationPurpose:replies.findLast(r=>r.path==='/mobile/continuity/capabilities'&&r.status===200)?.response?.authorization?.purpose,acceptance:host.setup.runtime==='native'&&host.setup.apiKind==='createMobileApi'?'ui-api-completed':'fixture-only'};
   }finally{await page.unroute('**/*',bridge);}
 }

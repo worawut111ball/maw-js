@@ -19,6 +19,7 @@ const scenario = {
   facts, // explicit authorized provenance: field,seq,sourceId,agent,nativeId,eventHash
   text: 'ช่วยทวนเป้าหมาย จำนวนงานที่เหลือ และกำหนดส่งจากบริบทที่ได้รับก่อนหน้า',
   timeoutMs: 180000,
+  purpose: 'bounded-acceptance', // ตรวจ API purpose และป้าย UI จริง ไม่สร้าง permit ให้เอง
 };
 // Root ส่ง Page จาก isolated context {serviceWorkers:'block'}
 const result = await acceptProtocolSwitch(page, host, scenario);
@@ -43,6 +44,18 @@ Responses ใน bridge ไม่ถูกเติม ready/identity/receipt. `
 
 Returned result เก็บเฉพาะ route/status + request/response/source/ID hashes ไม่เก็บ auth/context/prompt/answer/native ID. UI assets คือ source เดิมไม่ rewrite; hash ทุก asset ที่เสิร์ฟ Unknown assets/network ถูก abort และใช้ isolated context ปิด service worker Root ต้องเก็บ artifacts ใน private vault ถ้าจะเพิ่ม screenshot/native diagnostics
 
+## Actual API/composition/service integration ด้วย bounded permit
+
+`protocol-ui-composition-setup.ts` เตรียม host ที่ใช้ actual `createMobileApi`, host composition, pinned loader validation, service, engine, SQLite journal/permit budget/facts selection, native-record parser และ `verifyProtocolContextDelivery` ของ Root จริง. `protocol-ui-composition.test.ts` เรียก browser ผ่าน bridge เดิม ไม่มี fake HTTP handler หรือ UI state injection
+
+ส่วนที่เป็น DI อย่างชัดเจน: temporary pinned builder stand-in/fake native bytes ที่ไม่ execute, supervisor/driver/wire, authority/attestation, native-format records, และ `projectInventory:async()=>[]` สำหรับ ambient discovery. `/projects` ใช้ actual owned registry merge/auth; purpose/remaining/progress/receipt/events มาจาก actual service ไม่เติม API response ขึ้นเอง. Host bounded authority ส่ง permit จริงตาม exported schema และ `protocolAcceptanceProfile(candidate.binding)` ไม่ echo profile จาก HTTP เพื่อ grant สิทธิ์
+
+Production evidence ปิดอยู่ (pilot); tests ยืนยัน advertisement2→2, switch+text consume2→0 จาก durable ledger, all permits หมดแล้วยังอ่าน exact receipt/events ได้ และ delayed final ระหว่าง budgetหมดรักษา original draft ไม่ replay. ทุกกรณีเป็น DI integration ไม่ใช่ native execution/Read/retrieval/account/upstream/production proof
+
+Focused command: `MAW_PROTOCOL_UI_FIXTURES=1 NODE_ENV=test MAW_TEST_MODE=1 bun test test/e2e/protocol-ui-acceptance.test.ts test/e2e/protocol-ui-composition.test.ts`. ทั้งสอง suite เป็น opt-in เมื่อไม่เปิด flag ไม่มี browser/service fixture launch ใน canonical suite
+
+`result.nativeExecutionVerified:false` และ `productionCertified:false` เสมอ ไม่ยก `setup.runtime` label เป็น proof. `authorizationPurpose` อ่านจาก API, `draftOutcome` แยก `cleared`/`retained-original`; completed receipt ไม่บังคับล้าง draft หาก guard เปลี่ยนระหว่างรอ ACK
+
 ## การ cleanup
 
 Root ถือ native lifecycle ทั้งหมด: helper ไม่ bootstrap/close/start/stop/dispose เอง ถ้า timeout/uncertain ไม่ retry หรือเรียก cleanup เพื่อเดาว่าปลอดภัย เมื่อรันจริงต้องให้ native pending effect จบหรือเข้าสู่ explicit reconciliation ตาม contractก่อน Root ทำ cleanup ห้ามใช้ user pane `wM:p1` และห้ามเผย raw failure/body/auth ใน public report
@@ -59,3 +72,4 @@ Root ถือ native lifecycle ทั้งหมด: helper ไม่ bootstra
 |---|---|---|
 | 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม in-process bridge/interface + fixture-only browser tests; แจ้ง P1 header owned identity โดยไม่แก้ UI freeze |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | รับ owner P1 จาก Root แก้ cached protocol fields และเพิ่ม regression; negative fixtures ต้องล้มที่ stage ที่กำหนดจริง |
+| 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม bounded-purpose validation และ actual API/composition/service/parser/context-verifier integration; แยก DI/native evidence และ preserved draft หลัง budgetหมด |

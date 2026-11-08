@@ -2,7 +2,7 @@
 (function () {
   let view = null, serial = 0, modal = null;
   const labels = { 'waiting-safe-point':'รอ agent จบรอบ', checkpointed:'กำลังเตรียมบริบท', 'preparing-target':'กำลังเปิดหรือกลับเข้า session เดิม', 'delivering-context':'กำลังส่งบริบท', 'ready-awaiting-user':'พร้อม — รอคำสั่ง', blocked:'พักการสลับ', failed:'สลับไม่สำเร็จ', uncertain:'ต้องตรวจสถานะก่อนทำต่อ' };
-  const reasons = { staged_source_target_unverified:'ยังยืนยันสถานะ agent ต้นทางและปลายทางไม่ได้ กรุณาตรวจ operation เดิมก่อนส่งซ้ำ', facts_selection_unavailable:'Mac ยังไม่มีบริการเลือก facts ที่พร้อมใช้', facts_preview_changed:'ข้อมูลอ้างอิงเปลี่ยนแล้ว ต้องอ่าน preview และเลือกใหม่', facts_room_changed:'binding ของข้อมูลอ้างอิงเปลี่ยนแล้ว', facts_preview_expired:'preview หมดอายุ ต้องอ่านและเลือกใหม่', facts_selection_scope_mismatch:'receipt facts ไม่ตรงคำขอสลับ', room_backend_not_ready:'Backend ของห้องนี้ยังไม่พร้อมสลับ', agent_changed:'agent เดิมถูกเปลี่ยนแล้ว', context_facts_unavailable:'ยังเตรียมข้อมูลส่งต่อไม่ได้', context_goal_missing:'ยังไม่มีเป้าหมายงานสำหรับส่งต่อ', source_changed_during_checkpoint:'agent เดิมมีงานใหม่ระหว่างเตรียมข้อมูล', history_changed_during_checkpoint:'ประวัติมีข้อมูลเพิ่ม ต้องเตรียมใหม่', resume_identity_mismatch:'กลับเข้า session เดิมไม่สำเร็จ', target_changed_during_context:'agent ปลายทางถูกเปลี่ยนระหว่างรับข้อมูล', context_receipt_unverified:'ยังยืนยันว่ารับบริบทครบไม่ได้', launch_unverified_source_preserved:'ยังยืนยันการเปิดปลายทางไม่ได้ ต้องตรวจปลายทางก่อนทำต่อ', all_backends_required:'ยังรองรับไม่ครบทั้งสามระบบ', continuity_not_ready:'ยังไม่พร้อมเปิดการสลับ', model_unavailable:'โมเดลนี้ยังไม่พร้อมใช้', stale_room_revision:'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด', canceled_by_user:'ยกเลิกการสลับแล้ว' };
+  const reasons = { bounded_acceptance_denied:'host ไม่อนุญาตคำขอทดสอบนี้', bounded_acceptance_expired:'permit ทดสอบหมดอายุแล้ว', bounded_acceptance_required:'ยังไม่มี permit ทดสอบจาก host', bounded_acceptance_scope_mismatch:'permit ทดสอบไม่ตรงขอบเขตห้องหรือ profile', bounded_acceptance_unavailable:'permit ทดสอบยังไม่พร้อม', acceptance_budget_exhausted:'สิทธิ์ทดสอบครบจำนวนแล้ว — อ่านผลเดิมได้', acceptance_operation_conflict:'คำขอเดิมไม่ตรง permit — ไม่ส่งซ้ำ', acceptance_turn_reconciliation_required:'ต้องตรวจผล turn เดิมก่อน — ไม่ส่งซ้ำ', staged_source_target_unverified:'ยังยืนยันสถานะ agent ต้นทางและปลายทางไม่ได้ กรุณาตรวจ operation เดิมก่อนส่งซ้ำ', facts_selection_unavailable:'Mac ยังไม่มีบริการเลือก facts ที่พร้อมใช้', facts_preview_changed:'ข้อมูลอ้างอิงเปลี่ยนแล้ว ต้องอ่าน preview และเลือกใหม่', facts_room_changed:'binding ของข้อมูลอ้างอิงเปลี่ยนแล้ว', facts_preview_expired:'preview หมดอายุ ต้องอ่านและเลือกใหม่', facts_selection_scope_mismatch:'receipt facts ไม่ตรงคำขอสลับ', room_backend_not_ready:'Backend ของห้องนี้ยังไม่พร้อมสลับ', agent_changed:'agent เดิมถูกเปลี่ยนแล้ว', context_facts_unavailable:'ยังเตรียมข้อมูลส่งต่อไม่ได้', context_goal_missing:'ยังไม่มีเป้าหมายงานสำหรับส่งต่อ', source_changed_during_checkpoint:'agent เดิมมีงานใหม่ระหว่างเตรียมข้อมูล', history_changed_during_checkpoint:'ประวัติมีข้อมูลเพิ่ม ต้องเตรียมใหม่', resume_identity_mismatch:'กลับเข้า session เดิมไม่สำเร็จ', target_changed_during_context:'agent ปลายทางถูกเปลี่ยนระหว่างรับข้อมูล', context_receipt_unverified:'ยังยืนยันว่ารับบริบทครบไม่ได้', launch_unverified_source_preserved:'ยังยืนยันการเปิดปลายทางไม่ได้ ต้องตรวจปลายทางก่อนทำต่อ', all_backends_required:'ยังรองรับไม่ครบทั้งสามระบบ', continuity_not_ready:'ยังไม่พร้อมเปิดการสลับ', model_unavailable:'โมเดลนี้ยังไม่พร้อมใช้', stale_room_revision:'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด', canceled_by_user:'ยกเลิกการสลับแล้ว' };
   const stale = 'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด';
   const base = v => `/rooms/${encodeURIComponent(v.w.id)}/${encodeURIComponent(v.room.id)}/continuity`;
   const physicalStamp = (w,r) => {const b=r.protocolBinding;return JSON.stringify([w.id,r.id,r.agent??null,r.generation??null,r.claudeSessionId??null,r.transportKind??null,r.logicalRoomId??null,r.revision??null,b?[b.agent,b.nativeId,b.generation,b.model??null,b.route??null]:null]);};
@@ -12,10 +12,57 @@
     return r?physicalStamp(w,r):null;
   };
   const selected = v => !!v && view === v && state.ws === v.w.id && state.room === v.room.id && currentPhysical(v)===v.physical;
-  const certified = (c,room) => c?.ready===true && (c.scope==='room-backend'
+  const backendReady = (c,room) => c?.ready===true && (c.scope==='room-backend'
     ? ['herdr','tmux','superset'].includes(room?.backend)&&c.backends?.some(x=>x.backend===room.backend&&x.ready===true)
     : (c.scope===undefined||c.scope==='all-backends')&&['herdr','tmux','superset'].every(b=>c.backends?.some(x=>x.backend===b&&x.ready===true)));
-  const capStamp=c=>JSON.stringify([models(c),c?.scope??'all-backends',c?.factsSelectionAvailable===true]);
+  // Advertisements describe host bounds; reading/matching them never consumes or grants readiness.
+  const opaque=v=>typeof v==='string'&&v.length>0&&v.length<=1024&&!/[\x00-\x1f]/.test(v);
+  function validPermit(p){
+    const r=p?.scope?.room,f=p?.scope?.profile,ops=p?.scope?.operations;
+    return p?.source==='trusted-bounded-acceptance'&&opaque(p.permitId)&&Number.isSafeInteger(p.expiresAt)&&Number.isFinite(new Date(p.expiresAt).getTime())&&Number.isSafeInteger(p.maxOperations)&&p.maxOperations>0&&Number.isSafeInteger(p.remaining)&&p.remaining>=0&&p.remaining<=p.maxOperations
+      &&r&&['id','backend','workspace','room','cwd'].every(k=>opaque(r[k]))&&['herdr','tmux','superset'].includes(r.backend)
+      &&f&&['hash','namespace','model','route'].every(k=>opaque(f[k]))&&/^[a-f0-9]{64}$/.test(f.hash)&&/^[a-f0-9]{64}$/.test(f.namespace)&&['codex','claude'].includes(f.agent)
+      &&Array.isArray(ops)&&ops.length>0&&ops.every(k=>['switch','text-turn'].includes(k))&&new Set(ops).size===ops.length;
+  }
+  function permits(c,room,kind,profile){
+    if(c?.authorization?.purpose!=='bounded-acceptance'||!room||!Array.isArray(c.authorization.permits))return [];
+    return c.authorization.permits.filter(p=>{
+      if(!validPermit(p)||p.expiresAt<=Date.now()||p.remaining<1||!p.scope.operations.includes(kind)||!['id','backend','workspace','room','cwd'].every(k=>opaque(room[k])&&p.scope.room[k]===room[k]))return false;
+      const f=p.scope.profile;
+      if(profile&&(f.agent!==profile.agent||f.model!==profile.model))return false;
+      if(profile?.route!==undefined&&f.route!==profile.route)return false;
+      if(profile?.generation!==undefined&&!new RegExp(`^protocol:${f.agent}:${f.namespace}:[1-9][0-9]*$`).test(profile.generation))return false;
+      return true;
+    });
+  }
+  function authorizationAllows(c,room,kind,profile){
+    const purpose=c?.authorization?.purpose;
+    if(purpose===undefined)return c?.authorization===undefined; // original production evidence contract
+    if(purpose==='production')return true;
+    if(purpose!=='bounded-acceptance')return false;
+    const matching=permits(c,room,kind,profile);
+    // There is no route picker: conflicting advertised profiles for one agent/model cannot be guessed.
+    const profiles=new Set(matching.map(p=>JSON.stringify(p.scope.profile)));
+    return matching.length>0&&(!profile||profiles.size===1);
+  }
+  const certified=(c,room,kind='switch',profile)=>backendReady(c,room)&&authorizationAllows(c,room,kind,profile);
+  function purposeNode(c,room,ws,alias){
+    if(!c?.authorization)return null;
+    const node=document.createElement('div');node.className='continuity-purpose';
+    if(c.authorization.purpose==='production'){node.textContent='โหมดใช้งานจริง';return node;}
+    if(c.authorization.purpose!=='bounded-acceptance'){node.textContent='ยังระบุโหมดไม่ได้ — พักการส่ง';return node;}
+    node.textContent='โหมดทดสอบจำกัดขอบเขต';
+    const rows=Array.isArray(c.authorization.permits)?c.authorization.permits.filter(p=>validPermit(p)&&p.scope.room.workspace===ws&&p.scope.room.room===alias&&(!room||p.scope.room.id===room.id)):[];
+    if(!rows.length){node.appendChild(document.createTextNode(' · ยังไม่มีสิทธิ์ทดสอบสำหรับห้องนี้'));return node;}
+    for(const p of rows){const row=document.createElement('p'),s=p.scope;const actions=s.operations.map(k=>k==='switch'?'สลับโมเดล':'ส่งข้อความ').join(', '),expiry=new Intl.DateTimeFormat('th-TH',{dateStyle:'short',timeStyle:'short',timeZone:'Asia/Bangkok'}).format(p.expiresAt);row.textContent=`ห้อง ${s.room.workspace}/${s.room.room} · โมเดล ${s.profile.agent} / ${s.profile.model} · route ${s.profile.route} · ${actions} · คงเหลือ ${p.remaining}/${p.maxOperations} ครั้ง · หมดอายุ ${expiry} (GMT+7)`;node.appendChild(row);}
+    return node;
+  }
+  function drawPurpose(v,c,room){
+    if(!selected(v))return;
+    const slot=document.getElementById('ext-room-top');if(!slot)return;
+    slot.querySelector(':scope > .continuity-purpose')?.remove();const node=purposeNode(c,room,v.w.id,v.room.id);if(node)slot.prepend(node);
+  }
+  const capStamp=c=>JSON.stringify([models(c),c?.scope??'all-backends',c?.factsSelectionAvailable===true,c?.authorization??null,c?.ready,c?.backends,c?.roomStateAvailable]);
   const models = c => Array.isArray(c?.models) ? c.models.filter(m => ['codex','claude'].includes(m.agent) && typeof m.id === 'string' && m.id && m.id.length<=160 && typeof m.label === 'string' && m.label) : [];
   const stamp = d => JSON.stringify([d.room.id,d.room.revision,d.room.active,d.room.operationId || null,d.room.bindings || null,d.operation || null]);
   const request = async (path,body) => {
@@ -112,7 +159,7 @@
       if(typeof paintPending==='function')paintPending();return true;
     }
   };
-  function closeModal() { if(modal){modal.bg.remove();modal=null;} }
+  function closeModal() { if(modal){clearTimeout(modal.expiryTimer);modal.bg.remove();modal=null;} }
   function trigger(v) {
     if(!selected(v))return;
     const slot=document.getElementById('ext-room-actions');if(!slot)return;
@@ -138,6 +185,7 @@
   }
   function activate(w,room) {
     document.querySelector('#ext-room-top .continuity-client-only')?.remove();
+    document.querySelector('#ext-room-top > .continuity-purpose')?.remove();
     const previous=view;closeModal();view={w:{id:w.id},room:{id:room.id,agent:room.agent,generation:room.generation,claudeSessionId:room.claudeSessionId,transportKind:room.transportKind,logicalRoomId:room.logicalRoomId,revision:room.revision,protocolBinding:room.protocolBinding},physical:physicalStamp(w,room),serial:++serial,current:null,caps:null,loading:null,read:0,busy:false,history:previous?.w.id===w.id&&previous?.room.id===room.id?previous.history:null};
     document.querySelector('#ext-room-top .continuity-status')?.remove();
     const b=document.querySelector(`[data-xk="${keyIndex}"]`);if(b){b.hidden=true;b.disabled=false;}
@@ -158,11 +206,12 @@
     node.dataset.state=historicalReady?'historical':op?.state||'idle';
     node.textContent=historicalReady?'operation เดิมเสร็จแล้ว — binding ปัจจุบันเปลี่ยนหรือยังไม่ยืนยัน':op?(labels[op.state]||'กำลังตรวจสถานะ')+(op.reason?' · '+(reasons[op.reason]||'ต้องตรวจสถานะ agent ก่อนทำต่อ'):''):'Agent: '+data.room.active;
     const activeBinding=data.room.bindings?.[data.room.active];
+    if(op?.state==='ready-awaiting-user'&&!historicalReady&&!certified(v.caps,data.room,'text-turn',activeBinding))node.textContent='operation ส่งบริบทเสร็จแล้ว · ดูผลเดิมได้ — ยังไม่อนุญาตส่งข้อความใหม่';
     const info=document.createElement('div');info.className='continuity-current';info.textContent=`Agent: ${data.room.active} · โมเดล: ${activeBinding?.model||'—'} · route: ${activeBinding?.route||'—'}`;node.appendChild(info);
     const held=(data.held||[]).length;if(held)node.appendChild(document.createTextNode(` · ข้อความพัก ${held} รายการ`));
     if(op && data.room.operationId===op.id && ['waiting-safe-point','blocked'].includes(op.state)) {
       const action=(label,suffix)=>{
-        const b=document.createElement('button');b.textContent=label;b.disabled=v.busy;
+        const b=document.createElement('button');b.textContent=label;b.disabled=v.busy||!certified(v.caps,data.room,'switch',op.model?{agent:op.target,model:op.model}:undefined);
         b.onclick=()=>{if(unresolved(v))return toast('ตรวจสถานะคำขอเดิมก่อนทำต่อ');return mutate(v,data,async fresh=>{
           await request(base(v)+'/operations/'+encodeURIComponent(op.id)+'/'+suffix,suffix==='cancel'?{expectedRevision:fresh.room.revision}:{});
           if(selected(v))await load(v,true);
@@ -227,12 +276,11 @@
     const pending=(async()=>{
       try {
         const caps=await request('/continuity/capabilities');if(!valid())return null;
-        v.caps=caps;if(!caps.ready||!(caps.scope==='room-backend'||certified(caps))){clear(v);return null;}
+        v.caps=caps;drawPurpose(v,caps,v.current?.room);if(caps.roomStateAvailable!==true&&(!caps.ready||!(caps.scope==='room-backend'||backendReady(caps)))){clear(v);return null;}
         const data=await request(base(v));if(!valid())return null;
         if(data.room?.workspace!==v.w.id || data.room?.room!==v.room.id || typeof data.room.id!=='string' || !Number.isSafeInteger(data.room.revision) || data.room.revision<0 || !['codex','claude'].includes(data.room.active))throw new Error(stale);
-        if(!certified(caps,data.room)){clear(v);return null;}
         if(modal?.view===v && (modal.stamp!==stamp(data) || modal.models!==JSON.stringify(models(caps)) || modal.capStamp!==capStamp(caps)))closeModal();
-        v.current=data;draw(v,data);trigger(v);
+        v.current=data;drawPurpose(v,caps,data.room);draw(v,data);trigger(v);
         const b=document.querySelector(`[data-xk="${keyIndex}"]`);if(b){b.hidden=false;b.disabled=v.busy;}
         return data;
       } catch { if(valid())clear(v);return null; }
@@ -319,7 +367,9 @@
     const alive=()=>selected(v)&&modal===frame&&bg.isConnected;
     const heading=document.createElement('h2');heading.textContent='เปลี่ยน agent / โมเดล';sheet.appendChild(heading);
     const noteText=document.createElement('p');noteText.textContent='รับบริบทแล้วรอคำสั่ง · กลับเจ้าเดิมใช้ session เดิม · ไม่ส่ง draft หรือข้อความพักอัตโนมัติ';sheet.appendChild(noteText);
-    const catalog=models(v.caps),agents=[...new Set(catalog.map(m=>m.agent))];
+    const purpose=purposeNode(v.caps,data.room,v.w.id,v.room.id);if(purpose)sheet.appendChild(purpose);
+    const activePermits=permits(v.caps,data.room,'switch');if(activePermits.length)frame.expiryTimer=setTimeout(()=>{if(modal===frame)closeModal();},Math.min(2147483647,Math.max(0,Math.min(...activePermits.map(p=>p.expiresAt))-Date.now())));
+    const catalog=models(v.caps).filter(m=>authorizationAllows(v.caps,data.room,'switch',{agent:m.agent,model:m.id})),agents=[...new Set(catalog.map(m=>m.agent))];
     const provider=document.createElement('select');provider.dataset.continuityProvider='';provider.setAttribute('aria-label','Agent / provider');
     for(const agent of agents){const o=document.createElement('option');o.value=agent;o.textContent=agent;provider.appendChild(o);}
     provider.value=agents.find(a=>a!==data.room.active)||agents[0]||'';
@@ -334,7 +384,7 @@
     const update=()=>{
       confirm.textContent='เปลี่ยนเป็น '+(provider.value||'—');
       const chosen=picks();previewButton.disabled=v.busy||v.caps?.factsSelectionAvailable!==true;
-      confirm.disabled=v.busy||unresolved(v)||!frame.preview||!chosen.some(c=>c.field==='goal')||chosen.length>256||!catalog.some(m=>m.agent===provider.value&&m.id===select.value)||v.caps?.factsSelectionAvailable!==true;
+      confirm.disabled=v.busy||unresolved(v)||!frame.preview||!chosen.some(c=>c.field==='goal')||chosen.length>256||!catalog.some(m=>m.agent===provider.value&&m.id===select.value)||v.caps?.factsSelectionAvailable!==true||!certified(v.caps,v.current?.room,'switch',{agent:provider.value,model:select.value});
     };
     frame.update=update;
     const fillModels=()=>{select.textContent='';for(const m of catalog.filter(m=>m.agent===provider.value)){const o=document.createElement('option');o.value=m.id;o.textContent=m.label;select.appendChild(o);}update();};
@@ -364,13 +414,13 @@
       if(!alive()||v.busy||unresolved(v)||confirm.disabled||!frame.preview)return;
       const snapshot=frame.preview,choice=choices(),target=provider.value,model=select.value,selections=picks();
       return mutate(v,data,async fresh=>{
-        const unchanged=()=>alive()&&choices()===choice&&v.caps?.factsSelectionAvailable===true&&models(v.caps).some(m=>m.agent===target&&m.id===model);
+        const unchanged=()=>alive()&&choices()===choice&&v.caps?.factsSelectionAvailable===true&&models(v.caps).some(m=>m.agent===target&&m.id===model)&&certified(v.caps,v.current?.room,'switch',{agent:target,model});
         if(!unchanged())throw new Error(stale);
         const reread=await request(base(v)+'/facts/preview');if(!unchanged())throw new Error(stale);
         if(previewStamp(validPreview(reread.preview,fresh))!==previewStamp(snapshot))throw new Error('บริบทหรือ facts เปลี่ยนแล้ว — อ่าน preview และเลือกใหม่');
         sourceBinding(fresh);if(!Number.isSafeInteger(fresh.room.bindings[fresh.room.active].cursor))throw new Error(stale);
         const id=requestId(),selectionBody={id,previewId:snapshot.id,expectedRevision:fresh.room.revision,selections},switchBody={id,target,model,expectedRevision:fresh.room.revision,factsSelectionId:id};
-        v.intent={version:1,request:freeze({ws:v.w.id,room:v.room.id,physical:v.physical,logicalRoomId:fresh.room.id,sourceKey:switchBindingKey(fresh.room.bindings?.[fresh.room.active]),selectionBody,switchBody}),status:'dispatching',stage:'selection',message:'กำลังบันทึก facts ที่เลือก — ยังไม่เริ่มสลับ'};
+        v.intent={version:1,request:freeze({ws:v.w.id,room:v.room.id,physical:v.physical,logicalRoomId:fresh.room.id,sourceKey:switchBindingKey(fresh.room.bindings?.[fresh.room.active]),authorization:freeze(structuredClone(v.caps.authorization??null)),selectionBody,switchBody}),status:'dispatching',stage:'selection',message:'กำลังบันทึก facts ที่เลือก — ยังไม่เริ่มสลับ'};
         if(!persistIntent(v)){v.intent.status='failed';v.intent.message='บันทึกคำขอในอุปกรณ์ไม่สำเร็จ — ยังไม่ส่ง อย่าปิดหน้านี้';draw(v,fresh);throw new Error(v.intent.message);}
         draw(v,fresh);
         try{
@@ -466,13 +516,13 @@
       if(transport){
         if(phase!=='capture'||p.continuityIntent||p.continuityAttempted)return stop('รายการเดิมพักไว้ — ไม่ส่งต่ออัตโนมัติ');
         if(transport.roomId!==data.room.id||transport.revision!==data.room.revision||switchBindingKey(transport.binding)!==switchBindingKey(data.room.bindings?.[data.room.active]))return stop('binding ของ owned transport เปลี่ยนแล้ว — ไม่ส่ง');
-        if(transport.state!=='idle'||transport.capabilities.textTurn!==true)return stop('owned protocol ยังไม่พร้อมรับข้อความ — พักในอุปกรณ์');
+        if(transport.state!=='idle'||transport.capabilities.textTurn!==true||!certified(caps,data.room,'text-turn',transport.binding))return stop('owned protocol ยังไม่พร้อมรับข้อความ — พักในอุปกรณ์');
         if(!p.text||p.text.length>8000||p.text.includes('\0'))return stop('รองรับข้อความ 1–8000 ตัวอักษร — เก็บต้นฉบับไว้');
-        const intent=freeze({ws,room,roomId:transport.roomId,body:{id:requestId(),text:p.text,expectedRevision:transport.revision,binding:structuredClone(transport.binding)}});
+        const intent=freeze({ws,room,roomId:transport.roomId,authorization:structuredClone(caps.authorization??null),body:{id:requestId(),text:p.text,expectedRevision:transport.revision,binding:structuredClone(transport.binding)}});
         p.continuityTurnIntent=intent;p.state='continuity-uncertain';p.err='กำลังส่ง protocol — ยังยืนยันผลไม่ได้';
         if(!persist())return stop('บันทึก intent ในอุปกรณ์ไม่สำเร็จ — ไม่ส่ง protocol');
-        const latest=await heldRequest(path),t=await readTransport(ws,room);
-        if(!sameRoom()||unchanged&&!unchanged()||latest.room?.id!==intent.roomId||latest.room?.revision!==intent.body.expectedRevision||switchBindingKey(latest.room?.bindings?.[latest.room?.active])!==switchBindingKey(intent.body.binding)||!t||t.roomId!==intent.roomId||t.revision!==intent.body.expectedRevision||switchBindingKey(t.binding)!==switchBindingKey(intent.body.binding)||t.state!=='idle'||t.capabilities.textTurn!==true)return stop('draft/ห้อง/binding เปลี่ยนก่อนส่ง — ไม่ส่งคำขอเดิม');
+        const latest=await heldRequest(path),latestCaps=await heldRequest('/continuity/capabilities'),t=await readTransport(ws,room);
+        if(!sameRoom()||unchanged&&!unchanged()||latest.room?.id!==intent.roomId||latest.room?.revision!==intent.body.expectedRevision||switchBindingKey(latest.room?.bindings?.[latest.room?.active])!==switchBindingKey(intent.body.binding)||!t||t.roomId!==intent.roomId||t.revision!==intent.body.expectedRevision||switchBindingKey(t.binding)!==switchBindingKey(intent.body.binding)||t.state!=='idle'||t.capabilities.textTurn!==true||!certified(latestCaps,latest.room,'text-turn',t.binding)||JSON.stringify(latestCaps.authorization??null)!==JSON.stringify(intent.authorization))return stop('draft/ห้อง/binding เปลี่ยนก่อนส่ง — ไม่ส่งคำขอเดิม');
         p.continuityAttempted=true;if(!persist())return stop('บันทึก intent ไม่สำเร็จ — ไม่ส่ง protocol');
         if(!sameRoom()||unchanged&&!unchanged())return stop('draft หรือห้องเปลี่ยนแล้ว — ไม่ส่ง');
         try{return acceptTurn(p,intent,(await heldRequest(path+'/turns',intent.body)).receipt,persist);}
