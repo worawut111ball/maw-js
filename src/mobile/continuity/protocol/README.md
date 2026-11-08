@@ -8,6 +8,8 @@
 | `entry.ts` | Team2 candidate binding → typed policy/driver | ไม่อ่าน `env` ไม่ spawn และไม่ให้ launch authority |
 | `entry-loader.ts` | ตรวจ reviewed source inventory และเรียก builder V2/V3 | Host-only; process spec มี private env ห้าม log; ดู `README-entry-loader.md` |
 | `native-history-reader.ts` | ค้น exact UUID ใน native home ของ admitted profile แล้วอ่านเต็ม | ไม่เลือก latest; duplicate/missing/symlink ปฏิเสธ; ใช้ bounded stable reader ที่ตัด hidden reasoning |
+| `host-composition.ts` | ประกอบ private pinned config, loader, supervisor, service และ history synchronization | Default off; ดู `README-host-composition.md`; pilot ไม่เปิด production capabilities |
+| `service.ts` | Durable owned-room registry, facts selection, turn receipts และ inventory | ต้องมี trusted authority; ดู `README-service.md`; ไม่มี TUI adoption |
 | `wire.ts` | JSONL framing, UTF-8 และขนาด frame, serialized write | ไม่มี process launch; failed write ไม่ replay |
 | `turn-host.ts` | Persist intent ก่อน turn; exact retry คืน historical result | ใช้ได้เฉพาะ session ที่ host ถือ ownership แล้ว ไม่ใช่ lifetime lease |
 | `codex.ts` | Codex 0.164.0 app-server driver | Fixed on-request/read-only/user-reviewer; native final แยกจาก ACK |

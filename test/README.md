@@ -158,6 +158,8 @@ Focused command ที่รันแล้ว: `MAW_TEST_MODE=1 bun test test/c
 
 `mobile-protocol-native-history-reader.test.ts` ตรวจ exact UUID/full native public projection ด้วย temporary Claude/Codex JSONL; missing/duplicate/symlink/foreign session/cwd ต้องปฏิเสธ ไม่ค้น latest. `mobile-protocol-runtime-host.test.ts` เพิ่ม admission room/launch operation scope ที่คงเดิมข้าม turn และ deny ต่างห้องก่อน launch
 
+`mobile-protocol-host-composition.test.ts` ตรวจ private pinned config/default off, scope/profile admission, bootstrap history ก่อนคืนผล และ exact-turn normalization ผ่าน actual parser/loader/service กับ fake child/driver. Pilot capability ยังปิด; fixture authority ไม่ใช้รับรอง native หรือ production
+
 `e2e/protocol-ui-acceptance.ts` เป็น helper สำหรับ actual full UI + in-process API bridge; [README](e2e/README-protocol-ui-acceptance.md) ระบุ trusted native setup ที่ caller ต้องให้ แยก fixture-only ออกจาก native. ชุด fixture opt-in ด้วย `MAW_PROTOCOL_UI_FIXTURES=1`; default skip ไม่เปิด browser/native/serverเอง. การใช้ fixture handler ไม่ใช่ actual service/native acceptance
 
 | วันที่ | ใคร | แก้อะไร |
