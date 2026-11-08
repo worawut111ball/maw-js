@@ -9,6 +9,8 @@ import { ProtocolError, type ProtocolHooks, type ProtocolIdentity, type Protocol
 export type RuntimeSelection=ProtocolRuntimeCandidate['session'];
 export interface RuntimeLaunchReceipt {readonly finalArgvHash:string}
 export interface RuntimeAdmissionRequest {
+  readonly roomId:string;
+  readonly launchOperationId:string;
   readonly launchReceipt?:Readonly<RuntimeLaunchReceipt>;
   binding:Readonly<ProtocolRuntimeBinding>; selection:RuntimeSelection; phase:string;
   operationId:string; textHash?:string;
@@ -84,7 +86,7 @@ export class ProtocolRuntimeHost {
   get pendingApproval(){return this.driver?.pendingApproval??false;}
   private admission(phase:string,operationId=this.launchOperation,textHash?:string):Promise<void>{
     return (async()=>{
-      const expected=this.binding!,e=await boundedAdmission(Promise.resolve().then(()=>this.admit(Object.freeze({binding:structuredClone(expected),selection:structuredClone(this.selection!),phase,operationId,...(textHash?{textHash}:{}),...(this.launchReceipt?{launchReceipt:this.launchReceipt}:{})}))),this.policy!.timeoutMs);
+      const expected=this.binding!,e=await boundedAdmission(Promise.resolve().then(()=>this.admit(Object.freeze({roomId:this.roomId,launchOperationId:this.launchOperation,binding:structuredClone(expected),selection:structuredClone(this.selection!),phase,operationId,...(textHash?{textHash}:{}),...(this.launchReceipt?{launchReceipt:this.launchReceipt}:{})}))),this.policy!.timeoutMs);
       if(this.launchReceipt&&canonical(e?.launchReceipt)!==canonical(this.launchReceipt))fail('runtime_launch_receipt_unverified',!!this.owned);
       if(e?.source!=='trusted-protocol-admission'||e.externalWriter!=='absent'||canonical(e.binding)!==canonical(expected))fail(e?.externalWriter==='external-tui'?'runtime_external_tui_takeover_unsupported':'runtime_admission_unverified',!!this.owned);
     })();

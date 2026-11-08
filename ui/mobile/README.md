@@ -90,7 +90,7 @@ Panelไม่ clear composer/files/native chat cache. Stored logical historyค
 
 ### Owned protocol บน logical room เดิม — 8 พ.ย. 69
 
-`/projects` row ของ owned room ใช้ `transportKind/logicalRoomId/protocolBinding/revision/transportState` จาก host; identity guard รวม native ID/model/route ของ protocol แม้ Codex generation เดิม และ inventory ไม่ grant ready
+`/projects` row ของ owned room ใช้ `transportKind/logicalRoomId/protocolBinding/revision/transportState` จาก host; identity guard รวม native ID/model/route ของ protocol แม้ Codex generation เดิม และ inventory ไม่ grant ready. Cached room ของปุ่ม header เก็บ `transportKind/logicalRoomId/revision/protocolBinding` ครบด้วย เพื่อให้การเปิด modal ใช้ identity เดียวกับ row ปัจจุบัน โดยไม่ลด stale-room guard
 
 `ext/continuity.js` ใช้ GET `/rooms/:ws/:room/continuity/transport` เป็น authority ของ transport; การสลับสำเร็จหรือ native history เดิมไม่ให้สิทธิ์ส่ง protocol เอง เมื่อ host ประกาศ `kind:owned-protocol` หน้าเดิมแสดง stored `/events` ตาม cursor (เก็บในจอได้ 5000 รายการล่าสุด, อ่านสูงสุด 10 หน้าต่อรอบ) และปิด TUI keys/permissions/raw screen/suggestion ผ่าน awaited API guard ไม่มี native epoch จำลอง
 
@@ -122,3 +122,4 @@ Status/capability changes ใน session เดิมอัปเดต controls
 | 8 พ.ย. 69 | ทีม1 | Herdr capability/transient history/cache ordering/pagination และ composer guards |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม header switch UI, explicit facts API, scoped capability, immutable intent/lookup และ regressions โดยไม่ deploy working source |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ optional owned transport/text turn/status, ปิด TUI fallback, เก็บไฟล์/draft และแก้ facts reference 1024 พร้อม browser fixtures |
+| 8 พ.ย. 69 | Codex cmdmap/p5 | แก้ P1 cached room protocol identity ของ header switch; เพิ่ม actual owned inventory header/stale confirm regression และทวน acceptance fixtures โดยไม่รัน native |

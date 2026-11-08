@@ -64,6 +64,8 @@ Errors เป็น safe `ProtocolError` code; stage/start/inspection/close unce
 
 ## ทดสอบ
 
+`RuntimeAdmissionRequest` ส่ง `roomId` และ `launchOperationId` จาก start intent เดิมทุก phase แยกจาก `operationId` ของ turn ปัจจุบัน Host จึงตรวจ owner policy ได้โดยไม่เดาห้องจาก candidate ที่ใช้ร่วมกัน ค่า scope คงเดิมข้าม turn/inspect และ outer request frozen. Root ทดสอบ runtime+service 90 pass / 0 fail / 866 expects ผ่าน local DI (`/tmp/maw-protocol-admission-scope.log`) รวม different room/same candidate ปฏิเสธก่อน launch; ไม่ใช่ native acceptance ของ seam ใหม่นี้
+
 `bun test test/mobile-protocol-runtime-host.test.ts` ใช้ temporary SQLite + fake owned child + real Codex/Claude drivers ผ่าน schema fixtures ใน DI wire ไม่มี child spawn/network/native Keys
 
 ## ประวัติ
@@ -73,3 +75,4 @@ Errors เป็น safe `ProtocolError` code; stage/start/inspection/close unce
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม owned runtime V2, staged Claude, lifetime lease, durable turns, inspection และ focused tests |
 | 8 พ.ย. 69 | Codex ensure | รับ explicit pilot V3 union, persist original binding และปิด child/intent revocation ระหว่าง awaited admission |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม immutable per-launch receipt แยก resume binding และ missing/drift guards ทุก admission boundary ของ V3 โดยคง contract V2 |
+| 8 พ.ย. 69 | Codex root | เพิ่ม stable room/launch operation scope ให้ trusted admission สำหรับ host composition |

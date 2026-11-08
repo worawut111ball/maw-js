@@ -10,7 +10,10 @@ import { serveStatic } from "hono/bun";
 import { api } from "../api";
 import { createMobileApi } from "../mobile/api";
 
-const mobileApi = createMobileApi();
+/** Trusted startup composition only. Never populated from a browser request or raw env. */
+export interface ServerHostOptions {
+  mobile?:Parameters<typeof createMobileApi>[1];
+}
 import { feedBuffer, feedListeners } from "../api/feed";
 import { mountViews } from "../views/index";
 import { setupTriggerListener } from "./runtime/trigger-listener";
@@ -90,7 +93,8 @@ export { views };
 
 // --- Server ---
 
-export async function startServer(port = +(process.env.MAW_PORT || loadConfig().port || 3456)) {
+export async function startServer(port = +(process.env.MAW_PORT || loadConfig().port || 3456), host:ServerHostOptions = {}) {
+  const mobileApi = createMobileApi(undefined, host.mobile);
   const engine = new MawEngine({ feedBuffer, feedListeners });
 
   const HTTP_URL = `http://localhost:${port}`;

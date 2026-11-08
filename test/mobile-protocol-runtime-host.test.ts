@@ -254,3 +254,16 @@ test('v2 admission remains compatible without per-launch receipt',async()=>{
  const f=fixture('claude',true);await f.host.open(f.input);await f.host.turn('v2-next','sample');await f.host.inspect();
  expect(f.admissions.every(request=>!Object.hasOwn(request,'launchReceipt'))).toBe(true);await f.host.close();
 });
+test('admission retains owner room and launch operation across later turns',async()=>{
+ const f=fixture('claude');await f.host.start(f.input);await f.host.turn('later-turn','sample');await f.host.inspect();
+ expect(f.admissions.some(r=>r.operationId==='later-turn')).toBe(true);
+ for(const r of f.admissions){expect(r.roomId).toBe(f.input.roomId);expect(r.launchOperationId).toBe(f.input.operationId);expect(Object.isFrozen(r)).toBe(true);expect(Reflect.set(r,'roomId','other-room')).toBe(false);}
+ await f.host.close();
+});
+test('same candidate cannot hide a different owner room from host admission',async()=>{
+ const f=fixture();const host=new ProtocolRuntimeHost({...f.options,admit:async r=>{
+  if(r.roomId!==f.input.roomId||r.launchOperationId!==f.input.operationId)throw new Error('owner_scope_denied');
+  return f.options.admit(r);
+ }});
+ await expect(host.start({...f.input,roomId:'other-room'})).rejects.toMatchObject({uncertain:true});expect(f.events).not.toContain('launch');
+});

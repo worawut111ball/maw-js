@@ -138,7 +138,7 @@
   }
   function activate(w,room) {
     document.querySelector('#ext-room-top .continuity-client-only')?.remove();
-    const previous=view;closeModal();view={w:{id:w.id},room:{id:room.id,agent:room.agent,generation:room.generation,claudeSessionId:room.claudeSessionId},physical:physicalStamp(w,room),serial:++serial,current:null,caps:null,loading:null,read:0,busy:false,history:previous?.w.id===w.id&&previous?.room.id===room.id?previous.history:null};
+    const previous=view;closeModal();view={w:{id:w.id},room:{id:room.id,agent:room.agent,generation:room.generation,claudeSessionId:room.claudeSessionId,transportKind:room.transportKind,logicalRoomId:room.logicalRoomId,revision:room.revision,protocolBinding:room.protocolBinding},physical:physicalStamp(w,room),serial:++serial,current:null,caps:null,loading:null,read:0,busy:false,history:previous?.w.id===w.id&&previous?.room.id===room.id?previous.history:null};
     document.querySelector('#ext-room-top .continuity-status')?.remove();
     const b=document.querySelector(`[data-xk="${keyIndex}"]`);if(b){b.hidden=true;b.disabled=false;}
     view.intent=restoreIntent(view);trigger(view);return view;
