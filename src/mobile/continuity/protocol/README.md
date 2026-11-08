@@ -23,6 +23,8 @@ V2/V3 แยก `homeEnvironment` absent/present แล้ว การไม่
 
 ## ตรวจสอบ
 
+`context-delivery.ts` ตรวจ exact native context-only/no-tools turn แยกจาก retrieval/semantic proof ดู [README-context-delivery.md](README-context-delivery.md)
+
 `MAW_TEST_MODE=1 bun test test/mobile-protocol-wire.test.ts test/mobile-protocol-turn-host.test.ts test/mobile-protocol-codex.test.ts`
 
 Root รัน 8 พ.ย. 69 ได้ 62 pass / 0 fail / 174 expects ผ่าน local DI/SQLite fixtures และ pinned schema artifacts ไม่ใช่ native inference หรือการใช้ปุ่มผ่าน browser
