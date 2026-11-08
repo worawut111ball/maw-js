@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '../../..');
-const mobile = readFileSync(resolve(root, 'ui/mobile/m.html'), 'utf8');
+const mobile = readFileSync(process.env.MOBILE_HTML_PATH || resolve(root, 'ui/mobile/m.html'), 'utf8');
 const project = { name: 'Herdr · default', source: 'herdr', workspaces: [{ id: 'herdr:w7', name: 'ทีมทดสอบ', branch: null, rooms: [{ id: 'w7:p1', title: 'หัวหน้าทดสอบ', agent: 'codex', status: 'working', generation: 'g1', continuityToken: 'g1', capabilities: { prompt: true, keys: true, answer: false, screen: true, history: false, close: true, stop: true } }] }] };
 
 test('Herdr existing room, missing history and team creation use shipped mobile UI', async ({ page }) => {

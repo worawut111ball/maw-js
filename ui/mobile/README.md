@@ -70,3 +70,14 @@ src/mobile/
 |---|---|---|
 | 23 ต.ค. 69 | ไอ้แดง (Claude Code) | สร้าง README — สรุปโครง pack ทั้งหมด, deploy, ข้อมูลใน ~/.maw, กติกา (ประวัติละเอียดอยู่ใน PLAN-maw-mobile.md) |
 | 30 ต.ค. 69 | ไอ้แดง (Claude Code) | เพิ่ม pack docs (เมนูเอกสาร ISO) · ห้อง Superset "ยังไม่เปิด" + wake · autostart เหลือ shell เมื่อ agent ปิด |
+
+
+## Herdr chat stability — 8 พ.ย. 69
+
+Status/capability changes ใน session เดิมอัปเดต controls โดยไม่สร้าง chat DOM ใหม่. Cache ผูก workspace/room/agent/generation; native conversation/epoch เปลี่ยนจริงไม่ merge ข้อมูลเดิม. History transient แสดงข้อมูลที่ยืนยันล่าสุดพร้อมป้ายข้อมูลเก่า และ retry แบบอ่านอย่างเดียว. Herdr chat ไม่ใช้ generic offline API cache; latest request ป้องกันคำตอบเก่าทับใหม่ และ pagination signature รวม loaded range. Draft/ไฟล์/ตำแหน่งอ่านคงอยู่ใน same binding; missing capability ปิดทั้งปุ่มและ keyboard shortcut.
+
+ผลทดสอบและ scoped static release ดู vault `plans/cross-provider-handoff/herdr-chat-stability-20261108/RESULT.md`. Browser fixture ไม่ใช่ native inference; ไม่เปิด cross-provider switch และไม่ restart serverจากการแก้ HTML นี้.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | ทีม1 | Herdr capability/transient history/cache ordering/pagination และ composer guards |

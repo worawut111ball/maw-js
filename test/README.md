@@ -101,3 +101,8 @@ Root `bun run test`: 2022 pass/12 skip/0 fail (124 files; ไม่รวม iso
 ### Release checks — 8 พ.ย. 69
 
 ก่อน commit/deploy ตามคำสั่งพี่ Ball: mock-smoke 6 pass; isolated 76/77 files ผ่าน แต่ oracle-manifest ล้มเรื่องลำดับ fleet; plugin 144 pass/2 skip/13 fail/2 errors จาก mock export cmdOraclePrune ไม่ครบ. รันทวนทั้งสองชุดใน git archive HEAD เดิม 4c3f0ab7 แล้วพบ failures เดียวกัน จึงเป็น baseline limitations ไม่อ้าง test:all ผ่าน. ไม่แก้ส่วน manifest/plugin นอกขอบเขตรอบนี้. สำรอง source/UI แล้ว; deploy คง continuity default off.
+
+
+## Herdr chat stability — 8 พ.ย. 69
+
+`ui/web/e2e/herdr-chat-stability.spec.ts` ใช้ full Mobile HTML กับ mock HTTP บน Chromium iphone-xr/desktop: send→working→done, draft/files/scroll, transient/error recovery, binding/UUID/epoch/workspace isolation, latest-response ordering, older pagination และ missing/revoked capabilities. `MOBILE_HTML_PATH` ใช้ทดสอบ exact scoped release candidate; `herdr-mobile.spec.ts` รองรับตัวเลือกเดียวกัน. ไม่มีการเปิด native agentหรือส่งข้อความจริงจากtestsเหล่านี้. Logs/hash/reviewอยู่ vault `plans/cross-provider-handoff/herdr-chat-stability-20261108/`.

@@ -446,19 +446,33 @@ let state = { projects: [], project: null, ws: null, room: null, follow: true, s
 let timer = null;
 // per-room chat memory so switching rooms paints instantly (last 12 rooms)
 const chatCache = new Map(), chatHtmlCache = new Map();
+// Writer generation is deliberately strict: capability/status changes are not identity changes.
+function chatBinding(ws, room) {
+  const r = state.projects.flatMap(p => p.workspaces).find(w => w.id === ws)?.rooms.find(r => r.id === room);
+  return JSON.stringify([ws, room, r?.agent ?? null, r?.generation ?? null, r?.claudeSessionId ?? null]);
+}
+function herdrCanCompose(room) { return !!room && !["ended", "asleep"].includes(room.status) && !!(room.capabilities?.prompt || room.capabilities?.answer); }
+function syncHerdrControls(room) {
+  if (!String(state.ws).startsWith("herdr:")) return;
+  const allowed = herdrCanCompose(room), msg = document.getElementById("msg"), send = document.getElementById("send");
+  if (send) send.disabled = !allowed || !!msg?._continuityCapturing || (!msg?.value.trim() && !state.files.length);
+  // Keep the composer mounted for local drafts, while native actions remain capability gated.
+  document.querySelectorAll("[data-k]").forEach(b => b.disabled = b.dataset.k === "ctrlc" ? !room?.capabilities?.stop : !room?.capabilities?.keys);
+}
 // warm the other agent rooms of this workspace in the background → the first switch paints at once
 let prefetching = null;
 async function prefetchRooms(w) {
   if (prefetching === w.id || document.hidden) return; prefetching = w.id;
   try {
-    for (const r of w.rooms.filter(r => r.agent && r.status !== "asleep" && r.id !== state.room && !chatHtmlCache.has(r.id)).slice(0, 4)) {
+    for (const r of w.rooms.filter(r => r.agent && r.status !== "asleep" && r.id !== state.room && !chatHtmlCache.has(chatBinding(w.id, r.id))).slice(0, 4)) {
       if (state.ws !== w.id || document.hidden) break;
+      const binding = chatBinding(w.id, r.id);
       const c = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(r.id)}/chat?limit=150`).catch(() => null);
-      if (!c || c.kind !== "messages" || chatHtmlCache.has(r.id) || state.room === r.id) continue;
+      if (!c || c.kind !== "messages" || state.ws !== w.id || chatBinding(w.id, r.id) !== binding || chatHtmlCache.has(binding) || state.room === r.id) continue;
       const items = new Map(c.items.map(it => [it.i, it])), list = [...items.values()].sort((a, b) => a.i - b.i);
-      chatCache.set(r.id, { room: r.id, epoch: c.epoch, start: c.start, total: c.total, items });
+      chatCache.set(binding, { binding, conversation: c.conversation, room: r.id, epoch: c.epoch, start: c.start, total: c.total, items });
       const keep = state.room; state.room = r.id;   // labels (Claude / Codex) come from the room being drawn
-      try { rememberChatHtml(r.id, (c.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${c.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list)); }
+      try { rememberChatHtml(binding, (c.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${c.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list)); }
       finally { state.room = keep; }
       await new Promise(res => setTimeout(res, 300));   // gentle on 4G
     }
@@ -505,7 +519,7 @@ async function api(path, opts = {}) {
   const t0 = performance.now();
   try { return await apiRaw(path, opts); } finally { perfNote(path, performance.now() - t0); }
 }
-const liveOnlyPath = path => /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path);
+const liveOnlyPath = path => /^\/rooms\/herdr(?::|%3a)[^/]*\/[^/]+\/chat(?:\?|$)/i.test(path) || /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path);
 async function apiRaw(path, opts = {}) {
   const get = !opts.method || opts.method === "GET", cacheable = get && !liveOnlyPath(path);
   // offline: what was last read stays readable (net.check() is what notices the link coming back)
@@ -765,8 +779,9 @@ function renderProject() {
   const p = state.projects.find(x => x.name === state.project); if (!p) return renderHome();
   const w = p.workspaces.find(x => x.id === state.ws) || p.workspaces[0];
   const room = w?.rooms.find(r => r.id === state.room);
-  renderProject.binding = room && `${w.id}/${room.id}/${room.generation || ""}/${JSON.stringify(room.capabilities || {})}`;
-  const canType = !!room && room.status !== "ended" && room.status !== "asleep" && (p.source !== "herdr" || !!(room.capabilities?.prompt || room.capabilities?.answer));
+  renderProject.binding = room && chatBinding(w.id, room.id);
+  renderProject.room = room;
+  const canType = !!room && room.status !== "ended" && room.status !== "asleep" && (p.source !== "herdr" || !!room.capabilities);
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
   store.set("maw-last-view", JSON.stringify({ kind: "project", project: p.name, ws: w?.id, room: room?.id ?? null, mode: state.mode, pview: state.pview, fpath: state.fpath || "", fview: state.fview || null, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
@@ -784,7 +799,7 @@ function renderProject() {
   }
   $app.dataset.view = ""; $app.innerHTML = `${""}
     <header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}
-      ${room ? `<span class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span>` : ""}</header>
+      ${room ? `<span id="room-status" class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span>` : ""}</header>
     ${seg}
     ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
     <div class="tabs" id="tabs">${(w?.rooms || []).map(r => `<button class="tab ${r.id === state.room ? "on" : ""}" data-r="${esc(r.id)}">${dot(r.status)}<span class="t">${esc(r.title)}</span></button>`).join("")}
@@ -794,7 +809,7 @@ function renderProject() {
         <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(room.title)}</span>
         <span class="mode"><button data-m="chat" class="${state.mode === "chat" ? "on" : ""}">แชท</button><button data-m="raw" class="${state.mode === "raw" ? "on" : ""}">จอ</button></span></div>
       <div class="roominfo"><div class="ctxrow" id="ctx" hidden></div><div id="ext-room-top"></div></div>
-      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">${room.status === "asleep" ? `<div class="wake"><b>ห้องนี้ยังไม่ได้เปิดหลังรีสตาร์ท Mac</b>Superset จำแท็บนี้ไว้ แต่ยังไม่ได้เริ่ม — กดเปิดแล้ว Claude / Codex ในแท็บนี้จะคุยต่อจากเดิม<button id="wake">เปิดห้องนี้</button></div>` : (state.mode === "chat" && chatHtmlCache.get(state.room)) || "กำลังโหลด…"}</div></div>
+      <div class="screenwrap"><div class="screen ${state.mode}" id="screen">${room.status === "asleep" ? `<div class="wake"><b>ห้องนี้ยังไม่ได้เปิดหลังรีสตาร์ท Mac</b>Superset จำแท็บนี้ไว้ แต่ยังไม่ได้เริ่ม — กดเปิดแล้ว Claude / Codex ในแท็บนี้จะคุยต่อจากเดิม<button id="wake">เปิดห้องนี้</button></div>` : (state.mode === "chat" && chatHtmlCache.get(chatBinding(w.id, room.id))) || "กำลังโหลด…"}</div></div>
       ${canType ? `
       <div class="keys"><button class="key sk" id="skbtn">/ สกิล</button>${mawExt.keys.map((k, i) => !k.show || k.show({ w, room }) ? `<button class="key ${esc(k.cls || "")}" data-xk="${i}">${esc(String(k.label).replace(/^[^\p{L}\p{N}\/]+/u, ""))}</button>` : "").join("")}${[["enter", "⏎"], ["1", "1"], ["2", "2"], ["3", "3"], ["esc", "Esc"], ["up", "↑"], ["down", "↓"], ["tab", "Tab"], ["ctrlc", "Ctrl+C"]]
         .map(([k, l]) => `<button class="key ${k === "ctrlc" ? "warn" : ""}" data-k="${k}">${l}</button>`).join("")}</div>
@@ -831,6 +846,7 @@ function renderProject() {
   $app.querySelectorAll("[data-xk]").forEach(b => b.onclick = () => { try { mawExt.keys[+b.dataset.xk].onClick({ w, room }); } catch (e) { toast(e.message); } });
   extCall("onRoom", { p, w, room });
   const scr = document.getElementById("screen");
+  if (state.mode === "chat" && chatHtmlCache.has(chatBinding(w.id, room.id))) scr._chatBinding = chatBinding(w.id, room.id);
   paintPending(); // bubbles still on their way to the Mac
   // opening / switching to a room → start at the newest message (the cached chat is painted at the top otherwise)
   if (state.lastRoomShown !== state.room) { state.lastRoomShown = state.room; state.follow = true; }
@@ -840,7 +856,7 @@ function renderProject() {
   if (msg) {
     const dkey = `${w.id}/${room.id}`;
     if (state.filesRoom !== dkey) { state.filesRoom = dkey; state.files = []; } // attachments belong to one room
-    msg.oninput = () => { send.disabled = !msg.value.trim() && !state.files.length; msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight, 140) + "px"; saveDraftText(dkey, msg.value); };
+    msg.oninput = () => { send.disabled = !msg.value.trim() && !state.files.length; msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight, 140) + "px"; saveDraftText(dkey, msg.value); syncHerdrControls(room); };
     wireSlash(w, room, msg);
     extCall("onComposer", { w, room, msg });
     const att = document.getElementById("att"), fileIn = document.getElementById("fileIn");
@@ -971,12 +987,21 @@ function renderProject() {
     msg.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } };
     send.onclick = doSend;
     async function doSend() {
-      const text = msg.value.trim(), files = [...state.files]; if (!text && !files.length) return;
+      const raw = msg.value, text = raw.trim(), files = [...state.files]; if (!text && !files.length) return;
+      const herdr = isHerdr(w.id), origin = chatBinding(w.id, room.id);
+      const current = () => !herdr || (state.ws === w.id && state.room === room.id
+        && chatBinding(w.id, room.id) === origin && document.getElementById("msg") === msg
+        && herdrCanCompose(roomBinding(w.id, room.id)) && msg.value === raw
+        && state.files.length === files.length && files.every((f, i) => state.files[i] === f));
+      if (!current() || (herdr && msg._continuityCapturing)) return;
+      if (herdr) msg._continuityCapturing = true;
+      try {
       // a question card is open: the dialog holds the keyboard on the Mac, so text typed here answers its
       // "Type something." row (permissions pack) instead of being typed into the dialog as stray keys
       if (text && !files.length && window.mawDialogAnswer) {
         send.disabled = true;
         const took = await window.mawDialogAnswer(text).catch(() => false);
+        if (!current()) return;
         send.disabled = false;
         if (took === "sent") { msg.value = ""; msg.oninput(); return; }
         if (took === "kept") return;   // the card said why; the text stays in the box
@@ -988,10 +1013,12 @@ function renderProject() {
       else if (state.macDraft) {
         send.disabled = true;
         const how = await askMacDraft(state.macDraft);
+        if (!current()) return;
         send.disabled = false;
         if (!how) return;
         mode = how;
       }
+      if (!current()) return;
       state.macDraft = null;
       state.pulled = state.pulledText = null; state.pulledFiles = []; state.justSent = { room: room.id, text, at: Date.now() };
       // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
@@ -1002,14 +1029,19 @@ function renderProject() {
       pendingSends.push(pend); savePending(pend);
       msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
       paintPending(); queueSend(pend);
+      } finally {
+        if (herdr) { msg._continuityCapturing = false; if (document.getElementById("msg") === msg) syncHerdrControls(roomBinding(w.id, room.id)); }
+      }
     }
     $app.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
+      if (isHerdr(w.id) && (b.dataset.k === "ctrlc" ? !roomBinding(w.id, room.id)?.capabilities?.stop : !roomBinding(w.id, room.id)?.capabilities?.keys)) return;
       if (b.dataset.k === "ctrlc" && !b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้ง"; setTimeout(() => { delete b.dataset.armed; b.textContent = "Ctrl+C"; }, 2500); return; }
       if (state.justSent) state.justSent.done = true;
       try { if (isHerdr(w.id)) await herdrKey(w.id, room.id, b.dataset.k); else await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/send`, { method: "POST", body: JSON.stringify({ key: b.dataset.k }) }); setTimeout(loadScreen, 300); }
       catch (e) { toast("ส่งปุ่มไม่ได้: " + e.message); }
     });
   }
+  syncHerdrControls(room);
   loadScreen();
   setTimeout(() => { if (state.project === p.name && state.ws === w.id) prefetchRooms(w); }, 1500);
 }
@@ -1147,30 +1179,35 @@ function renderList(list) {
 }
 
 async function loadChat(scr, older) {
-  const ws = state.ws, room = state.room;
+  const ws = state.ws, room = state.room, mode = state.mode, binding = chatBinding(ws, room);
   const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
   const q = older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : "?limit=150";
-  const c = await api(base + q);
+  const request = {}; scr._chatRequest = request;
+  const c = await api(base + q).catch(e => { if (scr._chatRequest !== request) return { kind: "stale" }; throw e; });
   // the reply of a room we already left must not land in the room on screen now
-  if (state.ws !== ws || state.room !== room || !scr.isConnected) return { kind: "stale" };
+  if (scr._chatRequest !== request || state.ws !== ws || state.room !== room || state.mode !== mode || chatBinding(ws, room) !== binding || document.getElementById("screen") !== scr || !scr.isConnected) return { kind: "stale" };
+  // Offline HTTP cache is not a new verification of this writer/session binding.
+  if (isHerdr(ws) && c._offlineAt) return { kind: "unavailable", reason: "history_unavailable" };
   if (c.kind !== "messages") return c;
+  scr.querySelector("[data-history-transient]")?.remove();
   const prev = state.chat;
   // switching rooms: reuse that room's cached items (shown instantly by renderProject), refresh in place
-  if (!prev || prev.room !== state.room) { const cached = chatCache.get(state.room); if (cached && cached.epoch === c.epoch && c.total >= cached.total) state.chat = cached; }
+  if (!prev || prev.binding !== binding) { const cached = chatCache.get(binding); if (cached && cached.epoch === c.epoch && cached.conversation === c.conversation && c.total >= cached.total) state.chat = cached; }
   const cur = state.chat;
-  if (!cur || cur.room !== state.room || cur.epoch !== c.epoch || c.total < cur.total) { state.chat = { room: state.room, epoch: c.epoch, start: c.start, total: c.total, items: new Map() }; scr._sig = ""; }
-  chatCache.set(state.room, state.chat);
+  if (!cur || cur.binding !== binding || cur.conversation !== c.conversation || cur.epoch !== c.epoch || c.total < cur.total) { state.chat = { binding, conversation: c.conversation, room: state.room, epoch: c.epoch, start: c.start, total: c.total, items: new Map() }; scr._sig = ""; }
+  chatCache.set(binding, state.chat);
+  scr._chatBinding = binding;
   const ch = state.chat;
   for (const it of c.items) ch.items.set(it.i, it);
   ch.start = older ? c.start : Math.min(ch.start, c.start);
   const grew = c.total > ch.total; ch.total = c.total;
   const list = [...ch.items.values()].sort((a, b) => a.i - b.i);
-  const sig = ch.total + ":" + list.filter(m => m.queued).length + ":" + list.filter(m => m.canceled).length + ":" + list.filter(m => m.tool).map(m => m.tool.bg === "running" ? 2 : m.tool.output == null ? 0 : 1).join("") + ":" + [...state.open].join(",");
+  const sig = ch.start + ":" + ch.total + ":" + list.length + ":" + list.filter(m => m.queued).length + ":" + list.filter(m => m.canceled).length + ":" + list.filter(m => m.tool).map(m => m.tool.bg === "running" ? 2 : m.tool.output == null ? 0 : 1).join("") + ":" + [...state.open].join(",");
   if (scr._sig === sig) { if (pendingSends.length) { reconcilePending(list); paintPending(); } markLive(); return c; }
   const atBottom = scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60, oldH = scr.scrollHeight, oldTop = scr.scrollTop;
   scr._sig = sig;
   scr.innerHTML = (ch.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${ch.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list);
-  rememberChatHtml(state.room, scr.innerHTML);
+  rememberChatHtml(binding, scr.innerHTML);
   reconcilePending(list); paintPending(); markLive();
   fillAudioMeta(scr);
   scr.querySelector("#older")?.addEventListener("click", () => loadChat(scr, true));
@@ -1179,7 +1216,7 @@ async function loadChat(scr, older) {
   scr.querySelectorAll("[data-x]").forEach(a => a.onclick = () => { const k = a.dataset.x; state.open.has(k) ? state.open.delete(k) : state.open.add(k); scr._sig = ""; loadChat(scr); });
   if (older) scr.scrollTop = scr.scrollHeight - oldH + oldTop;
   else if (state.follow || atBottom || !prev) scr.scrollTop = scr.scrollHeight;
-  else if (grew) showNewPill(scr);
+  else { scr.scrollTop = oldTop; if (grew) showNewPill(scr); }
   return c;
 }
 // voice / audio files in the chat: small line under the player — length · size · type (size from a HEAD request, cached)
@@ -1545,26 +1582,43 @@ async function loadSuggestion() {
     box.querySelector(".go").onclick = () => { msg.value = sg.text; msg.oninput(); hide(); document.getElementById("send").click(); };
   } catch { hide(); }
 }
+function showHistoryUnavailable(scr, binding, reason) {
+  const transient = !reason || ["history_changed", "history_unavailable", "native_file_missing", "history_epoch_changed"].includes(reason);
+  const verified = transient && scr._chatBinding === binding && chatCache.get(binding)?.conversation;
+  const top = scr.scrollTop;
+  scr.querySelector("[data-history-transient]")?.remove();
+  if (verified) {
+    const note = document.createElement("div"); note.className = "sys"; note.dataset.historyTransient = "";
+    note.textContent = "กำลังเชื่อมต่อประวัติอีกครั้ง — แสดงประวัติที่ยืนยันล่าสุดของ session เดิม (ข้อมูลเก่า)";
+    scr.appendChild(note); scr.scrollTop = top;
+  } else {
+    scr._sig = ""; scr._chatBinding = null;
+    scr.innerHTML = '<div class="empty">ยังอ่านประวัติแชทไม่ได้<br><button data-herdr-screen>ดูจอจริง</button></div>';
+    scr.querySelector('[data-herdr-screen]').onclick = () => { state.mode = "raw"; renderProject(); };
+  }
+  paintPending();
+}
 async function loadScreen() {
   const scr = document.getElementById("screen"); if (!scr || !state.room || scr.querySelector(".wake")) return;
   // one request per room at a time: on slow 4G the 2.5 s poll would otherwise pile up behind itself
-  const key = `${state.ws}/${state.room}/${state.mode}`;
+  const binding = chatBinding(state.ws, state.room), mode = state.mode;
+  const key = JSON.stringify([binding, mode]);
+  const current = () => binding === chatBinding(state.ws, state.room) && state.mode === mode && document.getElementById("screen") === scr && scr.isConnected;
   if (loadScreen.busy?.key === key && Date.now() - loadScreen.busy.at < 15_000) return;
   const mine = loadScreen.busy = { key, at: Date.now() };
   loadSuggestion();
   try {
     if (state.mode === "chat") {
       const c = await loadChat(scr);
+      if (!current() || c.kind === "stale") return;
       if (c.kind === "text") { const html = `<div class="msg ai ${esc(agentKind())}"><div class="who">${esc(agentName())}</div><div class="bubble">${md(c.text.replace(/^\[earlier output omitted\]\n/, ""))}</div></div>`; if (scr._sig !== html) { scr._sig = html; scr.innerHTML = html; scr.scrollTop = scr.scrollHeight; } }
       else if (c.kind === "unavailable" || (c.kind === "none" && String(state.ws).startsWith("herdr:"))) {
-        scr.innerHTML = '<div class="empty">ยังอ่านประวัติแชทไม่ได้<br><button data-herdr-screen>ดูจอจริง</button></div>';
-        scr.querySelector('[data-herdr-screen]').onclick = () => { state.mode = "raw"; renderProject(); };
-        paintPending();
+        showHistoryUnavailable(scr, binding, c.reason);
       }
       else if (c.kind === "none") { state.mode = "raw"; scr.className = "screen raw"; return loadScreen(); }
     } else {
       const s = await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/screen?lines=1000`);
-      if (key !== `${state.ws}/${state.room}/${state.mode}` || !scr.isConnected) return;
+      if (!current()) return;
       // keep the terminal's own colours (tmux sends them; Superset's reader returns plain text)
       const lines = String(s.content ?? "").replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").split("\n").filter(l => !SEP.test(stripAnsi(l)));
       const html = ansiHtml(lines.join("\n").replace(/(\n\s*){3,}/g, "\n\n").trimEnd());
@@ -1577,7 +1631,8 @@ async function loadScreen() {
       }
     }
   } catch (e) {
-    if (e.message === "unauthorized" || !scr.isConnected || key !== `${state.ws}/${state.room}/${state.mode}`) return;
+    if (e.message === "unauthorized" || !current()) return;
+    if (isHerdr(state.ws) && mode === "chat") { showHistoryUnavailable(scr, binding, "history_unavailable"); return; }
     // offline with nothing kept for this view: say so, but never wipe what is already on screen
     if (e.offline) { if (!scr.querySelector(".msg, .rawnote")) scr.innerHTML = `<div class="sys">📴 ออฟไลน์ — ห้องนี้ยังไม่มีข้อมูลในเครื่อง (ต้องเคยเปิดตอนมีเน็ต) · พิมพ์ทิ้งไว้ได้ จะส่งเมื่อเชื่อมต่อได้</div>`; paintPending(); return; }
     scr.textContent = "อ่านไม่ได้: " + e.message;
@@ -2461,15 +2516,23 @@ function refreshTabs() {
   const tabs = document.getElementById("tabs"); if (!w || !tabs) return;
   const ids = [...tabs.querySelectorAll("[data-r]")].map(b => b.dataset.r).join(",");
   const currentRoom = w.rooms.find(r => r.id === state.room);
-  const bindingChanged = p.source === "herdr" && renderProject.binding !== (currentRoom && `${w.id}/${currentRoom.id}/${currentRoom.generation || ""}/${JSON.stringify(currentRoom.capabilities || {})}`);
+  const bindingChanged = p.source === "herdr" && renderProject.binding !== (currentRoom && chatBinding(w.id, currentRoom.id));
   if (bindingChanged || ids !== w.rooms.map(r => r.id).join(",")) {
     const draft = document.getElementById("msg")?.value;
-    if (bindingChanged) { state.chat = null; chatCache.delete(state.room); chatHtmlCache.delete(state.room); }
+    if (bindingChanged) { state.chat = null; state.open = new Set(); }
+    const scroll = document.getElementById("screen")?.scrollTop, follow = state.follow;
     renderProject();
     if (draft) { const m = document.getElementById("msg"); if (m) { m.value = draft; m.oninput(); } }
+    if (!bindingChanged && !follow && scroll !== undefined) { const scr = document.getElementById("screen"); if (scr) scr.scrollTop = scroll; }
     return;
   }
-  for (const r of w.rooms) { const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
+  // Preserve captured room closures while refreshing capabilities/status; identity was checked above.
+  if (p.source === "herdr" && currentRoom) {
+    if (renderProject.room) Object.assign(renderProject.room, currentRoom);
+    syncHerdrControls(currentRoom);
+    const status = document.getElementById("room-status"); if (status) status.innerHTML = `${dot(currentRoom.status)}${ST[currentRoom.status]}`;
+  }
+  for (const r of w.rooms) { const title = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .t`); if (title) title.textContent = r.title; const b = tabs.querySelector(`[data-r="${CSS.escape(r.id)}"] .dot`); if (b) b.className = `dot s-${r.status}`; }
 }
 window.addEventListener("popstate", () => { if (state.project || state.page) renderHome(); state.lastRoomShown = null; });
 // New version on the Mac → reload by itself (only when nothing is half-typed), so the phone never runs stale code
