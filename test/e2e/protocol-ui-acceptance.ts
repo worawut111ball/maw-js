@@ -57,6 +57,52 @@ const origin='https://maw-acceptance.invalid';
 const repo=resolve(import.meta.dirname,'../..');
 const uiRoot=resolve(repo,'ui/mobile');
 const bindingKey=(b:any)=>JSON.stringify([b?.agent,b?.nativeId,b?.generation,b?.model??null,b?.route??null,b?.cursor]);
+export interface AcceptanceSwitchIdentity {
+  id:string;roomId:string;workspace:string;room:string;target:'codex'|'claude';model:string;
+  expectedRevision:number;from:{agent:string;nativeId:string;generation:string;model?:string;route?:string;cursor:number};
+}
+export interface AcceptanceSwitchObservation {sequence:number;method:string;path:string;status:number;response:any}
+const stoppedSwitchStates=['blocked','uncertain','failed'] as const;
+const safeSwitchReasons=[
+  'staged_source_target_unverified','launch_unverified_source_preserved','resume_identity_mismatch',
+  'target_identity_unverified','target_not_ready_for_context','context_receipt_unverified','target_changed_during_context',
+  'backend_unavailable','capability_unavailable','agent_changed','preflight_unverifiable',
+  'history_identity_changed','history_cursor_unavailable','context_facts_unavailable','context_goal_missing',
+  'source_changed_during_checkpoint','history_changed_during_checkpoint','target_policy_unverified',
+  'side_effect_unverified','checkpoint_unavailable','canceled_by_user',
+] as const;
+export class AcceptanceSwitchStopped extends Error {
+  readonly code:`acceptance_switch_${typeof stoppedSwitchStates[number]}`;
+  readonly reasonCode:typeof safeSwitchReasons[number]|'unclassified_reason';
+  constructor(readonly state:typeof stoppedSwitchStates[number],reason:unknown){
+    const reasonCode=typeof reason==='string'&&(safeSwitchReasons as readonly string[]).includes(reason)?reason as typeof safeSwitchReasons[number]:'unclassified_reason';
+    const code=`acceptance_switch_${state}` as const;
+    super(code+':'+reasonCode);this.name='AcceptanceSwitchStopped';this.code=code;this.reasonCode=reasonCode;
+  }
+}
+/** Pure observation: no polling, retry, advance or transport writes. Pending states remain pending. */
+export function inspectAcceptanceSwitch(observations:readonly AcceptanceSwitchObservation[],expected:AcceptanceSwitchIdentity,prefix:string){
+  let latest:AcceptanceSwitchObservation|undefined;
+  const exact=prefix+'/operations/'+encodeURIComponent(expected.id);
+  for(const item of observations){
+    const relevant=item.method==='GET'&&(item.path===prefix||item.path===exact)
+      ||item.method==='POST'&&(item.path===prefix+'/switch'||item.path===exact+'/advance');
+    const op=item.response?.operation;
+    if(!relevant||item.status!==200||item.response?.ok!==true||!Number.isSafeInteger(item.sequence)||item.sequence<1
+      ||op?.id!==expected.id||op.roomId!==expected.roomId||op.target!==expected.target||op.model!==expected.model
+      ||op.expectedRevision!==expected.expectedRevision||bindingKey(op.from)!==bindingKey(expected.from))continue;
+    if(item.path===prefix){
+      const room=item.response.room;
+      if(room?.id!==expected.roomId||room.workspace!==expected.workspace||room.room!==expected.room
+        ||!Number.isSafeInteger(room.revision)||room.revision<expected.expectedRevision||room.revision>expected.expectedRevision+1
+        ||room.operationId!==undefined&&room.operationId!==expected.id)continue;
+    }
+    // Request admission order, not response arrival order: late older HTTP must not replace newer evidence.
+    if(!latest||item.sequence>latest.sequence)latest=item;
+  }
+  if(latest&&(stoppedSwitchStates as readonly unknown[]).includes(latest.response.operation.state))throw new AcceptanceSwitchStopped(latest.response.operation.state,latest.response.operation.reason);
+  return latest;
+}
 const pickKey=(p:FactPick)=>JSON.stringify([p.field,p.seq,p.sourceId,p.agent,p.nativeId,p.eventHash]);
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 async function until<T>(fn:()=>T|Promise<T>,timeout:number,label:string):Promise<NonNullable<T>>{
@@ -79,7 +125,8 @@ export async function acceptProtocolSwitch(page:Page,host:ProtocolAcceptanceHost
   const prefix='/mobile/rooms/'+encodeURIComponent(host.workspace)+'/'+encodeURIComponent(host.room)+'/continuity';
   const evidence:ApiObservation[]=[],blocked:string[]=[],bridgeErrors:string[]=[];
   async function waiting<T>(fn:()=>T|Promise<T>,ms:number,label:string){return until(async()=>{if(bridgeErrors.length)throw new Error("acceptance_bridge_failure");return fn();},ms,label);}
-  const replies:{method:string;path:string;body:any;response:any;status:number}[]=[];
+  let requestSequence=0;
+  const replies:(AcceptanceSwitchObservation&{body:any})[]=[];
   const uiHashes:Record<string,string>={};
   const source=await readFile(host.setup.sourcePath); // source hash, never expose source contents
   const setupHash=sha(source);
@@ -99,13 +146,14 @@ export async function acceptProtocolSwitch(page:Page,host:ProtocolAcceptanceHost
     const path=url.pathname;
     if(path.startsWith('/mobile/')){
       if(!allowed(req.method(),path)){if(path!=='/mobile/perf')blocked.push(req.method()+' '+path);return route.abort('blockedbyclient');}
+      const sequence=++requestSequence;
       const body=req.postDataBuffer();
       const response=await requestMobileApi(host.api,{path:path+url.search,method:req.method(),headers:await req.allHeaders(),...(body?{body:new Uint8Array(body)}:{})},host.requestHeaders);
       const bytes=new Uint8Array(await response.arrayBuffer());
       let parsed:any;try{parsed=JSON.parse(new TextDecoder().decode(bytes));}catch{}
       let requestBody:any;try{requestBody=req.postDataJSON();}catch{}
       evidence.push({method:req.method(),path:(path.startsWith(prefix)?'/mobile/rooms/<workspace>/<room>/continuity'+path.slice(prefix.length):path).replace(/\/operations\/[^/]+/,'/operations/<id>').replace(/\/turns\/[^/]+/,'/turns/<id>'),status:response.status,requestHash:sha(body??''),responseHash:sha(bytes)});
-      replies.push({method:req.method(),path,body:requestBody,response:parsed,status:response.status});
+      replies.push({sequence,method:req.method(),path,body:requestBody,response:parsed,status:response.status});
       const outHeaders=Object.fromEntries(response.headers);delete outHeaders['content-length'];delete outHeaders['content-encoding'];
       return route.fulfill({status:response.status,headers:outHeaders,body:Buffer.from(bytes)});
     }
@@ -152,8 +200,14 @@ export async function acceptProtocolSwitch(page:Page,host:ProtocolAcceptanceHost
     const selection=replies.find(r=>r.method==='POST'&&r.path===prefix+'/facts/selections');
     assert.equal(selection?.status,200);assert.equal(selection?.body.id,operationId);
     assert.deepEqual(selection?.body.selections.map(pickKey).sort(),scenario.facts.map(pickKey).sort());
-    // Read the actual progress endpoint until the real engine completes, never manufacture/advance via helper.
-    const ready=await waiting(()=>replies.findLast(r=>r.path===prefix&&r.status===200&&r.response?.operation?.id===operationId&&r.response.operation.state==='ready-awaiting-user'&&r.response.room.active===scenario.target&&!r.response.room.operationId),timeout,'actual-switch-completion');
+    const accepted=switched.response?.operation;
+    assert(accepted?.id===operationId&&accepted.roomId===preview.roomId&&accepted.target===scenario.target&&accepted.model===scenario.model&&accepted.expectedRevision===switched.body.expectedRevision&&accepted.from,'acceptance_switch_receipt_mismatch');
+    const expected:AcceptanceSwitchIdentity={id:operationId,roomId:preview.roomId,workspace:host.workspace,room:host.room,target:scenario.target,model:scenario.model,expectedRevision:switched.body.expectedRevision,from:structuredClone(accepted.from)};
+    // Stop only on exact current evidence. GET/poll never advances; blocked needs explicit operator retry.
+    const ready=await waiting(()=>{
+      const current=inspectAcceptanceSwitch(replies,expected,prefix);
+      return current?.path===prefix&&current.response.operation.state==='ready-awaiting-user'&&current.response.room.active===scenario.target&&!current.response.room.operationId?current:undefined;
+    },timeout,'actual-switch-completion');
     assert.equal(ready.response.room.id,preview.roomId,'logical room changed');
     const transport=await waiting(()=>replies.findLast(r=>r.path===prefix+'/transport'&&r.status===200&&r.response?.transport?.kind==='owned-protocol'&&r.response.transport.state==='idle'&&r.response.transport.capabilities?.textTurn===true&&r.response.transport.roomId===preview.roomId&&r.response.transport.binding.agent===scenario.target&&r.response.transport.binding.model===scenario.model),timeout,'owned-text-ready');
     assert.equal(bindingKey(transport.response.transport.binding),bindingKey(ready.response.operation.targetBinding),'ready/transport binding mismatch');

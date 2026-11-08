@@ -56,6 +56,14 @@ Focused command: `MAW_PROTOCOL_UI_FIXTURES=1 NODE_ENV=test MAW_TEST_MODE=1 bun t
 
 `result.nativeExecutionVerified:false` และ `productionCertified:false` เสมอ ไม่ยก `setup.runtime` label เป็น proof. `authorizationPurpose` อ่านจาก API, `draftOutcome` แยก `cleared`/`retained-original`; completed receipt ไม่บังคับล้าง draft หาก guard เปลี่ยนระหว่างรอ ACK
 
+## Fail-fast ของ switch — 9 พ.ย. 69
+
+`acceptProtocolSwitch` หยุด attempt เมื่อ response HTTP 200/`ok:true` ของ exact operation อยู่ใน `blocked`, `uncertain` หรือ `failed` แทนรอ `actual-switch-completion` จน timeout. ใช้ `AcceptanceSwitchStopped.code` เป็น `acceptance_switch_blocked`, `acceptance_switch_uncertain` หรือ `acceptance_switch_failed`; `reasonCode` เป็น safe enum ที่ helper allowlist เท่านั้น เช่น `staged_source_target_unverified`. reason อื่นคืน `unclassified_reason` ไม่แนบ raw text/body/native ID ใน error
+
+การจับคู่ตรวจ scoped route, operation ID, logical room, target/model, expected revision และ full source binding. Current-room response ต้องตรง workspace/room/revision/active operation ด้วย; exact operation lookup ตรวจ fingerprint เดียวกัน. เลือกหลักฐานด้วยลำดับเริ่ม request ไม่ใช่เวลาที่ response กลับ จึงไม่ให้ response เก่าที่กลับช้าทับหลักฐานใหม่. `waiting-safe-point`, `checkpointed`, `preparing-target`, `delivering-context` และ state ที่ไม่รู้จักยังรอต่อ; `blocked` ต้อง explicit retry ตาม engine จึงจบ attempt นี้โดยไม่ retry/advance/send เพิ่มเอง
+
+Focused fixtures: `MAW_PROTOCOL_UI_FIXTURES=1 NODE_ENV=test MAW_TEST_MODE=1 bun test test/e2e/protocol-ui-acceptance.test.ts` ครอบคลุม actual browser fixture ทั้ง happy path/uncertain/lost ACK, pure terminal states, foreign/stale binding, deferred response order และ safe unknown reason. Pure progress tests รันโดยไม่เปิด opt-in ได้; browser fixtures ยัง opt-in. เป็น fixture-only ไม่ใช่ live/native acceptance
+
 ## การ cleanup
 
 Root ถือ native lifecycle ทั้งหมด: helper ไม่ bootstrap/close/start/stop/dispose เอง ถ้า timeout/uncertain ไม่ retry หรือเรียก cleanup เพื่อเดาว่าปลอดภัย เมื่อรันจริงต้องให้ native pending effect จบหรือเข้าสู่ explicit reconciliation ตาม contractก่อน Root ทำ cleanup ห้ามใช้ user pane `wM:p1` และห้ามเผย raw failure/body/auth ใน public report
@@ -73,3 +81,4 @@ Root ถือ native lifecycle ทั้งหมด: helper ไม่ bootstra
 | 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม in-process bridge/interface + fixture-only browser tests; แจ้ง P1 header owned identity โดยไม่แก้ UI freeze |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | รับ owner P1 จาก Root แก้ cached protocol fields และเพิ่ม regression; negative fixtures ต้องล้มที่ stage ที่กำหนดจริง |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม bounded-purpose validation และ actual API/composition/service/parser/context-verifier integration; แยก DI/native evidence และ preserved draft หลัง budgetหมด |
+| 9 พ.ย. 69 | Codex cmdmap/p5 | Fail-fast exact switch blocked/uncertain/failed ด้วย safe reason enum; เพิ่ม scope/request-order/negative fixtures โดยไม่แก้ product หรือ native |
