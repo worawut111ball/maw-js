@@ -1,5 +1,6 @@
 /** Codex app-server 0.164 v2, private DI transport only. No process, HTTP or import-time I/O. */
 import { isAbsolute, normalize } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { ProtocolError, type NativeProtocolSession, type ProtocolWire, type ProtocolPolicy, type ProtocolHooks, type ProtocolIdentity, type ProtocolTurn } from './types';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const object=(v:any):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -8,7 +9,7 @@ const path=(v:unknown):v is string=>token(v,4096)&&isAbsolute(v)&&normalize(v)==
 const key=(id:any)=>`${typeof id}:${id}`;
 const requestId=(id:any)=>typeof id==='string'&&token(id,1024)||Number.isSafeInteger(id);
 type Pending={method:string;resolve:(v:any)=>void;reject:(e:ProtocolError)=>void;timer:ReturnType<typeof setTimeout>};
-type Active={operationId:string;turnId?:string;acked:boolean;pending:Map<string,string>;items:Map<string,any>;completion?:any;resolve:(v:ProtocolTurn)=>void;reject:(e:ProtocolError)=>void;timer:ReturnType<typeof setTimeout>};
+type Active={operationId:string;turnId?:string;acked:boolean;hydrating?:boolean;deprecationSeen?:boolean;transientErrors?:number;pending:Map<string,string>;items:Map<string,any>;completion?:any;resolve:(v:ProtocolTurn)=>void;reject:(e:ProtocolError)=>void;timer:ReturnType<typeof setTimeout>};
 const itemTypes=new Set(['userMessage','hookPrompt','agentMessage','functionCallOutput','plan','reasoning','commandExecution','fileChange','mcpToolCall','dynamicToolCall','collabAgentToolCall','subAgentActivity','webSearch','imageView','sleep','imageGeneration','enteredReviewMode','exitedReviewMode','contextCompaction']);
 const toolTypes=new Set(['commandExecution','fileChange','mcpToolCall','dynamicToolCall','collabAgentToolCall','imageGeneration']);
 const passive=new Set(['thread/started','thread/name/updated','thread/tokenUsage/updated','account/rateLimits/updated','item/agentMessage/delta','item/reasoning/textDelta','item/reasoning/summaryTextDelta','item/reasoning/summaryPartAdded','item/commandExecution/outputDelta','item/fileChange/outputDelta','item/mcpToolCall/progress','turn/diff/updated','turn/plan/updated']);
@@ -28,6 +29,7 @@ export class CodexProtocolSession implements NativeProtocolSession {
   private initializeResultSeen=false;
   private expectedNativeId?:string;
   private openingThreadId?:string;
+  private resumeDeprecationSeen=false;
   private lastFrame?:CodexProtocolDiagnostics['lastFrame'];
   private failureFrame?:CodexProtocolDiagnostics['lastFrame'];
   private pumping=false;
@@ -141,6 +143,18 @@ export class CodexProtocolSession implements NativeProtocolSession {
     return active;
   }
   private notification(method:string,p:any){
+    if(method==='deprecationNotice'){
+      // Exact 0.164 informational schema, limited to one notice per specific deprecated RPC window.
+      const active=this.active;
+      const hydration=!!active?.hydrating&&!!active.completion&&[...this.rpc.values()].some(v=>v.method==='thread/read');
+      const resume=this.opening&&this.initializeResultSeen&&!this.identity&&!active&&!!this.expectedNativeId&&[...this.rpc.values()].some(v=>v.method==='thread/resume');
+      if(!hydration&&!resume||hydration&&active!.deprecationSeen||resume&&this.resumeDeprecationSeen)throw this.poison('notification_scope_mismatch');
+      const bounded=(v:unknown,max:number)=>typeof v==='string'&&!v.includes('\0')&&Buffer.byteLength(v)<=max;
+      if(!object(p)||Object.keys(p).some(k=>!['summary','details'].includes(k))||!bounded(p.summary,4096)||!p.summary.trim()
+        ||Object.hasOwn(p,'details')&&p.details!==null&&!bounded(p.details,8192))throw this.poison('invalid_protocol_frame');
+      if(hydration)active!.deprecationSeen=true;else this.resumeDeprecationSeen=true;
+      return; // No text retained/exposed, timer reset, readiness, approval or completion grant.
+    }
     if(method==='remoteControl/status/changed'){
       // 0.164 schema: global remote-control metadata, never thread/turn/approval evidence.
       // The server may enqueue it immediately after initialize's response, before open resumes.
@@ -171,10 +185,30 @@ export class CodexProtocolSession implements NativeProtocolSession {
       if(p?.threadId!==undefined&&this.identity&&p.threadId!==this.identity.nativeId)throw this.poison('notification_scope_mismatch');
       if(p?.turnId!==undefined&&this.active?.turnId&&p.turnId!==this.active.turnId)throw this.poison('notification_scope_mismatch');return;
     }
-    if(method==='error'||method==='model/rerouted')throw this.poison(method==='error'?'native_turn_error':'model_rerouted');
+    if(method==='error'){
+      const active=this.active,e=p?.error;
+      const text=(v:unknown)=>typeof v==='string'&&!v.includes('\0')&&Buffer.byteLength(v)<=8192;
+      const nullableText=(v:unknown)=>v==null||text(v);
+      // Exact 0.164 StreamError is an intermediate native retry, not a client resend instruction.
+      if(!active?.turnId||active.completion||!object(p)||Object.keys(p).some(k=>!['error','threadId','turnId','willRetry'].includes(k))
+        ||p.threadId!==this.identity?.nativeId||p.turnId!==active.turnId||p.willRetry!==true||(active.transientErrors??0)>=8
+        ||!object(e)||Object.keys(e).some(k=>!['message','additionalDetails','codexErrorInfo','misalignment'].includes(k))||!text(e.message)
+        ||!nullableText(e.additionalDetails)||e.codexErrorInfo!=null&&typeof e.codexErrorInfo!=='string'&&!object(e.codexErrorInfo)
+        ||e.misalignment!=null&&(!object(e.misalignment)||Object.keys(e.misalignment).some(k=>!['detailedExplanation','errorType','reviewTarget','steer'].includes(k))
+          ||!['detailedExplanation','errorType','reviewTarget'].every(k=>nullableText(e.misalignment[k]))
+          ||e.misalignment.steer!=null&&(!object(e.misalignment.steer)||Object.keys(e.misalignment.steer).some(k=>k!=='message')||!text(e.misalignment.steer.message)))
+        ||Buffer.byteLength(JSON.stringify(e))>16384)throw this.poison('native_turn_error');
+      active.transientErrors=(active.transientErrors??0)+1;
+      return; // Keep original timers, items, approvals and terminal requirements; never write to the wire.
+    }
+    if(method==='model/rerouted')throw this.poison('model_rerouted');
     if(!['turn/started','turn/completed','item/started','item/completed'].includes(method))throw this.poison('unsupported_notification');
     const active=this.scoped(p);
     if(method==='turn/started'||method==='turn/completed'){
+      if(active.completion){
+        if(method!=='turn/completed'||!isDeepStrictEqual(active.completion,p.turn))throw this.poison('turn_not_safely_completed',true);
+        return; // The first terminal snapshot is immutable across the hydration await.
+      }
       this.bindTurn(active,p.turn);
       if(method==='turn/completed'){
         if(p.turn.status!=='completed'||active.pending.size||this.pendingApproval)throw this.poison('turn_not_safely_completed',true);
@@ -194,8 +228,14 @@ export class CodexProtocolSession implements NativeProtocolSession {
     if(item.status!=='completed'||item.error!=null||item.success===false||item.type==='commandExecution'&&item.exitCode!==0)throw this.poison('native_tool_failed',true);
   }
   private finish(active:Active){
-    if(this.active!==active||!active.acked||!active.completion)return;
+    if(this.active!==active||!active.acked||!active.completion||active.hydrating)return;
     const turn=active.completion;
+    if(turn.itemsView==='summary'||turn.itemsView==='notLoaded'){
+      if(active.pending.size||this.pendingApproval)throw this.poison('turn_not_safely_completed',true);
+      active.hydrating=true;
+      void this.hydrateCompletion(active).catch(e=>this.poison(e instanceof ProtocolError?e.code:'turn_not_safely_completed',true));
+      return;
+    }
     if(turn.items.length>10_000||turn.itemsView!==undefined&&turn.itemsView!=='full'||active.pending.size||this.pendingApproval)throw this.poison('turn_not_safely_completed',true);
     for(const item of turn.items){if(!object(item)||!token(item.id)||!itemTypes.has(item.type)||active.items.size+active.pending.size>=10_000)throw this.poison('invalid_native_item',true);if(item.error!=null||item.status!==undefined&&item.status!=='completed')throw this.poison('native_item_failed',true);if(toolTypes.has(item.type))this.toolCompleted(item);active.items.set(item.id,item);}
     const final=[...active.items.values()].filter(i=>i.type==='agentMessage'&&(i.phase==null||i.phase==='final_answer'));
@@ -203,6 +243,28 @@ export class CodexProtocolSession implements NativeProtocolSession {
     const text=final.map(i=>i.text).join('\n');
     clearTimeout(active.timer);this.active=undefined;
     active.resolve({operationId:active.operationId,nativeId:this.identity!.nativeId,turnId:active.turnId!,text,state:'completed'});
+  }
+  /** 0.164 terminal notifications contain a display summary, not full history. Read once; never resend a turn. */
+  private async hydrateCompletion(active:Active){
+    const result=await this.request('thread/read',{threadId:this.identity!.nativeId,includeTurns:true});
+    this.ensure();if(this.active!==active)throw this.poison('turn_not_safely_completed',true);
+    const t=result?.thread;
+    if(!object(t)||t.id!==this.identity!.nativeId||t.cwd!==this.policy.cwd||t.model!=null&&t.model!==this.policy.model||t.modelProvider!==this.policy.modelProvider
+      ||t.ephemeral!==false||t.forkedFromId!=null||t.status?.type!=='idle'||!Array.isArray(t.turns)||t.turns.length>10_000
+      ||t.turns.some((v:any)=>!object(v)||v.status==='inProgress')||active.pending.size||this.pendingApproval)throw this.poison('turn_not_safely_completed',true);
+    const matches=t.turns.filter((v:any)=>v.id===active.turnId),full=matches[0];
+    if(matches.length!==1||full.status!=='completed'||full.error!=null||full.itemsView!=='full'||!Array.isArray(full.items)||full.items.length>10_000)throw this.poison('turn_not_safely_completed',true);
+    const byId=new Map<string,any>();
+    for(const item of full.items){
+      if(!object(item)||!token(item.id)||byId.has(item.id))throw this.poison('invalid_native_item',true);
+      byId.set(item.id,item);
+    }
+    // Hydration cannot erase observed work or contradict the terminal display summary.
+    for(const item of [...active.items.values(),...active.completion.items]){
+      const loaded=byId.get(item.id);
+      if(!loaded||loaded.type!==item.type||item.type==='agentMessage'&&(loaded.text!==item.text||loaded.phase!==item.phase))throw this.poison('turn_not_safely_completed',true);
+    }
+    active.completion=structuredClone(full);active.hydrating=false;this.finish(active);
   }
   private async approve(frame:any){
     const p=frame.params,active=this.active,id=key(frame.id);

@@ -232,3 +232,170 @@ test.skipIf(!existsSync(schemaRoot))('MCP lifecycle fixtures conform to generate
  const schema=JSON.parse(readFileSync(join(schemaRoot,'v2/McpServerStatusUpdatedNotification.json'),'utf8'));
  for(const status of ['starting','ready','failed','cancelled'])expect(schemaCheck(mcpStatus({status}),schema,schema)).toBe(true);expect(schemaCheck(mcpStatus({status:'connected'}),schema,schema)).toBe(false);expect(schemaCheck(mcpStatus({failureReason:'unknown'}),schema,schema)).toBe(false);
 });
+
+describe('Exact-pin terminal summary hydrates full history once',()=>{
+ const readResult=(items:any[]=[finalItem()])=>({thread:{...thread(),turns:[turn('completed',items)]}});
+ const terminal=(wire:Wire,view:string,items:any[])=>event(wire,'turn/completed',{threadId,turn:{...turn('completed',items),itemsView:view}});
+ for(const conflict of [false,true])test(`terminal duplicate during deferred hydration conflict=${conflict}`,async()=>{
+  const h=fixture(),{pending}=await running(h);let read:any;h.wire.onSend=f=>{if(f.method==='thread/read')read=f;};
+  terminal(h.wire,'summary',[finalItem()]);await tick();
+  const item={...finalItem(),...(conflict?{text:'replacement'}:{})};terminal(h.wire,'summary',[item]);await tick();
+  h.wire.push({id:read.id,result:readResult([item])});
+  if(conflict){await expect(pending).rejects.toMatchObject({code:'turn_not_safely_completed',uncertain:true});expect(h.session.idle).toBe(false);}
+  else expect((await pending).text).toBe(finalItem().text);
+  expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const model of [undefined,null,policy.model])test(`hydrated optional configured model ${String(model)} follows open semantics`,async()=>{
+  const h=fixture(),{pending}=await running(h);h.wire.onSend=f=>{if(f.method==='thread/read'){const r:any=readResult();if(model===undefined)delete r.thread.model;else r.thread.model=model;h.wire.push({id:f.id,result:r});}};
+  terminal(h.wire,'summary',[finalItem()]);expect((await pending).state).toBe('completed');
+ });
+ for(const view of ['summary','notLoaded'])test(`${view} waits for a single exact read, not a turn replay`,async()=>{
+  const h=fixture(),{pending}=await running(h);let read:any;let done=false;void pending.then(()=>{done=true;});
+  h.wire.onSend=f=>{if(f.method==='thread/read')read=f;};
+  event(h.wire,'item/completed',{threadId,turnId,item:finalItem()});terminal(h.wire,view,view==='summary'?[finalItem()]:[]);
+  await tick();expect(done).toBe(false);expect(read.params).toEqual({threadId,includeTurns:true});
+  h.wire.push({id:read.id,result:readResult()});expect((await pending).text).toBe(finalItem().text);
+  expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test.each(['thread','turn','duplicate-turn','cwd','model','provider','active','summary','notLoaded','failed','error','missing-observed','changed-final','duplicate-item','failed-tool','pending-tool'])('hydration rejects %s without replay',async kind=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'item/completed',{threadId,turnId,item:finalItem()});
+  h.wire.onSend=f=>{if(f.method!=='thread/read')return;const r:any=readResult(),t=r.thread,v=t.turns[0];
+   if(kind==='thread')t.id=other;if(kind==='turn')v.id=other;if(kind==='duplicate-turn')t.turns.push(structuredClone(v));
+   if(kind==='cwd')t.cwd='/home/example/other';if(kind==='model')t.model='other';if(kind==='provider')t.modelProvider='other';if(kind==='active')t.status={type:'active'};
+   if(kind==='summary'||kind==='notLoaded')v.itemsView=kind;if(kind==='failed')v.status='failed';if(kind==='error')v.error={message:'synthetic'};
+   if(kind==='missing-observed')v.items=[];if(kind==='changed-final')v.items[0].text='different';if(kind==='duplicate-item')v.items.push(finalItem());
+   if(kind==='failed-tool'||kind==='pending-tool')v.items.push({type:'commandExecution',id:'hydrated-tool',status:kind==='failed-tool'?'completed':'inProgress',exitCode:1});
+   h.wire.push({id:f.id,result:r});
+  };
+  terminal(h.wire,'summary',[finalItem()]);await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.session.idle).toBe(false);
+  await expect(h.session.turn('no-replay','sample')).rejects.toThrow();expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('pending stream item cannot be cleared by a summary or a successful read',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'item/started',{threadId,turnId,item:{id:'pending',type:'mcpToolCall'}});terminal(h.wire,'summary',[finalItem()]);
+  await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.some(f=>f.method==='thread/read')).toBe(false);
+ });
+ test('pending approval cannot be cleared by summary hydration',async()=>{
+  const h=fixture({approve:()=>new Promise(()=>{})}),{pending}=await running(h);approval(h.wire);await tick();terminal(h.wire,'summary',[finalItem()]);
+  await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.some(f=>f.method==='thread/read')).toBe(false);
+ });
+ for(const late of ['item','approval'])test(`late ${late} while read is awaited cannot be erased by hydration`,async()=>{
+  const h=fixture({approve:()=>new Promise(()=>{})}),{pending}=await running(h);let read:any;
+  h.wire.onSend=f=>{if(f.method==='thread/read')read=f;};terminal(h.wire,'summary',[finalItem()]);await tick();
+  if(late==='item')event(h.wire,'item/started',{threadId,turnId,item:{id:'late-pending',type:'mcpToolCall'}});else approval(h.wire);
+  await tick();h.wire.push({id:read.id,result:readResult()});await expect(pending).rejects.toMatchObject({uncertain:true});
+  expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const cause of ['disconnect','rpc-error','timeout'])test(`read ${cause} remains uncertain with no retry`,async()=>{
+  const h=fixture({}, {timeoutMs:50}),{pending}=await running(h);
+  h.wire.onSend=f=>{if(f.method==='thread/read'){if(cause==='disconnect')void h.wire.close();if(cause==='rpc-error')h.wire.push({id:f.id,error:{code:-1,message:'synthetic'}});}};
+  terminal(h.wire,'summary',[finalItem()]);await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);
+ });
+ test.skipIf(!existsSync(schemaRoot))('read params and response validate against independently generated pinned schemas',()=>{
+  for(const [name,value]of [['ThreadReadParams',{threadId,includeTurns:true}],['ThreadReadResponse',readResult()]]as const){const s=JSON.parse(readFileSync(join(schemaRoot,'v2',name+'.json'),'utf8'));expect(schemaCheck(value,s,s)).toBe(true);}
+ });
+});
+
+describe('Bounded exact-pin hydration deprecation notice',()=>{
+ const terminal=(wire:Wire)=>event(wire,'turn/completed',{threadId,turn:{...turn('completed',[finalItem()]),itemsView:'summary'}});
+ for(const details of [undefined,null,'Use paginated history.'])test(`informational notice details=${String(details)} never completes or grants readiness`,async()=>{
+  const h=fixture(),{pending}=await running(h);let read:any,done=false;void pending.then(()=>{done=true;});
+  h.wire.onSend=f=>{if(f.method==='thread/read')read=f;};terminal(h.wire);await tick();event(h.wire,'deprecationNotice',{summary:'Full-history hydration is deprecated.',...(details===undefined?{}:{details})});await tick();
+  expect(done).toBe(false);expect(h.session.idle).toBe(false);expect(h.session.pendingApproval).toBe(false);
+  h.wire.push({id:read.id,result:{thread:{...thread(),turns:[turn('completed',[finalItem()])]}}});expect((await pending).state).toBe('completed');expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const params of [{},{summary:7},{summary:''},{summary:'x',details:7},{summary:'x'.repeat(4097)},{summary:'x',details:'x'.repeat(8193)},{summary:'x\0'},{summary:'x',threadId},{summary:'x',approvalPolicy:'never'}])test('malformed or authority-bearing notice rejected: '+JSON.stringify(params).slice(0,80),async()=>{
+  const h=fixture(),{pending}=await running(h);h.wire.onSend=()=>{};terminal(h.wire);await tick();event(h.wire,'deprecationNotice',params);await expect(pending).rejects.toMatchObject({uncertain:true});
+ });
+ test('repeated notices are bounded to one and do not extend the read',async()=>{
+  const h=fixture(),{pending}=await running(h);h.wire.onSend=()=>{};terminal(h.wire);await tick();event(h.wire,'deprecationNotice',{summary:'Deprecated.'});event(h.wire,'deprecationNotice',{summary:'Deprecated.'});await expect(pending).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);
+ });
+ test('notice before hydration fails closed; unrelated unknown method is not ignored',async()=>{
+  for(const method of ['deprecationNotice','unknownDeprecationNotice']){const h=fixture(),{pending}=await running(h);event(h.wire,method,{summary:'Deprecated.'});await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.some(f=>f.method==='thread/read')).toBe(false);}
+ });
+ test('notice after read response is not accepted as a global passive event',async()=>{
+  const h=fixture(),{pending}=await running(h);h.wire.onSend=f=>{if(f.method==='thread/read'){h.wire.push({id:f.id,result:{thread:{...thread(),turns:[turn('completed',[finalItem()])]}}});event(h.wire,'deprecationNotice',{summary:'Late.'});}};
+  terminal(h.wire);await pending.catch(()=>{});await tick();expect(h.session.diagnostics().broken).toBe(true);expect(h.session.idle).toBe(false);
+ });
+ test.skipIf(!existsSync(schemaRoot))('notice fixture follows saved 0.164 generated schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/DeprecationNoticeNotification.json'),'utf8'));expect(schemaCheck({summary:'Deprecated.',details:null},s,s)).toBe(true);});
+});
+
+describe('Exact-resume startup deprecation notice window',()=>{
+ test('one notice while exact thread/resume awaits response does not establish identity',async()=>{
+  const h=fixture();let resume:any,done=false;h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/resume')resume=f;};
+  const opening=h.session.open(threadId);void opening.then(()=>{done=true;});await tick();expect(resume.params.threadId).toBe(threadId);
+  event(h.wire,'deprecationNotice',{summary:'Full-history resume deprecated.',details:null});await tick();expect(done).toBe(false);expect(h.session.idle).toBe(false);
+  h.wire.push({id:resume.id,result:opened()});expect((await opening).nativeId).toBe(threadId);expect(h.wire.frames.filter(f=>f.method==='thread/resume')).toHaveLength(1);expect(h.wire.frames.some(f=>f.method==='thread/start')).toBe(false);
+ });
+ for(const scenario of ['fresh-start','initialize','duplicate','scope','wrong-response','after-response'])test(`resume notice ${scenario} fails closed without fallback`,async()=>{
+  const h=fixture();h.wire.onSend=f=>{
+   if(f.method==='initialize'){
+    if(scenario==='initialize')event(h.wire,'deprecationNotice',{summary:'Early.'});
+    h.wire.push({id:f.id,result:init});
+   }
+   if(f.method==='thread/start')event(h.wire,'deprecationNotice',{summary:'Fresh is outside this window.'});
+   if(f.method==='thread/resume'){
+    event(h.wire,'deprecationNotice',{summary:'Deprecated.',...(scenario==='scope'?{threadId}: {})});
+    if(scenario==='duplicate')event(h.wire,'deprecationNotice',{summary:'Deprecated.'});
+    h.wire.push({id:f.id,result:scenario==='wrong-response'?{...opened(),thread:{...thread(),id:other}}:opened()});
+    if(scenario==='after-response')event(h.wire,'deprecationNotice',{summary:'Late.'});
+   }
+  };
+  const opening=h.session.open(scenario==='fresh-start'?undefined:threadId);await opening.catch(()=>{});await tick();
+  expect(h.session.diagnostics().broken).toBe(true);expect(h.session.idle).toBe(false);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+  if(scenario!=='fresh-start')expect(h.wire.frames.some(f=>f.method==='thread/start')).toBe(false);
+ });
+ test('resume and subsequent hydration each have their own single-notice budget',async()=>{
+  const h=fixture();h.wire.onSend=f=>{
+   if(f.method==='initialize')h.wire.push({id:f.id,result:init});
+   if(f.method==='thread/resume'){event(h.wire,'deprecationNotice',{summary:'Resume deprecated.'});h.wire.push({id:f.id,result:opened()});}
+   if(f.method==='turn/start')h.wire.push({id:f.id,result:{turn:turn()}});
+   if(f.method==='thread/read'){event(h.wire,'deprecationNotice',{summary:'Read deprecated.'});h.wire.push({id:f.id,result:{thread:{...thread(),turns:[turn('completed',[finalItem()])]}}});}
+  };
+  await h.session.open(threadId);const pending=h.session.turn('resumed-turn','sample');await tick();event(h.wire,'turn/completed',{threadId,turn:{...turn('completed',[finalItem()]),itemsView:'summary'}});expect((await pending).state).toBe('completed');
+ });
+});
+
+describe('Exact active-turn native retry errors',()=>{
+ const retry=(over:any={})=>({threadId,turnId,willRetry:true,error:{message:'Synthetic transient stream interruption.',codexErrorInfo:{responseStreamDisconnected:{httpStatusCode:null}}},...over});
+ test('willRetry true is intermediate, never ACK/completion/readiness or another request',async()=>{
+  const h=fixture(),{pending}=await running(h);let done=false;void pending.then(()=>{done=true;});const before=structuredClone(h.wire.frames);
+  event(h.wire,'error',retry());await tick();expect(done).toBe(false);expect(h.session.idle).toBe(false);expect(h.session.diagnostics().broken).toBe(false);expect(h.wire.frames).toEqual(before);
+  complete(h.wire);expect((await pending).state).toBe('completed');expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ for(const error of [{message:'synthetic'},{message:'synthetic',codexErrorInfo:null,additionalDetails:null,misalignment:null},{message:'synthetic',codexErrorInfo:'extension-class'},{message:'synthetic',misalignment:{errorType:null,detailedExplanation:'Information only',reviewTarget:null,steer:{message:'Never automatically submitted.'}}}])test('schema-valid bounded TurnError fields are informational only: '+Object.keys(error).join(','),async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'error',retry({error}));await tick();complete(h.wire);expect((await pending).text).toBe(finalItem().text);expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ const malformed:any[]=[{willRetry:false},{willRetry:undefined},{willRetry:'true'},{threadId:other},{turnId:other},{turnId:null},{extra:true},{error:null},{error:{}},{error:{message:4}},{error:{message:'x\0'}},{error:{message:'x'.repeat(8193)}},{error:{message:'x',additionalDetails:4}},{error:{message:'x',codexErrorInfo:7}},{error:{message:'x',misalignment:[]}},{error:{message:'x',misalignment:{steer:{}}}},{error:{message:'x',codexErrorInfo:{extension:'x'.repeat(17000)}}},{error:{message:'x',approvalPolicy:'never'}}];
+ for(const over of malformed)test('false/malformed/foreign error fails closed '+JSON.stringify(over).slice(0,100),async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'error',retry(over));await expect(pending).rejects.toMatchObject({code:'native_turn_error',uncertain:true});await expect(h.session.turn('no-replay','sample')).rejects.toThrow();expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('error cannot bind an unbound native turn before turn/start response',async()=>{
+  const h=fixture();await h.session.open();h.wire.onSend=()=>{};const pending=h.session.turn('unbound-retry','sample');pending.catch(()=>{});await tick();event(h.wire,'error',retry());await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('retry error during open is not an active-turn error',async()=>{
+  const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')event(h.wire,'error',retry());};await expect(h.session.open()).rejects.toThrow('native_turn_error');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+ });
+ test('eight retry observations permitted; ninth fails without clearing pending work',async()=>{
+  const h=fixture(),{pending}=await running(h);for(let i=0;i<8;i++)event(h.wire,'error',retry());await tick();expect(h.session.diagnostics().broken).toBe(false);event(h.wire,'error',retry());await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('retry cannot erase observed pending tools',async()=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'item/started',{threadId,turnId,item:{type:'mcpToolCall',id:'pending'}});event(h.wire,'error',retry());complete(h.wire);await expect(pending).rejects.toThrow('turn_not_safely_completed');
+ });
+ test('retry cannot erase pending approval or approve it',async()=>{
+  const h=fixture({approve:()=>new Promise(()=>{})}),{pending}=await running(h);approval(h.wire);await tick();event(h.wire,'error',retry());await tick();expect(h.session.pendingApproval).toBe(true);complete(h.wire);await expect(pending).rejects.toThrow('turn_not_safely_completed');expect(h.wire.frames.some(f=>f.result?.decision==='accept')).toBe(false);
+ });
+ test.each(['failed','interrupted','error','rerouted','disconnect'])('retry followed by %s cannot complete',async kind=>{
+  const h=fixture(),{pending}=await running(h);event(h.wire,'error',retry());
+  if(kind==='disconnect')await h.wire.close();else if(kind==='rerouted')event(h.wire,'model/rerouted',{threadId,turnId});else if(kind==='error')event(h.wire,'error',retry({willRetry:false}));else event(h.wire,'turn/completed',{threadId,turn:turn(kind,[finalItem()])});
+  await expect(pending).rejects.toMatchObject({uncertain:true});expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('original deadline remains installed and unchanged after retry notifications',async()=>{
+  const h=fixture({}, {timeoutMs:35}),{pending}=await running(h);const timer=(h.session as any).active.timer;
+  for(let i=0;i<3;i++){event(h.wire,'error',retry());await tick();expect((h.session as any).active.timer).toBe(timer);}
+  await expect(pending).rejects.toMatchObject({code:'turn_timeout',uncertain:true});expect(h.wire.frames.filter(f=>f.method==='turn/start')).toHaveLength(1);
+ });
+ test('retry after terminal while hydration pending fails rather than reopening the turn',async()=>{
+  const h=fixture(),{pending}=await running(h);h.wire.onSend=()=>{};event(h.wire,'turn/completed',{threadId,turn:{...turn('completed',[finalItem()]),itemsView:'summary'}});await tick();event(h.wire,'error',retry());await expect(pending).rejects.toMatchObject({code:'native_turn_error',uncertain:true});expect(h.wire.frames.filter(f=>f.method==='thread/read')).toHaveLength(1);
+ });
+ test.skipIf(!existsSync(schemaRoot))('retry fixture conforms to generated pinned ErrorNotification schema',()=>{const s=JSON.parse(readFileSync(join(schemaRoot,'v2/ErrorNotification.json'),'utf8'));expect(schemaCheck(retry(),s,s)).toBe(true);});
+});

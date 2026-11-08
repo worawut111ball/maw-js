@@ -11,7 +11,7 @@
 - openไม่มีID: initialize → initialized → thread/start
 - openมีUUID: initialize → initialized → exact thread/resume ไม่มี fallback/fork/startใหม่
 - fixed pilotprofile: thread/start/resume ส่ง approvalPolicy on-request, sandbox read-only, approvalsReviewer user และตรวจ responseเป็น on-request/readOnly/user ปฏิเสธworkspaceWrite/untrusted/never/fullaccess/networkaccess ไม่มี permission parity claim
-- turnส่งเฉพาะ threadId + text UserInput แล้วรอ exact turn/completed notification สถานะ completed, errorว่าง, fullitems และไม่มี observed pending items/approval ไม่ถือturn/start ACKเป็นcompletion
+- turnส่งเฉพาะ threadId + text UserInput แล้วรอ exact turn/completed notification สถานะ completed, errorว่าง, full items (หรือ hydrate full history หนึ่งครั้งจาก summary/notLoaded) และไม่มี observed pending items/approval ไม่ถือturn/start ACKเป็นcompletion
 - คืน ProtocolTurn เฉพาะ public agentMessage final/legacy unknown phase ไม่คืน reasoning/tool bodies เป็นคำตอบ
 - concurrentturn/reused operation ID ปฏิเสธ ไม่มี automatic resend/reconnect/resume fallback เมื่อ disconnect/writefailure/timeout จะ poison instance และคืน ProtocolError.uncertain=true หากมีoperationอาจเริ่มแล้ว
 - operation IDs/approval IDs เป็น memory-bound ต่อinstance จำกัด10000 ไม่มี guaranteeข้ามrestart/instance ต้องใช้hostdurablejournal/exclusivewriterเพิ่มเติม
@@ -50,18 +50,50 @@ starting/ready เป็น passive lifecycle ต้อง thread UUID ตรง
 
 Root trace protocol-codex-live-1794150744991 เป็นหลักฐานของ Root: initialize→remoteControl status→thread/start result→MCP lifecycle ก่อนfirstturn ผู้เขียนใช้ DI/schemaเท่านั้น ไม่มีnative/spawn Live rerunเป็นของRootด้วยfreshoperation ไม่replayoperationเดิม
 
+## Terminal summary และ bounded full-history hydration
+
+8 พ.ย. 69 exact 0.164.0 `TurnItemsView` มี full/summary/notLoaded และ upstream `bespoke_event_handling.rs:1344–1360` ส่ง terminal summary ที่มี last agent message หรือ notLoaded ถ้าไม่มี message จึงไม่ถือ terminal display payload ว่าเป็น full history
+
+หลัง exact terminal completed และ turn/start ACK แล้ว ถ้าเป็น summary/notLoaded ให้ส่ง read-only `thread/read {threadId,includeTurns:true}` ครั้งเดียวต่อ turn ภายใต้ timeout เดิม ไม่มี turn resend/pagination fallback Native thread ต้อง UUID/cwd/model/provider เดิม ไม่ ephemeral/fork มี idle status และต้องพบ exact turn เพียงหนึ่งรายการ สถานะ completed/error ว่าง พร้อม `itemsView:full` ตรวจไม่เกิน10000 turns/10000 target items, unique item IDs, observed items ห้ามหาย และ public final ที่เคยเห็นห้ามเปลี่ยน ก่อนใช้ tool/final guards เดิม
+
+เก็บ terminal snapshot แรก immutable ระหว่าง await: duplicate เหมือนเดิมไม่ hydrate ซ้ำ; conflicting duplicate หรือ turn/started ใหม่ reject ก่อนเขียนทับ snapshot ไม่ clear observed pending item/approval เพื่อให้ hydration ผ่าน และตรวจซ้ำหลัง await Full history ที่ยัง partial/ผิด scope/ผิด identity/failed tool/timeout/disconnect ทำ uncertain และ poison instance ไม่มี automatic retry Read เป็น full-history API ที่ upstream ระบุ deprecated สำหรับ paginated history: กรณีไม่ให้ full evidence ให้ fail closed ไม่มีการเดาว่า partial stream ครบ ขอบเขตจำนวนนี้ตรวจหลัง JSON parse; byte/frame bound เป็นความรับผิดชอบ transport เดิม ไม่ใช่ streaming memory cap ใหม่
+
+Root run1794153097021 มี terminal notification แต่ปฏิเสธ และ native history มี exact task_complete ตาม Root ผู้เขียนอ่าน native เฉพาะ metadata type/phase/exact turn ไม่ dump content Safe wire trace เดิมไม่มี nested itemsView จึงยังไม่อ้างค่าของ live frame นั้นอย่างยืนยัน Patch อิง exact pinned upstream shape + generated schemas; ต้อง Root ทดสอบ native ใหม่เองด้วย fresh operation
+
+## Hydration deprecation notice
+
+8 พ.ย. 69 Root run1794153581156 ยืนยัน terminal statuscompleted/itemsViewsummary/items1 แล้ว thread/read ส่ง `deprecationNotice` ก่อน response Saved exact-pin `v2/DeprecationNoticeNotification.json` required summary:string และ optional details:string|null ไม่มี thread/turn/permission fields
+
+รับ informational notice ได้เฉพาะสอง window: (1) active turn กำลัง hydrate และยังมี pending thread/read RPC สูงสุดหนึ่งครั้งต่อturn (2) opening หลัง initialize response, ไม่มี identity/active turn, มี expectedNativeId และ pending exact thread/resume RPC สูงสุดหนึ่งครั้งต่อopen แยก budgetกัน Fresh thread/start ไม่อยู่ใน window Summary ต้องไม่ว่าง จำกัด4096 UTF-8 bytes; details จำกัด8192 bytes; NUL/typeผิด/unknownkeys reject ไม่เก็บ/แสดง/log notice body ไม่ reset timer ไม่ grant ready/approval/completion ไม่มี blanket unknown-ignore นอกช่วงนี้หรือ notice ซ้ำ failclosed การอ่าน full evidenceและterminal/pending/identityguardsยังเหมือนเดิม ไม่เปลี่ยนไปใช้ paginated API ในpatchนี้
+
+## Intermediate native retry errors
+
+8 พ.ย. 69 `error` notification exact0.164 required error/threadId/turnId/willRetry:boolean Native source `bespoke_event_handling.rs:1068–1084` ส่ง willRetry true สำหรับ StreamError โดยไม่update terminalsummary ส่วน :1636–1650 ส่งfalseพร้อมบันทึกturnerror
+
+รับ true เฉพาะ active turn ที่มี bound UUID และ thread/turn ตรง ยังไม่พบterminal Limit8 notificationsต่อturn Closed envelope/error keys ตรวจ TurnError messageและoptionalfieldsตามschema รวมmisalignment/steerที่ไม่ทำตามข้อความเอง ข้อความแต่ละfieldที่ตรวจจำกัด8192 UTF8bytes/noNUL และerrorJSONรวม<=16384bytes codexErrorInfo รองรับstring/objectตามschemaextension ไม่ใช้ค่าclassหรือrawmessageเป็นapproval/สิทธิ์ ไม่retain/log body
+
+Intermediateหมายถึงnativeกำลังretryเดิม ไม่ใช่mawส่งซ้ำ: ไม่write wire ไม่resettimer/deadline ไม่clearpendingitems/approval ไม่idle ไม่grantcompletion False/malformed/foreign/unbound/opening/afterterminal/เกินlimitยังpoisonuncertain ต้อง exactterminalcompleted/errornull/fullhistory+tools/approvalguardsเดิมครบจึงสำเร็จ Nativefailure/modelreroute/disconnect/timeoutภายหลังยังไม่ผ่าน
+
+Root run1794153986102 safe traceเดิมไม่มีactualwillRetry value จึงไม่อ้างpatchแก้rootcauseของrunนั้น Rootเพิ่มsafeprojectionสำหรับfuturefreshoperationเอง ไม่มีnative/replayในงานนี้
+
 ## Tests
 
-`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด98pass/0fail/310expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
+`NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-protocol-codex.test.ts` ผล scoped lifecycle+diagnostics ล่าสุด189pass/0fail/591expects ผ่านin-memoryasyncwire ไม่ใช่app-serverจริง ไม่มีinference/agentlaunch/live
 
 Fixturesใช้shapeจากschemaที่ทีม2generateด้วยpinnedbinary0.164.0 และมีoptionaltestตรวจactualgeneratedschemasในvault เมื่อartifactไม่มีจะskipschema-artifacttestหนึ่งเคส ไม่อ้างschema-artifactcoverageบนเครื่องที่ไม่มีไฟล์นั้น Validatorสำหรับfixturesครอบrequired/type/enum/refs/unions/arrayitems ไม่ใช่JSONSchemaengineเต็มรูปแบบ
 
-รายงาน/commands/logs/hash: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX.md`
+รายงาน/commands/logs/hash ล่าสุด: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/PROTOCOL-CODEX-WILLRETRY-20261108.md`
+
+Independent review ก่อน willRetry delta p4: `PROTOCOL-CODEX-HYDRATION-REVIEW.md` ปิด latest notice delta source5a28172/tests881c1271 ไม่มี new blocker ตามรายงาน p4; P1 immutable terminal/P2 optional model closure คงอยู่ การ review นั้นไม่ใช่ native acceptance ส่วน willRetry delta189testsอยู่ระหว่างส่งp4review ไม่อ้างว่าปิดแล้ว
 
 ## ประวัติ
 
 | วันที่ | ผู้ทำ | รายการ |
 |---|---|---|
+| 8 พ.ย. 69 | Codex ensure | รองรับ scoped bounded native willRetry true โดยไม่resetdeadline/clear pending/resend พร้อม189DItests |
+| 8 พ.ย. 69 | Codex ensure | จำกัด deprecationNotice เพิ่มเฉพาะ pending exact resume พร้อม outside-window/duplicate/scope/wrong-response negatives 153 tests |
+| 8 พ.ย. 69 | Codex ensure | รองรับ bounded exact-pin informational deprecationNotice เฉพาะ pending hydration read พร้อม negative tests |
+| 8 พ.ย. 69 | Codex ensure | รองรับ terminal summary ด้วย read-only full-history hydration ครั้งเดียว พร้อม negative tests; ไม่ resend turn |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม scoped MCP lifecycle และ value-free diagnostics พร้อม scope/error/unknown/no-readiness negatives 98 focused tests |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม exact-pin passive remote-control startup status พร้อม malformed/scope/unknown/no-ready negatives |
 | 8 พ.ย. 69 | Codex ensure | DI Codexprotocolpilot read-only-ask, exactnativecompletion/approvals/no-replayในinstance และ55focusedtests ไม่เปิดlive |
