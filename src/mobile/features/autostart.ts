@@ -46,20 +46,19 @@ const realTmux: Tmux = args => execFileSync(TMUX, args, { encoding: "utf-8", tim
 const has = (tmux: Tmux, s: string) => { try { tmux(["has-session", "-t", "=" + s]); return true; } catch { return false; } };
 
 /** Create every listed session that is not running. Returns the ones it started. */
-export function ensure(list: AutoRoom[], tmux: Tmux = realTmux): string[] {
+export function ensure(list: AutoRoom[], tmux: Tmux = realTmux, buildCommand: typeof commandFor = commandFor): string[] {
   const started: string[] = [];
   for (const r of list) {
     if (has(tmux, r.session)) continue;
-    const cmd = commandFor(r);
-    try { tmux(["new-session", "-d", "-s", r.session, "-c", r.dir, ...(cmd ? [cmd] : [])]); started.push(r.session); } catch { /* tmux server not up yet — next pass */ }
+    try { const cmd = buildCommand(r); tmux(["new-session", "-d", "-s", r.session, "-c", r.dir, ...(cmd ? [cmd] : [])]); started.push(r.session); } catch { /* Verification failure never falls back; no session created. A later pass may retry verification. */ }
   }
   return started;
 }
 
-export function mount(app: any, opts: { file?: string; tmux?: Tmux; allow?: typeof allowedDir; panes?: typeof listTmuxPanes } = {}): void {
+export function mount(app: any, opts: { file?: string; tmux?: Tmux; commandFor?: typeof commandFor; allow?: typeof allowedDir; panes?: typeof listTmuxPanes } = {}): void {
   const file = opts.file ?? FILE, tmux = opts.tmux ?? realTmux, allow = opts.allow ?? allowedDir, panes = opts.panes ?? listTmuxPanes;
   // real server only: after a reboot maw starts at login → bring the rooms back (twice, in case tmux was slow)
-  if (!opts.file && process.env.NODE_ENV !== "test") { setTimeout(() => ensure(load(file, allow), tmux), 5_000); setTimeout(() => ensure(load(file, allow), tmux), 60_000); }
+  if (!opts.file && process.env.NODE_ENV !== "test") { setTimeout(() => ensure(load(file, allow), tmux, opts.commandFor), 5_000); setTimeout(() => ensure(load(file, allow), tmux, opts.commandFor), 60_000); }
 
   app.get("/autostart", () => {
     const list = load(file, allow), live = panes();

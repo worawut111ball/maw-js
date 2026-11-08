@@ -421,6 +421,15 @@
   .toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #1e293b; padding: 10px 16px;
            border-radius: 12px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 60; }
   .toast.show { opacity: 1; }
+  /* offline: status bar on top, messages waiting for the link */
+  #netbar { position: fixed; left: 0; right: 0; top: 0; z-index: 70; padding: calc(6px + env(safe-area-inset-top)) 14px 6px; background: #7c2d12; color: #ffedd5;
+            font-size: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; box-shadow: 0 2px 10px #0008; }
+  #netbar span { margin-left: auto; opacity: .75; font-size: 12px; }
+  body.is-offline { padding-top: 34px; }
+  .msg.me.pend.waiting .bubble { opacity: .8; border: 1.5px dashed #fdba74; background: transparent; }
+  .msg.me.pend.waiting .who { color: #fdba74; }
+  .msg.me.pend.stale .bubble { border: 1.5px solid #fbbf24; background: transparent; }
+  .msg.me.pend.stale .who { color: #fde68a; }
   .login { padding: 32px 20px; display: flex; flex-direction: column; gap: 12px; }
   .login input { padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 15px var(--mono); }
   .login button { padding: 14px; border-radius: 12px; background: var(--accent); color: #031022; font-weight: 700; }
@@ -430,7 +439,7 @@
 <div class="app" id="app"></div>
 <div class="toast" id="toast"></div>
 <script>
-const ST = { working: "กำลังทำ", waiting: "รอคำตอบ", done: "เสร็จแล้ว", idle: "ว่าง", ended: "ปิดแล้ว", asleep: "ยังไม่เปิด" };
+const ST = { working: "กำลังทำ", waiting: "รอคำตอบ", done: "เสร็จแล้ว", idle: "ว่าง", unknown: "ยังไม่ทราบสถานะ", ended: "ปิดแล้ว", asleep: "ยังไม่เปิด" };
 const ICON = { claude: "✳ Claude", codex: "◎ Codex", opencode: "OpenCode", gemini: "✦ Gemini", copilot: "Copilot", amp: "Amp", "cursor-agent": "Cursor", droid: "Droid", pi: "Pi", agy: "Agy", mastracode: "Mastra" };
 const $app = document.getElementById("app");
 let state = { projects: [], project: null, ws: null, room: null, follow: true, showEmpty: false, presets: [], mode: "chat", chat: null, open: new Set(), pview: "rooms", fpath: "", fview: null, gview: null, files: [] };
@@ -467,8 +476,13 @@ window.mawExt = { onRoom: [], onPoll: [], onHome: [], onComposer: [], tabs: [], 
 // pages [{key, icon, title, summary() → {text, badge?, tone?}, mount(el)}] — a tile in the home "เมนู" grid that opens its own screen
 const extCall = (name, arg) => { for (const f of mawExt[name]) { try { f(arg); } catch (e) { console.error("[ext]", name, e); } } };
 /** Helpers for packs: type into / press a key in the open room. */
-async function roomSend(text) { await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ text }) }); }
-async function roomKey(key) { await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ key }) }); }
+async function roomSend(text) {
+  if (isHerdr(state.ws)) {
+    const room = roomBinding(state.ws, state.room);
+    return api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ text, id: requestId(), generation: room?.generation }) });
+  }
+  await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ text }) }); }
+async function roomKey(key) { if (isHerdr(state.ws)) return herdrKey(state.ws, state.room, key); await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/send`, { method: "POST", body: JSON.stringify({ key }) }); }
 
 const store = { get: k => { try { return localStorage.getItem(k) } catch { return null } }, set: (k, v) => { try { localStorage.setItem(k, v) } catch {} }, del: k => { try { localStorage.removeItem(k) } catch {} } };
 const fromHash = location.hash.match(/t=([a-f0-9]{32,})/);
@@ -491,12 +505,118 @@ async function api(path, opts = {}) {
   const t0 = performance.now();
   try { return await apiRaw(path, opts); } finally { perfNote(path, performance.now() - t0); }
 }
+const liveOnlyPath = path => /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path);
 async function apiRaw(path, opts = {}) {
-  const res = await fetch("/mobile" + path, { ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + (store.get("maw-mobile-token") || ""), ...(opts.headers || {}) } });
+  const get = !opts.method || opts.method === "GET", cacheable = get && !liveOnlyPath(path);
+  // offline: what was last read stays readable (net.check() is what notices the link coming back)
+  if (get && !net.online) { const hit = cacheable && await offlineCache.get(path); if (hit) return hit; throw net.error(); }
+  let res;
+  try {
+    // a GET that hangs (Mac asleep, Tailscale gone) would freeze the room — give up and use the copy instead
+    res = await fetch("/mobile" + path, { ...(get ? { signal: AbortSignal.timeout(30_000) } : {}), ...opts, headers: { "content-type": "application/json", authorization: "Bearer " + (store.get("maw-mobile-token") || ""), ...(opts.headers || {}) } });
+    if (net.gatewayDown(res)) throw Object.assign(new Error("maw ไม่ตอบ"), { gateway: true });
+  } catch (e) {
+    if (!net.isNetErr(e)) throw e;
+    // one slow or dropped request (4G hiccup) is not "offline": only when the Mac's ping fails too
+    if (await net.probe()) {
+      if (cacheable) { const hit = await offlineCache.get(path); if (hit) return hit; }
+      throw e;
+    }
+    net.down();
+    if (cacheable) { const hit = await offlineCache.get(path); if (hit) return hit; }
+    throw net.error();
+  }
+  net.up();
   if (res.status === 401) { renderLogin(); throw new Error("unauthorized"); }
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.ok === false) { const e = new Error(body.error || ("HTTP " + res.status)); e.body = body; throw e; }
+  if (cacheable) offlineCache.put(path, body);
   return body;
+}
+
+// ── offline: last data kept on the phone, a status bar, messages wait for the link ──
+// A GET answered from here carries _offlineAt (when it was fetched) so a screen can say how old it is.
+const offlineCache = (() => {
+  const DB = "maw-offline", OS = "api", MAX = 300, BIG = 3_000_000;
+  let dbp = null;
+  const db = () => dbp ??= new Promise((res, rej) => {
+    if (!("indexedDB" in window)) return rej(new Error("no indexedDB"));
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(OS);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }).catch(e => { dbp = Promise.reject(e); throw e; });
+  const tx = async (mode, fn) => { const d = await db(); return new Promise((res, rej) => { const t = d.transaction(OS, mode); const out = fn(t.objectStore(OS)); t.oncomplete = () => res(out?.result); t.onerror = () => rej(t.error); }); };
+  let writes = 0;
+  return {
+    async get(path) {
+      try { const v = await tx("readonly", s => s.get(path)); return v ? { ...v.body, _offlineAt: v.at } : null; } catch { return null; }
+    },
+    put(path, body) {
+      // live state worth showing offline; skip what only makes sense live
+      // (suggestion = the live typing/spinner line — an old one would claim the agent is working)
+      // (prompt = a dialog open right now — an old one shown offline would invite answering something already gone)
+      if (liveOnlyPath(path)) return;
+      if (/^\/(version|perf|health)\b|\/suggestion\?|\/prompt$/.test(path)) return;
+      let size = 0; try { size = JSON.stringify(body).length; } catch { return; }
+      if (size > BIG) return;
+      tx("readwrite", s => s.put({ at: Date.now(), body }, path)).catch(() => {});
+      if (++writes % 50 === 0) this.trim();
+    },
+    async trim() {
+      try {
+        const rows = []; await tx("readonly", s => { const c = s.openCursor(); c.onsuccess = () => { const k = c.result; if (k) { rows.push([k.key, k.value.at]); k.continue(); } }; return c; });
+        if (rows.length <= MAX) return;
+        rows.sort((a, b) => a[1] - b[1]);
+        await tx("readwrite", s => { for (const [k] of rows.slice(0, rows.length - MAX)) s.delete(k); });
+      } catch { /* best effort */ }
+    },
+  };
+})();
+
+const net = {
+  online: true, since: Date.now(), lastLive: Date.now(), checking: false,
+  isNetErr: e => e?.name === "TypeError" || e?.name === "AbortError" || e?.name === "TimeoutError" || e?.gateway,
+  gatewayDown: r => r.status >= 502 && r.status <= 504,
+  /** true = the Mac answers its ping (no auth needed to count: any non-gateway reply means it is reachable) */
+  async probe() {
+    if (!navigator.onLine) return false;
+    try { const r = await fetch("/mobile/health", { cache: "no-store", signal: AbortSignal.timeout(6_000), headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } }); return !this.gatewayDown(r); }
+    catch { return false; }
+  },
+  error() { const e = new Error(navigator.onLine ? "ต่อ Mac ไม่ได้" : "มือถือไม่มีเน็ต"); e.offline = true; return e; },
+  down() { if (!this.online) return; this.online = false; this.since = Date.now(); paintNet(); this.check(); },
+  up() {
+    this.lastLive = Date.now();
+    if (this.online) return;
+    this.online = true; this.since = Date.now(); paintNet(); toast("🟢 กลับมาออนไลน์แล้ว");
+    flushWaiting();
+  },
+  /** While offline: a cheap ping every 5 s (no auth) until the Mac answers. */
+  async check() {
+    if (this.online || this.checking) return; this.checking = true;
+    try {
+      while (!this.online) {
+        // any answer = the Mac is reachable again (a 401 is then shown by the next real request)
+        // (502–504 = Tailscale reached the Mac but maw itself is down → still offline)
+        try { const r = await fetch("/mobile/health", { cache: "no-store", signal: AbortSignal.timeout(4_000), headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } }); if (!net.gatewayDown(r)) { this.up(); break; } } catch { /* still down */ }
+        paintNet();
+        await new Promise(res => setTimeout(res, 5_000));
+      }
+    } finally { this.checking = false; }
+  },
+};
+window.addEventListener("offline", () => net.down());
+window.addEventListener("online", () => { net.check(); });
+function paintNet() {
+  let bar = document.getElementById("netbar");
+  if (net.online) { if (bar) bar.hidden = true; document.body.classList.remove("is-offline"); return; }
+  if (!bar) { bar = document.createElement("div"); bar.id = "netbar"; document.body.appendChild(bar); bar.onclick = () => { toast("กำลังลองเชื่อมต่อ…"); net.check(); }; }
+  document.body.classList.add("is-offline");
+  const hm = t => new Date(t).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+  const why = navigator.onLine ? "ต่อ Mac ไม่ได้" : "มือถือไม่มีเน็ต";
+  const wait = pendingSends.filter(p => p.state === "waiting").length;
+  bar.hidden = false;
+  bar.innerHTML = `<b>🟠 ออฟไลน์</b> · ${why} · ข้อมูลเมื่อ ${hm(net.lastLive)}${wait ? ` · <b>รอส่ง ${wait}</b>` : ""}<span>แตะเพื่อลองใหม่</span>`;
 }
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // CSI (colours/cursor) + OSC (e.g. OSC 8 file links, ended by BEL or ESC \) + stray ESC/control chars
@@ -613,7 +733,7 @@ function projCard(p) {
     + (shells ? `<span class="count">⌨ ${shells} terminal</span>` : "");
   const agents = [...new Set(r.map(x => x.agent).filter(Boolean))].map(a => `${agentChip(a)}`).join(" ");
   return `<button class="card ${n("waiting") ? "waitcard" : ""}" data-p="${esc(p.name)}">
-    <div class="row"><span class="title">${esc(p.name)}</span><span style="color:var(--dim);font-size:13px">${r.length} ห้อง ›</span></div>
+    <div class="row"><span class="title">${esc(p.name)}${p.source === "herdr" ? " · Herdr" : ""}</span><span style="color:var(--dim);font-size:13px">${r.length} ห้อง ›</span></div>
     <div class="sub">${counts || "ยังไม่มีห้อง"}</div>${agents ? `<div class="sub">${agents}</div>` : ""}</button>`;
 }
 
@@ -645,7 +765,8 @@ function renderProject() {
   const p = state.projects.find(x => x.name === state.project); if (!p) return renderHome();
   const w = p.workspaces.find(x => x.id === state.ws) || p.workspaces[0];
   const room = w?.rooms.find(r => r.id === state.room);
-  const canType = !!room && room.status !== "ended" && room.status !== "asleep";
+  renderProject.binding = room && `${w.id}/${room.id}/${room.generation || ""}/${JSON.stringify(room.capabilities || {})}`;
+  const canType = !!room && room.status !== "ended" && room.status !== "asleep" && (p.source !== "herdr" || !!(room.capabilities?.prompt || room.capabilities?.answer));
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
   store.set("maw-last-view", JSON.stringify({ kind: "project", project: p.name, ws: w?.id, room: room?.id ?? null, mode: state.mode, pview: state.pview, fpath: state.fpath || "", fview: state.fview || null, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
@@ -691,7 +812,7 @@ function renderProject() {
   document.getElementById("back").onclick = () => history.back();
   $app.querySelectorAll("[data-ws]").forEach(b => b.onclick = () => { state.ws = b.dataset.ws; const ww = p.workspaces.find(x => x.id === state.ws); state.room = ww?.rooms[0]?.id; renderProject(); });
   $app.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { state.room = b.dataset.r; state.follow = true; state.chat = null; state.queued = []; state.open = new Set(); renderProject(); });
-  const add = document.getElementById("add"); if (add) add.onclick = () => p.source === "tmux" ? openProjectSheet() : openNewRoom(w);
+  const add = document.getElementById("add"); if (add) add.onclick = () => p.source === "herdr" ? window.mawHerdrCreate?.(w) : p.source === "tmux" ? openProjectSheet() : openNewRoom(w);
   $app.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { state.pview = b.dataset.pv; renderProject(); });
   $app.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { state.mode = b.dataset.m; state.follow = true; renderProject(); });
   keepScroll(document.getElementById("tabs"), "tabs:" + p.name + "/" + (w?.id || ""), ".tab.on");
@@ -767,7 +888,7 @@ function renderProject() {
       const ph = msg.placeholder, pad = n => String(n).padStart(2, "0"), mmss = ms => `${Math.floor(ms / 60000)}:${pad(Math.floor(ms / 1000) % 60)}`;
       const type = () => ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find(t => MediaRecorder.isTypeSupported?.(t)) || "";
       const sendVoice = f => {   // voice goes out alone — whatever is typed in the box stays there
-        const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI: null, text: "", files: [f], mode: "", at: Date.now(), state: "sending", note: "", pics: [], names: [f.name] };
+        const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, generation: room.generation, continuityToken: room.continuityToken, lastUserI: null, text: "", files: [f], mode: "", at: Date.now(), state: "sending", note: "", pics: [], names: [f.name] };
         pendingSends.push(pend); savePending(pend); state.follow = true; paintPending(); queueSend(pend);
       };
       const show = () => {
@@ -851,6 +972,15 @@ function renderProject() {
     send.onclick = doSend;
     async function doSend() {
       const text = msg.value.trim(), files = [...state.files]; if (!text && !files.length) return;
+      // a question card is open: the dialog holds the keyboard on the Mac, so text typed here answers its
+      // "Type something." row (permissions pack) instead of being typed into the dialog as stray keys
+      if (text && !files.length && window.mawDialogAnswer) {
+        send.disabled = true;
+        const took = await window.mawDialogAnswer(text).catch(() => false);
+        send.disabled = false;
+        if (took === "sent") { msg.value = ""; msg.oninput(); return; }
+        if (took === "kept") return;   // the card said why; the text stays in the box
+      }
       // what's in the PC's box is checked again by the server right before it types (this view can be 2.5 s old):
       // "clear" = empty it first · "merge" = type after it · nothing = the server refuses and asks back (409 draft)
       let mode = "";
@@ -867,7 +997,7 @@ function renderProject() {
       // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
       // newest user message already in the chat → anything after it is ours (pasted images come back as "[Image #12]", not our text)
       const lastUserI = state.chat?.room === room.id ? Math.max(-1, ...[...state.chat.items.values()].filter(m => m.role === "user").map(m => m.i)) : null;
-      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, lastUserI, text, files, mode, at: Date.now(), state: "sending", note: "",
+      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, generation: room.generation, continuityToken: room.continuityToken, lastUserI, text, files, mode, at: Date.now(), state: "sending", note: "",
         pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
       pendingSends.push(pend); savePending(pend);
       msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
@@ -876,7 +1006,7 @@ function renderProject() {
     $app.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
       if (b.dataset.k === "ctrlc" && !b.dataset.armed) { b.dataset.armed = 1; b.textContent = "แตะอีกครั้ง"; setTimeout(() => { delete b.dataset.armed; b.textContent = "Ctrl+C"; }, 2500); return; }
       if (state.justSent) state.justSent.done = true;
-      try { await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/send`, { method: "POST", body: JSON.stringify({ key: b.dataset.k }) }); setTimeout(loadScreen, 300); }
+      try { if (isHerdr(w.id)) await herdrKey(w.id, room.id, b.dataset.k); else await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/send`, { method: "POST", body: JSON.stringify({ key: b.dataset.k }) }); setTimeout(loadScreen, 300); }
       catch (e) { toast("ส่งปุ่มไม่ได้: " + e.message); }
     });
   }
@@ -1019,7 +1149,7 @@ function renderList(list) {
 async function loadChat(scr, older) {
   const ws = state.ws, room = state.room;
   const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
-  const q = older && state.chat ? `?before=${state.chat.start}&limit=150` : "?limit=150";
+  const q = older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : "?limit=150";
   const c = await api(base + q);
   // the reply of a room we already left must not land in the room on screen now
   if (state.ws !== ws || state.room !== room || !scr.isConnected) return { kind: "stale" };
@@ -1076,24 +1206,81 @@ function fillAudioMeta(root) {
   });
 }
 // ── optimistic send: phone bubble first, Mac second ──
+const isHerdr = ws => String(ws || "").startsWith("herdr:");
+const requestId = () => crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2);
+function roomBinding(ws, id) { return state.projects.flatMap(p => p.workspaces).find(w => w.id === ws)?.rooms.find(r => r.id === id); }
+async function herdrKey(ws, room, key) {
+  const binding = roomBinding(ws, room);
+  return api(`/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/send`, { method: "POST", body: JSON.stringify({ key, id: requestId(), generation: binding?.generation }) });
+}
+async function checkHerdrDelivery(p) {
+  try {
+    const r = await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}`);
+    if (r.state === "acknowledged") { p.state = "sent"; p.sentAt = Date.now(); }
+    else { p.state = "uncertain"; p.err = "ยังยืนยันการส่งไม่ได้ — ตรวจจอก่อนเลือกส่งใหม่"; }
+  } catch { p.state = "uncertain"; p.err = "ยังยืนยันการส่งไม่ได้ — ตรวจจอก่อนเลือกส่งใหม่"; }
+  savePending(); paintPending();
+}
+async function resolveHerdrPending(p) {
+  if (!confirm("ตรวจจอแล้ว และไม่ต้องส่งข้อความนี้ซ้ำ ใช่ไหม?")) return;
+  try {
+    await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}/resolve`, { method: "POST", body: JSON.stringify({ confirmed: true, generation: p.generation }) });
+    dropPending(p); flushWaiting();
+  } catch (e) { toast(e.message); }
+}
+async function retargetHerdrPending(p) {
+  const priorStatus = p.uid ? await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}`).catch(() => null) : null;
+  let data; try { data = await api("/projects"); } catch (e) { toast(e.message); return; }
+  if (data._offlineAt) { toast("ต้องเชื่อมต่อก่อนเลือกปลายทางใหม่"); return; }
+  const choices = data.projects.filter(x => x.source === "herdr").flatMap(x => x.workspaces.flatMap(w => w.rooms.filter(r => r.capabilities?.prompt).map(r => ({ w, r }))));
+  const bg = document.createElement("div"); bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><h2>เลือกปลายทางใหม่</h2><p>ข้อความเดิมอาจส่งถึงแล้ว ตรวจจอก่อนส่งซ้ำ</p>${choices.map(({w,r},i) => `<button data-target="${i}">${esc(w.name)} · ${esc(r.title)}</button>`).join("") || "ไม่มี agent ที่พร้อมรับข้อความ"}<button data-cancel>ยกเลิก</button></div>`;
+  bg.querySelector('[data-cancel]').onclick = () => bg.remove();
+  bg.querySelectorAll('[data-target]').forEach(b => b.onclick = () => {
+    const {w,r} = choices[+b.dataset.target];
+    if (!confirm(`ส่งข้อความนี้ไป ${r.title}? ข้อความเดิมอาจส่งถึงแล้ว`)) return;
+    p.resolveParent = priorStatus?.state === "uncertain" && w.id === p.ws && r.id === p.room && r.generation === p.generation;
+    p.parentId = p.uid; p.uid = requestId(); p.ws = w.id; p.room = r.id; p.key = w.id + "/" + r.id;
+    p.generation = r.generation; p.continuityToken = r.continuityToken; p.at = Date.now(); p.requestStarted = false; p.offline = false;
+    p.state = "waiting"; p.err = ""; bg.remove(); savePending(); queueSend(p);
+  });
+  document.body.appendChild(bg);
+}
 const pendingSends = []; let pendSeq = 0, sendChain = Promise.resolve();
 const queueSend = p => { sendChain = sendChain.then(() => runSend(p)); }; // one at a time → the Mac gets them in order
 async function runSend(p) {
-  p.state = "sending"; p.err = ""; paintPending();
+  if (p.busy || p.state === "sent" || !pendingSends.includes(p)) return;   // two flushes racing / deleted meanwhile
+  if (isHerdr(p.ws)) {
+    if (["uncertain", "held"].includes(p.state)) return;
+    if (pendingSends.some(q => q !== p && q.id < p.id && q.ws === p.ws && q.room === p.room && ["uncertain", "held"].includes(q.state))) { p.state = "waiting"; savePending(); return; }
+  }
+  p.busy = true;
+  // the Mac remembers this id for 30 min → a retry after a lost reply is not typed twice
+  p.uid ||= (crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2));
+  p.state = "sending"; p.err = ""; paintPending(); savePending();
   try {
-    const paths = [];
-    for (const [k, f] of p.files.entries()) {
+    if (!net.online) throw net.error();   // queue it now; flushWaiting() sends it when the link is back
+    const paths = isHerdr(p.ws) && p.paths?.length ? [...p.paths] : [];
+    for (const [k, f] of (paths.length ? [] : p.files).entries()) {
       p.note = p.files.length > 1 ? `อัปโหลด ${k + 1}/${p.files.length}` : "อัปโหลดไฟล์"; paintPending();
       const up = await shrinkImage(f);
-      const r = await fetch(`/mobile/upload?name=${encodeURIComponent(up.name)}`, { method: "POST", body: up, headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
-      const j = await r.json(); if (!j.ok) throw new Error(j.error || "อัปโหลดไม่ได้");
+      let r;
+      try {
+        r = await fetch(`/mobile/upload?name=${encodeURIComponent(up.name)}`, { method: "POST", body: up, signal: AbortSignal.timeout(300_000), headers: { authorization: "Bearer " + (store.get("maw-mobile-token") || "") } });
+        if (net.gatewayDown(r)) throw Object.assign(new Error("maw ไม่ตอบ"), { gateway: true });
+      } catch (e) { if (net.isNetErr(e) && !(await net.probe())) { net.down(); throw net.error(); } throw e; }
+      net.up();
+      const j = await r.json().catch(() => ({})); if (!j.ok) throw new Error(j.error || "อัปโหลดไม่ได้");
       paths.push(j.path);
     }
     p.note = "";
     const text = (p.text ? p.text + (paths.length ? "\n\n" : "") : "") + paths.map(x => `[แนบไฟล์] ${x}`).join("\n");
     p.paths = paths;
     for (;;) {
-      try { await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", body: JSON.stringify({ text, clear: p.mode === "clear", merge: p.mode === "merge" }) }); break; }
+      try {
+        if (isHerdr(p.ws)) { p.requestStarted = true; savePending(); }
+        await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", signal: AbortSignal.timeout(60_000), body: JSON.stringify({ text, clear: p.mode === "clear", merge: p.mode === "merge", id: p.uid, ...(isHerdr(p.ws) ? { generation: p.generation, continuityToken: p.continuityToken, offline: !!p.offline, createdAt: p.at, parentId: p.parentId, resolveParent: !!p.resolveParent } : {}) }) }); break;
+      }
       catch (e) {
         if (e.body?.code !== "draft" || p.mode === "clear") throw e;
         const how = await askMacDraft(e.body.draft);   // something got into the PC's box meanwhile → the person decides
@@ -1106,17 +1293,40 @@ async function runSend(p) {
     if (state.filesRoom !== p.key || (!box?.value.trim() && !state.files.length)) clearDraft(p.key); // keep a newer draft typed meanwhile
     paintPending(); setTimeout(loadScreen, 400);
   } catch (e) {
+    if (isHerdr(p.ws) && p.requestStarted) {
+      if (e.body?.state === "definitely-rejected" || ["agent_changed", "generation_mismatch", "continuity_lost", "unsupported"].includes(e.body?.code)) {
+        p.state = "held"; p.err = e.body.error || "agent เดิมปิดหรือเปลี่ยนแล้ว";
+      } else { p.state = "uncertain"; p.err = "ยังยืนยันการส่งไม่ได้ — ตรวจจอก่อนส่งใหม่"; }
+      p.note = ""; savePending(); paintPending(); return;
+    }
+    if (e.offline || !net.online) {
+      if (isHerdr(p.ws)) p.offline = true;
+      // no link (phone offline / Mac asleep / maw down) → not a failure: it waits and goes by itself when the link is back
+      p.state = "waiting"; p.err = ""; p.note = ""; paintPending(); savePending(); paintNet();
+      return;
+    }
     p.state = "failed"; p.err = e.message; p.note = ""; paintPending(); savePending();
     playSound("error");
     if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted")
       navigator.serviceWorker?.ready.then(r => r.showNotification("🔴 ส่งไม่ได้", { body: `${e.message} — แตะเพื่อลองใหม่`, tag: "send-fail", vibrate: [320, 110, 320, 110, 320], icon: "/icon-192.png", data: { url: "/m.html" } })).catch(() => {});
+  } finally { p.busy = false; }
+}
+/** Link back → the queued messages go out in the order they were written. One held longer than 30 min may no longer
+ *  fit what the room is doing → it waits for a tap ("stale") instead of going by itself. */
+const STALE_MS = 30 * 60_000;
+function flushWaiting() {
+  for (const p of [...pendingSends].sort((a, b) => a.id - b.id)) {
+    if (p.state !== "waiting") continue;
+    if (Date.now() - (p.at || 0) > STALE_MS) { p.state = "stale"; continue; }
+    queueSend(p);
   }
+  savePending(); paintPending(); paintNet();
 }
 function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); forgetPendingFiles(p); savePending(); if (!quiet) paintPending(); }
 // Android may kill the page mid-send (camera, app switch) → keep the bubbles: list in localStorage, files in Cache Storage
 const PEND_KEY = "maw-pend", PEND_CACHE = "maw-pend";
 function savePending(withFiles) {
-  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
+  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, uid, mode, generation, continuityToken, requestStarted, offline, parentId, resolveParent, paths }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, uid, mode, generation, continuityToken, requestStarted, offline, parentId, resolveParent, paths, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
   if (withFiles && withFiles.files.length && "caches" in window)
     caches.open(PEND_CACHE).then(box => Promise.all(withFiles.files.map((f, i) => box.put(`${location.origin}/pend/${withFiles.id}/${i}`, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }))))).catch(() => {});
 }
@@ -1134,13 +1344,15 @@ async function restorePending() {
       const r = await box?.match(`${location.origin}/pend/${x.id}/${i}`).catch(() => null);
       if (r) files.push(new File([await r.blob()], decodeURIComponent(r.headers.get("x-name") || "file"), { type: r.headers.get("content-type") || "" }));
     }
-    // it may or may not have reached the Mac before the page died → never resend on its own
-    const state = x.state === "sending" ? "failed" : x.state;
-    pendingSends.push({ ...x, files, state, err: x.state === "sending" ? "แอปถูกปิดระหว่างส่ง — ดูในแชทก่อนกดลองใหม่" : x.err, note: "",
+    // it may or may not have reached the Mac before the page died: with an id the Mac drops a repeat → safe to queue
+    // again; an old bubble without one is never resent on its own
+    const state = x.state === "sending" ? (isHerdr(x.ws) ? (x.requestStarted ? "uncertain" : "waiting") : (x.uid ? "waiting" : "failed")) : x.state;
+    pendingSends.push({ ...x, files, state, err: x.state === "sending" && !x.uid ? "แอปถูกปิดระหว่างส่ง — ดูในแชทก่อนกดลองใหม่" : x.err, note: "",
       pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) });
     pendSeq = Math.max(pendSeq, x.id || 0);
   }
   savePending(); paintPending();
+  if (pendingSends.some(p => p.state === "waiting")) flushWaiting();
 }
 /** Sent bubbles leave once the real message shows up in the chat (or after a minute as a fallback). */
 function reconcilePending(list) {
@@ -1158,20 +1370,34 @@ function reconcilePending(list) {
 function paintPending() {
   const scr = document.getElementById("screen"); if (!scr) return;
   scr.querySelectorAll(".pend").forEach(n => n.remove());
-  if (state.mode !== "chat") return;
+  // the screen view shows only what still needs the person (waiting for the link, held too long, failed)
+  const onlyOpen = state.mode !== "chat";
   // a slash command (/rewind, /clear …) runs in the agent's UI and is never written as a message → its bubble goes soon
   for (const p of [...pendingSends]) if (p.state === "sent" && Date.now() - p.sentAt > (/^\s*\/\S/.test(p.text) && !p.files.length ? 3_000 : 60_000)) dropPending(p, true);
-  const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room);
+  const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room && (!onlyOpen || ["waiting", "stale", "failed", "uncertain", "held"].includes(p.state)));
   if (!mine.length) return;
   const atBottom = state.follow || scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60;
   for (const p of mine) {
-    const who = p.state === "failed" ? `⚠️ ส่งไม่ได้ · ${esc(p.err)}` : p.state === "sent" ? "✓ ส่งแล้ว" : `⏳ ${p.note ? esc(p.note) + "…" : "กำลังส่ง…"}`;
+    const mins = Math.max(1, Math.round((Date.now() - (p.at || Date.now())) / 60_000));
+    const who = p.state === "uncertain" ? "⏸ ยังยืนยันการส่งไม่ได้ — ไม่ส่งซ้ำอัตโนมัติ" : p.state === "held" ? `⏸ ${esc(p.err || "agent เดิมปิดหรือเปลี่ยนแล้ว")}` : p.state === "failed" ? `⚠️ ส่งไม่ได้ · ${esc(p.err)}` : p.state === "sent" ? "✓ ส่งแล้ว"
+      : p.state === "waiting" ? "📴 รอเน็ต · จะส่งเองเมื่อเชื่อมต่อได้"
+      : p.state === "stale" ? `⏸ ค้างมา ${mins} นาที · ห้องอาจเปลี่ยนเรื่องแล้ว — ส่งตอนนี้ไหม?`
+      : `⏳ ${p.note ? esc(p.note) + "…" : "กำลังส่ง…"}`;
     const el = document.createElement("div");
     el.className = `msg me pend ${p.state}`;
+    const acts = ["uncertain", "held"].includes(p.state) ? `<button data-a="status">ตรวจสถานะ</button><button data-a="retarget">เลือกปลายทางและส่งใหม่</button><button data-a="resolve">ตรวจแล้ว · ไม่ส่งซ้ำ</button><button data-a="drop">เก็บไว้บนจอจริง · เอารายการนี้ออก</button>` : p.state === "failed" ? `<button data-a="retry">↻ ลองใหม่</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button>`
+      : p.state === "stale" ? `<button data-a="retry">ส่งเลย ↑</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button>`
+      : p.state === "waiting" ? `<button data-a="edit">✎ แก้ไข</button><button data-a="drop">ยกเลิก</button>` : "";
     el.innerHTML = `<div class="who">${who}</div><div class="bubble">${p.pics.length ? `<div class="pics">${p.pics.map(u => `<img class="upimg" src="${u}" data-zoom="${u}">`).join("")}</div>` : ""}${esc(p.text)}${p.names.map(n => `<div class="upfile">📎 ${esc(n)}</div>`).join("")}</div>`
-      + (p.state === "failed" ? `<div class="pact"><button data-a="retry">↻ ลองใหม่</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button></div>` : "");
+      + (acts ? `<div class="pact">${acts}</div>` : "");
     el.querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
-      if (b.dataset.a === "retry") return queueSend(p);
+      if (b.dataset.a === "resolve") return resolveHerdrPending(p);
+      if (b.dataset.a === "status") return checkHerdrDelivery(p);
+      if (b.dataset.a === "retarget") return retargetHerdrPending(p);
+      if (b.dataset.a === "retry") {
+        if (isHerdr(p.ws)) { if (p.requestStarted) return retargetHerdrPending(p); p.at = Date.now(); p.offline = false; }
+        return queueSend(p);
+      }
       if (b.dataset.a === "edit") {
         const box = document.getElementById("msg");
         if (box) { box.value = p.text + (box.value ? "\n" + box.value : ""); state.files = [...p.files, ...state.files]; box.dispatchEvent(new Event("maw-redraw-att")); box.oninput(); box.focus(); }
@@ -1330,6 +1556,11 @@ async function loadScreen() {
     if (state.mode === "chat") {
       const c = await loadChat(scr);
       if (c.kind === "text") { const html = `<div class="msg ai ${esc(agentKind())}"><div class="who">${esc(agentName())}</div><div class="bubble">${md(c.text.replace(/^\[earlier output omitted\]\n/, ""))}</div></div>`; if (scr._sig !== html) { scr._sig = html; scr.innerHTML = html; scr.scrollTop = scr.scrollHeight; } }
+      else if (c.kind === "unavailable" || (c.kind === "none" && String(state.ws).startsWith("herdr:"))) {
+        scr.innerHTML = '<div class="empty">ยังอ่านประวัติแชทไม่ได้<br><button data-herdr-screen>ดูจอจริง</button></div>';
+        scr.querySelector('[data-herdr-screen]').onclick = () => { state.mode = "raw"; renderProject(); };
+        paintPending();
+      }
       else if (c.kind === "none") { state.mode = "raw"; scr.className = "screen raw"; return loadScreen(); }
     } else {
       const s = await api(`/rooms/${encodeURIComponent(state.ws)}/${encodeURIComponent(state.room)}/screen?lines=1000`);
@@ -1342,9 +1573,15 @@ async function loadScreen() {
         scr._raw = html; scr.innerHTML = `<div class="rawnote">แสดงเฉพาะจอปัจจุบัน (Claude วาดจอทับที่เดิม ไม่เก็บประวัติ) · ย้อนหลังทั้งหมดอยู่ใน <button data-gochat>แชท</button></div>` + (html || "(จอว่าง)");
         scr.querySelector("[data-gochat]").onclick = () => { state.mode = "chat"; state.follow = true; renderProject(); };
         scr.scrollTop = state.follow ? scr.scrollHeight : scr.scrollHeight - fromBottom;
+        paintPending();   // messages waiting for the link stay visible under the screen
       }
     }
-  } catch (e) { if (e.message !== "unauthorized" && scr.isConnected && key === `${state.ws}/${state.room}/${state.mode}`) scr.textContent = "อ่านไม่ได้: " + e.message; }
+  } catch (e) {
+    if (e.message === "unauthorized" || !scr.isConnected || key !== `${state.ws}/${state.room}/${state.mode}`) return;
+    // offline with nothing kept for this view: say so, but never wipe what is already on screen
+    if (e.offline) { if (!scr.querySelector(".msg, .rawnote")) scr.innerHTML = `<div class="sys">📴 ออฟไลน์ — ห้องนี้ยังไม่มีข้อมูลในเครื่อง (ต้องเคยเปิดตอนมีเน็ต) · พิมพ์ทิ้งไว้ได้ จะส่งเมื่อเชื่อมต่อได้</div>`; paintPending(); return; }
+    scr.textContent = "อ่านไม่ได้: " + e.message;
+  }
   finally { if (loadScreen.busy === mine) loadScreen.busy = null; }
 }
 
@@ -2216,15 +2453,19 @@ async function load(manual) {
     soundOnChange(state.projects);
     if (state.page) mawExt.refreshTiles(); else if (!state.project) renderHome(true); else if (!document.querySelector(".sheet-bg")) refreshTabs();
     if (manual) toast("อัปเดตแล้ว");
-  } catch (e) { if (e.message !== "unauthorized") toast("โหลดไม่ได้: " + e.message); }
+  } catch (e) { if (e.message !== "unauthorized" && !e.offline) toast("โหลดไม่ได้: " + e.message); }
 }
 /** Update tab dots/titles without rebuilding the room (keeps a half-typed message). */
 function refreshTabs() {
   const p = state.projects.find(x => x.name === state.project), w = p?.workspaces.find(x => x.id === state.ws);
   const tabs = document.getElementById("tabs"); if (!w || !tabs) return;
   const ids = [...tabs.querySelectorAll("[data-r]")].map(b => b.dataset.r).join(",");
-  if (ids !== w.rooms.map(r => r.id).join(",")) {
-    const draft = document.getElementById("msg")?.value; renderProject();
+  const currentRoom = w.rooms.find(r => r.id === state.room);
+  const bindingChanged = p.source === "herdr" && renderProject.binding !== (currentRoom && `${w.id}/${currentRoom.id}/${currentRoom.generation || ""}/${JSON.stringify(currentRoom.capabilities || {})}`);
+  if (bindingChanged || ids !== w.rooms.map(r => r.id).join(",")) {
+    const draft = document.getElementById("msg")?.value;
+    if (bindingChanged) { state.chat = null; chatCache.delete(state.room); chatHtmlCache.delete(state.room); }
+    renderProject();
     if (draft) { const m = document.getElementById("msg"); if (m) { m.value = draft; m.oninput(); } }
     return;
   }
@@ -2261,7 +2502,9 @@ start();
 </script>
 <!-- feature packs (ui/mobile/ext, deployed to /m-ext by ui/mobile/deploy.sh) -->
 <script src="/m-ext/permissions.js" defer></script>
+<script src="/m-ext/herdr.js" defer></script>
 <script src="/m-ext/modes.js" defer></script>
+<script src="/m-ext/continuity.js" defer></script>
 <script src="/m-ext/activity.js" defer></script>
 <script src="/m-ext/resume.js" defer></script>
 <script src="/m-ext/context.js" defer></script>

@@ -1,0 +1,23 @@
+{
+  "id": "fixture-request",
+  "result": {
+    "type": "agent_list",
+    "agents": [
+      {
+        "pane_id": "w7:p1",
+        "terminal_id": "terminal-example",
+        "workspace_id": "w7",
+        "tab_id": "w7:t1",
+        "focused": false,
+        "agent_status": "idle",
+        "revision": 1,
+        "agent": "codex",
+        "cwd": "/home/example/project",
+        "foreground_cwd": "/home/example/project",
+        "name": "demo-room",
+        "interactive_ready": true,
+        "launch_pending": false
+      }
+    ]
+  }
+}

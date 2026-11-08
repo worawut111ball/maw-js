@@ -1,0 +1,2 @@
+{"type": "user", "uuid": "demo-user", "timestamp": "2026-11-08T00:00:00Z", "message": {"role": "user", "content": "ตรวจห้องตัวอย่าง"}, "sessionId": "00000000-0000-4000-8000-000000000002"}
+{"type": "assistant", "uuid": "demo-assistant", "parentUuid": "demo-user", "timestamp": "2026-11-08T00:00:01Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "นี่คือประวัติของ Claude ตัวอย่าง"}]}, "sessionId": "00000000-0000-4000-8000-000000000002"}

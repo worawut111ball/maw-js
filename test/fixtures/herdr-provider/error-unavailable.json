@@ -1,0 +1,7 @@
+{
+  "id": "fixture-request",
+  "error": {
+    "code": "session_not_found",
+    "message": "Synthetic unavailable session"
+  }
+}

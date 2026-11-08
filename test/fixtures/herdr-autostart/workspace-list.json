@@ -1,0 +1,18 @@
+{
+  "id": "fixture-request",
+  "result": {
+    "type": "workspace_list",
+    "workspaces": [
+      {
+        "workspace_id": "w7",
+        "number": 7,
+        "label": "demo-room",
+        "focused": false,
+        "pane_count": 1,
+        "tab_count": 1,
+        "active_tab_id": "w7:t1",
+        "agent_status": "unknown"
+      }
+    ]
+  }
+}

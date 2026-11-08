@@ -458,3 +458,199 @@ describe("safety-check dialog with a countdown", () => {
   });
 });
 
+
+// Real screens of Claude Code's AskUserQuestion (Claude Code 2.1.281, captured 7 Nov 69 in a scratch tmux room).
+describe("AskUserQuestion — options, tabs and the free-text row", () => {
+  const { readFileSync } = require("fs");
+  const fx = (f: string) => readFileSync(`${import.meta.dir}/fixtures/${f}`, "utf8");
+  const { menuTabs, menuOptions } = require("../src/mobile/features/permissions");
+
+  test("question page: tabs, question, options with hints, the free row", () => {
+    const m = parseMenu(fx("askuser-q1.txt"))!;
+    expect(m.tabs).toEqual([{ label: "Colour", done: false }, { label: "Fruit", done: false }, { label: "Submit", done: false }]);
+    expect(m.question).toBe("What is your favourite colour?");
+    expect(m.options.map((o: any) => [o.n, o.label, o.free, o.sel])).toEqual([
+      [1, "Red", false, true], [2, "Green", false, false], [3, "Blue", false, false],
+      [4, "Type something.", true, false], [5, "Chat about this", false, false],
+    ]);
+    expect(m.options[0].hint).toBe("A warm colour");
+  });
+
+  test("typed text replaces the free row's label — still recognised as the free row", () => {
+    const m = parseMenu(fx("askuser-q1-typed.txt"))!;
+    const free = m.options.find((o: any) => o.free)!;
+    expect(free).toMatchObject({ n: 4, label: "ม่วงพาสเทล", sel: true });
+  });
+
+  test("second page marks the first tab done", () => {
+    const m = parseMenu(fx("askuser-q2.txt"))!;
+    expect(m.tabs[0]).toEqual({ label: "Colour", done: true });
+    expect(m.question).toBe("What is your favourite fruit?");
+    expect(m.options.find((o: any) => o.free)!.n).toBe(3);
+  });
+
+  test("review page: plain numbered answers, no free row", () => {
+    const m = parseMenu(fx("askuser-review.txt"))!;
+    expect(m.options.map((o: any) => o.label)).toEqual(["Submit answers", "Cancel"]);
+    expect(m.options.some((o: any) => o.free)).toBe(false);
+  });
+
+  test("menuTabs ignores lines that are not a tab header", () => {
+    expect(menuTabs("Do you trust the files in this folder?")).toEqual([]);
+    expect(menuOptions(["❯ 1. Yes", "  2. No"]).map((o: any) => o.free)).toEqual([false, false]);
+  });
+
+  test("POST /prompt/type: moves to the free row, types, Enter — and refuses when no free row is open", async () => {
+    const pressed: string[] = [], typed: string[] = [];
+    let screen = fx("askuser-q1.txt");
+    const routes: Record<string, Function> = {};
+    const fakeApp = { get: (p: string, h: Function) => { routes["GET " + p] = h; }, post: (p: string, h: Function) => { routes["POST " + p] = h; } };
+    mount(fakeApp, {
+      readScreen: async () => screen,
+      pressKey: async (_c: unknown, k: string) => { pressed.push(k); if (k === "4") screen = fx("askuser-q1-typed.txt").replace("ม่วงพาสเทล", "Type something."); },
+      typeLiteral: async (_c: unknown, t: string) => { typed.push(t); },
+      roomChannel: (ws: string, room: string) => (ws === "tmux" ? { kind: "tmux", pane: room, label: room } : null),
+      pause: async () => {},
+    } as any);
+    const call = async (body: any) => { const set: any = {}; const r = await routes["POST /rooms/:ws/:room/prompt/type"]({ params: { ws: "tmux", room: "%9" }, body, set }); return { status: set.status ?? 200, ...r }; };
+    expect((await call({ n: 4, text: "ม่วงพาสเทล" })).status).toBe(200);
+    expect(pressed).toEqual(["4", "enter"]);
+    expect(typed).toEqual(["ม่วงพาสเทล"]);
+    // row already holds earlier text → cleared first
+    pressed.length = 0; typed.length = 0; screen = fx("askuser-q1-typed.txt");
+    expect((await call({ n: 4, text: "เขียว" })).status).toBe(200);
+    expect(pressed).toEqual(["ctrlu", "enter"]);
+    // not a free row / dialog gone → nothing typed
+    pressed.length = 0; typed.length = 0;
+    expect((await call({ n: 1, text: "x" })).status).toBe(409);
+    screen = "❯ \n? for shortcuts";
+    expect((await call({ n: 4, text: "x" })).status).toBe(409);
+    expect([pressed, typed]).toEqual([[], []]);
+  });
+});
+
+describe("AskUserQuestion — which tab is open", () => {
+  const { readFileSync } = require("fs");
+  const { currentTab } = require("../src/mobile/features/permissions");
+  test("tmux keeps the colours: the tab painted with a background is the open one", () => {
+    const raw = readFileSync(`${import.meta.dir}/fixtures/askuser-tabs-ansi.txt`, "utf8");   // 3 questions, moved once to the right
+    expect(currentTab(raw)).toBe(1);
+    expect(parseMenu(raw)!.tab).toBe(1);
+    expect(parseMenu(raw)!.tabs.map((t: any) => t.label)).toEqual(["Colour", "Fruit", "Pet", "Submit"]);
+  });
+  test("plain text (Superset) → unknown", () => {
+    const raw = readFileSync(`${import.meta.dir}/fixtures/askuser-q1.txt`, "utf8");
+    expect(currentTab(raw)).toBeNull();
+    expect(parseMenu(raw)!.tab).toBeNull();
+  });
+  test("256-colour foreground numbers are not mistaken for a background", () => {
+    expect(currentTab("← \x1b[38;5;48m☐ A\x1b[39m  \x1b[48;5;153m☐ B\x1b[49m  ✔ Submit →")).toBe(1);
+  });
+});
+
+describe("AskUserQuestion — open tab without colours (Superset)", () => {
+  const { readFileSync } = require("fs");
+  const { tabFromScreen } = require("../src/mobile/features/permissions");
+  const fx = (f: string) => readFileSync(`${import.meta.dir}/fixtures/${f}`, "utf8");
+  test("the header word in the question picks the tab", () => {
+    expect(tabFromScreen(parseMenu(fx("askuser-q1.txt"))!)).toBe(0);   // Colour ↔ favourite colour
+    expect(tabFromScreen(parseMenu(fx("askuser-q2.txt"))!)).toBe(1);   // Fruit ↔ favourite fruit
+  });
+  test("review page = last tab", () => {
+    expect(tabFromScreen(parseMenu(fx("askuser-review.txt"))!)).toBe(2);
+  });
+  test("no match / two matches → unknown", () => {
+    const m = parseMenu(fx("askuser-q1.txt"))!;
+    expect(tabFromScreen({ ...m, question: "Pick one" })).toBeNull();
+    expect(tabFromScreen({ ...m, question: "colour or fruit?" })).toBeNull();
+  });
+});
+
+describe("AskUserQuestion — a digit while the cursor sits in the free-text row", () => {
+  const { readFileSync } = require("fs");
+  const fx = (f: string) => readFileSync(`${import.meta.dir}/fixtures/${f}`, "utf8");
+  test("steps out with ↑ first, so the digit picks instead of being typed", async () => {
+    const pressed: string[] = [];
+    let screen = fx("askuser-q1-typed.txt");   // ❯ 4. ม่วงพาสเทล (cursor in the text row)
+    const routes: Record<string, Function> = {};
+    const fakeApp = { get: (p: string, h: Function) => { routes["GET " + p] = h; }, post: (p: string, h: Function) => { routes["POST " + p] = h; } };
+    mount(fakeApp, {
+      readScreen: async () => screen,
+      pressKey: async (_c: unknown, k: string) => { pressed.push(k); if (k === "up") screen = fx("askuser-q1.txt"); },
+      roomChannel: () => ({ kind: "tmux", pane: "%9", label: "%9" }), pause: async () => {},
+    } as any);
+    const set: any = {};
+    const r = await routes["POST /rooms/:ws/:room/prompt/key"]({ params: { ws: "tmux", room: "%9" }, body: { key: "2" }, set });
+    expect(r.ok).toBe(true);
+    expect(pressed).toEqual(["up", "2"]);
+    // arrows / Enter are passed as they are
+    pressed.length = 0; screen = fx("askuser-q1-typed.txt");
+    await routes["POST /rooms/:ws/:room/prompt/key"]({ params: { ws: "tmux", room: "%9" }, body: { key: "enter" }, set: {} });
+    expect(pressed).toEqual(["enter"]);
+  });
+});
+
+describe("AskUserQuestion — a question of several lines", () => {
+  test("heading + bullets all come through, the box bars dropped", () => {
+    const screen = [
+      "⏺ Ran 1 shell command",
+      "────────────────────────────────────────",
+      "←  ☒ Card 13  ☐ Card 14  ☐ Card 15  ✔ Submit  →",
+      "│ Card 14/33 · BR-59 export the issue list",
+      "│ • RS: export shipments to Excel",
+      "│ • Has: CSV from the event log",
+      "│ • Missing: no export button on the page",
+      "  1. Real bug, fix it",
+      "     add the button",
+      "  2. As designed",
+      "     use the other way",
+      "❯ 3. Type something.",
+      "────────────────────────────────────────",
+      "  4. Chat about this",
+      "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ].join("\n");
+    const m = parseMenu(screen)!;
+    expect(m.question.split("\n")).toEqual([
+      "Card 14/33 · BR-59 export the issue list",
+      "• RS: export shipments to Excel",
+      "• Has: CSV from the event log",
+      "• Missing: no export button on the page",
+    ]);
+    expect(m.options.map((o: any) => o.label)).toEqual(["Real bug, fix it", "As designed", "Type something.", "Chat about this"]);
+    const { tabFromScreen } = require("../src/mobile/features/permissions");
+    expect(tabFromScreen(m)).toBe(1);   // "Card 14" is in the heading line
+  });
+});
+
+describe("AskUserQuestion — a single question (no arrows, no Submit tab)", () => {
+  test("the chip line is a header, the block under it is the question", () => {
+    const screen = [
+      "  Ran 1 shell command",
+      "────────────────────────────────────────",
+      " ☐ Card 33 ",
+      "",
+      "│ Card 33/33 (last) · BR-82 D365 file",
+      "│ • RS: destination comes from D365",
+      "│ • Missing: no file format for it",
+      " ",
+      "❯ 1. Real bug, fix it",
+      "     ask for the format",
+      "  2. As designed",
+      "     handled on site",
+      "  3. Type something.",
+      "────────────────────────────────────────",
+      "  4. Chat about this",
+      "  ",
+      "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    ].join("\n");
+    const m = parseMenu(screen)!;
+    expect(m.tabs).toEqual([{ label: "Card 33", done: false }]);
+    expect(m.question.split("\n")).toEqual(["Card 33/33 (last) · BR-82 D365 file", "• RS: destination comes from D365", "• Missing: no file format for it"]);
+    expect(m.options.filter((o: any) => o.free).map((o: any) => o.n)).toEqual([3]);
+  });
+  test("an ordinary first line is not taken for a header", () => {
+    const { menuTabs } = require("../src/mobile/features/permissions");
+    expect(menuTabs("Do you want to proceed?")).toEqual([]);
+    expect(menuTabs("☐ a todo ☐ another")).toEqual([]);
+  });
+});

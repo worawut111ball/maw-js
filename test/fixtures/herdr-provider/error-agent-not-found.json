@@ -1,0 +1,7 @@
+{
+  "id": "fixture-request",
+  "error": {
+    "code": "agent_not_found",
+    "message": "Synthetic missing agent"
+  }
+}

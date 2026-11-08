@@ -3,13 +3,29 @@
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 
-// The app page and feature packs must always come fresh from the Mac (Chrome otherwise keeps a cached copy
-// and the phone runs an old version after an update).
+// The app page and feature packs always come fresh from the Mac when it answers (Chrome otherwise keeps a cached
+// copy and the phone runs an old version after an update). Each good answer is also kept, so with no link — phone
+// offline, Mac asleep, maw down — the app still opens and shows the data it kept (the page's own offline cache).
+const SHELL = "maw-shell";
+const isShell = p => p === "/m.html" || p.startsWith("/m-ext/") || p === "/manifest.json" || /^\/(icon-\d+|apple-touch-icon)\.png$/.test(p);
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
-  if (url.pathname === "/m.html" || url.pathname.startsWith("/m-ext/") || url.pathname === "/manifest.json")
-    e.respondWith(fetch(e.request, { cache: "no-store" }).catch(() => fetch(e.request)));
+  if (e.request.method !== "GET" || url.origin !== location.origin || !isShell(url.pathname)) return;
+  // one copy per file whatever the query (?shared=, ?v=…)
+  const key = url.origin + url.pathname;
+  e.respondWith((async () => {
+    try {
+      const res = await fetch(e.request, { cache: "no-store" });
+      // 502–504 = Tailscale up but maw down → the kept copy is better than an error page
+      if (res.status >= 502 && res.status <= 504) throw new Error("gateway");
+      if (res.ok) { const box = await caches.open(SHELL); await box.put(key, res.clone()); }
+      return res;
+    } catch {
+      const hit = await caches.match(key, { cacheName: SHELL });
+      if (hit) return hit;
+      return new Response("<meta charset=utf-8><meta name=viewport content='width=device-width'><body style='background:#020208;color:#eee;font:16px system-ui;padding:24px'>📴 ออฟไลน์ — ยังไม่เคยเปิดแอปตอนมีเน็ต<br><br><button onclick='location.reload()'>ลองใหม่</button>", { status: 503, headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+  })());
 });
 
 // Share sheet → "maw": Android POSTs the screenshot/file here (manifest share_target).

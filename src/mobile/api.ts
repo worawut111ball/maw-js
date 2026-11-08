@@ -15,6 +15,8 @@
 import { Elysia, t } from "elysia";
 import webpush from "web-push";
 import { mountFeatures } from "./features";
+import type { ContinuityFeatureOptions } from "./features/continuity";
+import { herdrRuntime, HerdrError, type HerdrChannel, type HerdrRuntime } from "./herdr/runtime";
 import { execFileSync } from "child_process";
 import { closeSync, realpathSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
@@ -95,7 +97,17 @@ export function statusFromHook(event: string): AgentStatus | null {
 
 export interface Channel { kind: "tmux"; pane: string; label: string }
 export interface SupersetChannel { kind: "superset"; workspaceId: string; terminalId: string; label: string }
-export type ReplyChannel = Channel | SupersetChannel;
+export type ReplyChannel = Channel | SupersetChannel | HerdrChannel;
+
+export function herdrFailure(error: unknown, set: any) {
+  set.status = error instanceof HerdrError ? error.status : 503;
+  return { ok: false, code: error instanceof HerdrError ? error.code : "herdr_unavailable",
+    error: error instanceof HerdrError ? ({
+      guarded_dispatch_required: "ใช้คำสั่ง Herdr ที่ตรวจปลายทางและสถานะการส่ง",
+      room_changed: "agent เดิมปิดหรือเปลี่ยนแล้ว", agent_continuity_unverified: "agent เดิมปิดหรือเปลี่ยนแล้ว — เลือกปลายทางใหม่", agent_changed: "agent เดิมปิดหรือเปลี่ยนแล้ว", generation_mismatch: "agent เดิมปิดหรือเปลี่ยนแล้ว",
+      continuity_lost: "ยืนยัน agent เดิมไม่ได้ — เลือกปลายทางใหม่", dialog_changed: "คำถามเปลี่ยนไปแล้ว — โหลดใหม่ก่อนตอบ",
+    }[error.code] || "พักคำสั่ง Herdr — ตรวจสถานะ agent ก่อนลองใหม่") : "Herdr ไม่พร้อม — ยังยืนยันผลไม่ได้" };
+}
 
 export interface LiveRoom { pid: number; sessionId: string; status: string | null; name: string | null; channel: ReplyChannel | null }
 
@@ -376,6 +388,7 @@ export async function ssAsync(args: string[], timeoutMs = 15_000): Promise<strin
 const ssScreens = new Map<string, { at: number; lines: number; p: Promise<string> }>();
 const tailLines = (text: string, n: number) => { const l = text.split("\n"); return l.length > n ? l.slice(-n).join("\n") : text; };
 export async function readScreen(ch: ReplyChannel, lines: number): Promise<string> {
+  if (ch.kind === "herdr") return herdrRuntime.screen(ch, lines);
   if (ch.kind === "tmux") return capture(ch.pane, lines);
   const key = ch.workspaceId + "/" + ch.terminalId, hit = ssScreens.get(key);
   if (hit && Date.now() - hit.at < 900 && hit.lines >= lines) return tailLines(await hit.p, lines);
@@ -389,6 +402,7 @@ export async function readScreen(ch: ReplyChannel, lines: number): Promise<strin
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
+  if (ch.kind === "herdr") throw new HerdrError("guarded_dispatch_required", 409);
   if (ch.kind === "tmux") {
     const tmux = new Tmux();
     await tmux.sendKeysLiteral(ch.pane, text);
@@ -408,6 +422,13 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
 }
 
+/** Type text where the cursor is, without Enter (a dialog's "Type something." row) — the caller presses Enter. */
+export async function typeLiteral(ch: ReplyChannel, text: string): Promise<void> {
+  if (ch.kind === "herdr") throw new HerdrError("guarded_dispatch_required", 409);
+  if (ch.kind === "tmux") { await new Tmux().sendKeysLiteral(ch.pane, text); return; }
+  await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text, "--no-submit"]);
+}
+
 /**
  * Empty the agent's input box. Ctrl+U only clears the line the cursor is on, so a message of several lines needs
  * Backspace (join with the line above) + Ctrl+U for each more line. Re-reads the box until it is empty (max 4 rounds).
@@ -425,6 +446,7 @@ export async function clearInputBox(ch: ReplyChannel, read = (c: ReplyChannel) =
 }
 
 export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
+  if (ch.kind === "herdr") throw new HerdrError("guarded_dispatch_required", 409);
   if (ch.kind === "tmux") return new Tmux().sendKeys(ch.pane, QUICK_KEYS[label]);
   await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--keys", SUPERSET_KEYS[label]]);
 }
@@ -435,7 +457,7 @@ export async function pressKey(ch: ReplyChannel, label: string): Promise<void> {
 
 export interface Room { id: string; title: string; agent: string | null; status: AgentStatus; claudeSessionId: string | null }
 export interface Workspace { id: string; name: string; branch: string | null; rooms: Room[] }
-export interface Project { name: string; source: "superset" | "tmux" | "folder"; path?: string; workspaces: Workspace[] }
+export interface Project { name: string; source: "superset" | "tmux" | "folder" | "herdr"; path?: string; workspaces: Workspace[] }
 
 export function statusFromSuperset(state: string | null | undefined, hasAgent: boolean): AgentStatus {
   if (!hasAgent) return "idle";
@@ -657,6 +679,7 @@ export async function openTmuxRoom(dir: string, agent: string, prompt?: string, 
 
 /** Resolve a (workspace, room) pair from the phone into something we can read/type into. */
 export function roomChannel(ws: string, room: string): ReplyChannel | null {
+  if (ws.startsWith("herdr:")) return herdrRuntime.resolve(ws, room);
   if (ws === "tmux" || ws.startsWith("dir:")) return /^%\d+$/.test(room) ? { kind: "tmux", pane: room, label: room } : null;
   if (!/^[0-9a-f-]{36}$/i.test(ws) || !/^[0-9a-f-]{36}$/i.test(room)) return null;
   return { kind: "superset", workspaceId: ws, terminalId: room, label: room };
@@ -1055,6 +1078,22 @@ export function codexTranscript(file: string): ChatItem[] {
 
 // ── Attachments from the phone: stored on this Mac, the room gets the path in the message ──
 
+/** Message ids the phone sent recently (room-scoped by the caller): a retry of one already typed is not typed again. */
+export class SendLedger {
+  private seen = new Map<string, number>();
+  constructor(private ttlMs = 30 * 60_000, private max = 2000) {}
+  /** true = first time (go ahead and type it) · false = already sent within the ttl. */
+  claim(id: string, now = Date.now()): boolean {
+    for (const [k, at] of this.seen) { if (now - at < this.ttlMs && this.seen.size <= this.max) break; this.seen.delete(k); }
+    const at = this.seen.get(id);
+    if (at !== undefined && now - at < this.ttlMs) return false;
+    this.seen.delete(id); this.seen.set(id, now);   // re-insert → oldest stays first for the sweep above
+    return true;
+  }
+  release(id: string) { this.seen.delete(id); }
+}
+const sendLedger = new SendLedger();
+
 export const UPLOAD_DIR = join(homedir(), ".maw", "uploads");
 const UPLOAD_MAX = 25 * 1024 * 1024;
 /** Audio (voice notes / meeting recordings to transcribe) may be long — 1 h of phone m4a ≈ 60 MB. */
@@ -1340,7 +1379,7 @@ export function slashCommands(agent: string, cwd: string | null, home = homedir(
 
 let wsPathsRefreshing = false;
 export function workspacePath(wsId: string): string | null {
-  if (wsId === "tmux") return null;
+  if (wsId === "tmux" || wsId.startsWith("herdr:")) return null;
   if (wsId.startsWith("dir:")) return dirFromId(wsId);
   const fill = (out: string) => {
     const map = new Map<string, string>(), list = JSON.parse(out);
@@ -1599,7 +1638,12 @@ export const SUPERSET_KEYS: Record<string, string> = {
 };
 
 const perfLog: { at: number; ua: string; rows: { k: string; n: number; med: number; max: number }[] }[] = [];
-export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
+const legacyRoomChannel = roomChannel;
+const legacyReadScreen = readScreen;
+export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options: { herdr?: HerdrRuntime; continuity?: ContinuityFeatureOptions } = {}) {
+  const runtime = options.herdr ?? herdrRuntime;
+  const roomChannel = (ws: string, room: string): ReplyChannel | null => ws.startsWith("herdr:") ? runtime.resolve(ws, room) : legacyRoomChannel(ws, room);
+  const readScreen = (ch: ReplyChannel, lines: number) => ch.kind === "herdr" ? runtime.screen(ch, lines) : legacyReadScreen(ch, lines);
   const app = new Elysia({ prefix: "/mobile" })
     // Local hook receiver — guarded by its own token, never by Tailscale identity.
     .post("/hook", ({ body, headers, set }) => {
@@ -1650,7 +1694,18 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       return { ok: true };
     }, { body: t.Object({ key: t.String() }) })
     // ── projects / rooms ──
-    .get("/projects", () => ({ projects: buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() }) }))
+    .get("/projects", async () => {
+      const projects = buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() });
+      try {
+        const hp = await runtime.listProjects();
+        // Lifecycle controller is mounted only in the real host. Display capability never bypasses fresh route guards.
+        if (!options.herdr && process.env.NODE_ENV !== "test" && !process.env.MAW_TEST_MODE) for (const p of hp) for (const w of p.workspaces) for (const r of w.rooms) {
+          r.capabilities.create = true; r.capabilities.close = ["codex", "claude"].includes(r.agent || "");
+        }
+        return { projects: [...projects, ...hp], herdr: { available: true } };
+      }
+      catch { return { projects, herdr: { available: false, error: "Herdr ไม่พร้อมหรืออ่านสถานะไม่ได้" } }; }
+    })
     .get("/local/repos", () => {
       const pinned = new Set(loadFolders().map(f => f.path));
       return { ok: true, repos: scanRepos().slice(0, 200).map(r => ({ ...r, pinned: pinned.has(r.path) })) };
@@ -1796,6 +1851,14 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       return new Response(Bun.file(f), { headers: { "content-type": MIME[ext] ?? "application/octet-stream", "cache-control": "private, max-age=86400" } });
     })
     .get("/rooms/:ws/:room/chat", async ({ params, query, set }) => {
+      if (params.ws.startsWith("herdr:")) {
+        try {
+          await runtime.refresh();
+          const hc = runtime.resolve(params.ws, params.room);
+          if (!hc) { set.status = 404; return { ok: false, error: "ไม่พบห้อง Herdr" }; }
+          return await runtime.history(hc, query);
+        } catch (e) { return herdrFailure(e, set); }
+      }
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
       const live = [...readLiveRooms().values()].find(r => r.channel && (
@@ -1830,7 +1893,28 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         } catch { /* not an agent terminal */ }
       }
       return { ok: true, kind: "none" };
-    }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()) }) })
+    }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()), epoch: t.Optional(t.String()) }) })
+    .post("/rooms/:ws/:room/delivery/:id/resolve", async ({ params, body, set }) => {
+      set.headers["cache-control"] = "no-store";
+      if (!params.ws.startsWith("herdr:") || body.confirmed !== true) { set.status = 400; return { ok: false, error: "ต้องยืนยันว่าตรวจข้อความแล้ว" }; }
+      try {
+        await runtime.refresh();
+        const ch = runtime.resolve(params.ws, params.room);
+        if (!ch || ch.generation !== body.generation) { set.status = 409; return { ok: false, error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
+        return { ...runtime.resolveDelivery(params.id, ch), ok: true };
+      } catch (e) { return herdrFailure(e, set); }
+    }, { body: t.Object({ confirmed: t.Boolean(), generation: t.String({ maxLength: 256 }) }) })
+    .get("/rooms/:ws/:room/delivery/:id", async ({ params, set }) => {
+      set.headers["cache-control"] = "no-store";
+      if (!params.ws.startsWith("herdr:")) { set.status = 404; return { ok: false, error: "ไม่พบสถานะการส่ง" }; }
+      try {
+        await runtime.refresh();
+        const ch = runtime.resolve(params.ws, params.room);
+        if (!ch) { set.status = 409; return { ok: false, code: "agent_changed", error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
+        // Query response is successful even when delivery itself is unknown/uncertain.
+        return { ...runtime.deliveryStatus(params.id, ch), ok: true };
+      } catch (e) { return herdrFailure(e, set); }
+    })
     .get("/rooms/:ws/:room/screen", async ({ params, query, set }) => {
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
@@ -1875,6 +1959,21 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
     .post("/push/test", async () => { lastPush.delete("test" + "test"); return { ok: true, sent: await notifyPhones("test", "test", { title: "🔔 maw แจ้งเตือนได้แล้ว", body: "จะเด้งเมื่อ agent รอคำตอบ หรือทำงานเสร็จ" }) }; })
     .get("/system", async () => ({ ok: true, mac: await macHealth(), limits: { claude: claudeLimits(), codex: codexLimits() } }))
     .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
+      if (params.ws.startsWith("herdr:")) {
+        try {
+          await runtime.refresh();
+          const hc = runtime.resolve(params.ws, params.room);
+          if (!hc) { set.status = 409; return { ok: false, code: "agent_changed", error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
+          if (body.clear || body.merge || body.key === "clearbox") { set.status = 409; return { ok: false, code: "unsupported", error: "แก้ข้อความค้างบนจอ Herdr ก่อนส่ง" }; }
+          const result = await runtime.dispatch(hc, {
+            id: body.id || "", action: body.key === "ctrlc" ? "stop" : body.key ? "key" : "prompt", expectedGeneration: body.generation || "",
+            ...(body.key ? { key: body.key } : { text: body.text }), continuityToken: body.continuityToken,
+            offline: body.offline, createdAt: body.createdAt, parentId: body.parentId, resolveParent: body.resolveParent,
+          });
+          if (!result.ok) set.status = result.state === "uncertain" || result.state === "dispatching" ? 409 : 422;
+          return { ...result, error: result.ok ? undefined : result.state === "uncertain" ? "ยังยืนยันการส่งไม่ได้" : ["room_changed", "agent_continuity_unverified"].includes(result.code || "") ? "agent เดิมปิดหรือเปลี่ยนแล้ว" : "พักข้อความ — ตรวจสถานะ agent ก่อนส่ง" };
+        } catch (e) { return herdrFailure(e, set); }
+      }
       const ch = roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
       if (body.key === "clearbox") {
@@ -1885,20 +1984,28 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
         if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
         await pressKey(ch, body.key);
       } else if (body.text) {
-        // never type onto something already sitting in the box (it would go out glued to it) unless the phone said so:
-        // clear = the phone holds that text itself (pulled back) · merge = the person chose "send together"
-        if (!body.merge) {
-          const d = inputDraft(await readScreen(ch, 60).catch(() => ""));
-          if (d?.sure) {
-            if (!body.clear) { set.status = 409; return { ok: false, code: "draft", draft: d.text, error: "ช่องพิมพ์ที่คอมมีข้อความค้าง" }; }
-            if (!(await clearInputBox(ch))) { set.status = 409; return { ok: false, code: "draft", draft: d.text, error: "ล้างช่องพิมพ์ที่คอมไม่หมด" }; }
+        // a message queued on the phone while offline is retried when the link comes back; the reply to a send that did
+        // reach the Mac may have been lost → the same id within 30 min is answered "ok" without typing it twice
+        const sid = body.id ? `${params.ws}/${params.room}/${body.id}` : "";
+        if (sid && !sendLedger.claim(sid)) return { ok: true, dup: true };
+        // nothing typed → the id is free again (the phone retries it, or asks first about a draft in the PC's box)
+        const untyped = <T>(r: T) => { if (sid) sendLedger.release(sid); return r; };
+        try {
+          // never type onto something already sitting in the box (it would go out glued to it) unless the phone said so:
+          // clear = the phone holds that text itself (pulled back) · merge = the person chose "send together"
+          if (!body.merge) {
+            const d = inputDraft(await readScreen(ch, 60).catch(() => ""));
+            if (d?.sure) {
+              if (!body.clear) { set.status = 409; return untyped({ ok: false, code: "draft", draft: d.text, error: "ช่องพิมพ์ที่คอมมีข้อความค้าง" }); }
+              if (!(await clearInputBox(ch))) { set.status = 409; return untyped({ ok: false, code: "draft", draft: d.text, error: "ล้างช่องพิมพ์ที่คอมไม่หมด" }); }
+            }
           }
-        }
-        await typeInto(ch, body.text);
+          await typeInto(ch, body.text);
+        } catch (e) { untyped(null); throw e; }
       } else { set.status = 400; return { ok: false, error: "text or key required" }; }
       snapCache.at = 0;
       return { ok: true };
-    }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()), clear: t.Optional(t.Boolean()), merge: t.Optional(t.Boolean()) }) })
+    }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()), clear: t.Optional(t.Boolean()), merge: t.Optional(t.Boolean()), id: t.Optional(t.String({ maxLength: 128 })), generation: t.Optional(t.String({ maxLength: 256 })), continuityToken: t.Optional(t.String({ maxLength: 256 })), offline: t.Optional(t.Boolean()), createdAt: t.Optional(t.Number()), parentId: t.Optional(t.String({ maxLength: 128 })), resolveParent: t.Optional(t.Boolean()) }) })
     // Start a Superset tab that has not run since the Mac restarted: opening its workspace and focusing its pane makes the
     // desktop app start the terminal (and the agent it held — Claude/Codex continue the same chat). Its terminal id may change → answer with the id the room has now.
     .post("/workspaces/:ws/rooms/:room/wake", async ({ params, set }) => {
@@ -1953,7 +2060,7 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig()) {
       }
     });
   // feature packs (src/mobile/features/*) add their routes after the auth guard above
-  mountFeatures(app);
+  mountFeatures(app, { herdr: runtime, test: !!options.herdr, continuity: options.continuity });
   setTimeout(() => compactMsPerToken(), 30_000).unref?.(); // warm the /compact estimate in the background
   return app;
 }

@@ -1,10 +1,13 @@
 // Feature pack "permissions" (P1) — answer Claude Code / Codex permission prompts from the phone.
 // GET  /rooms/:ws/:room/prompt         → { ok, prompt }   the dialog open at the bottom of the screen, or null
+// POST /rooms/:ws/:room/prompt/type    { n, text }     AskUserQuestion "Type something." → that row, text, Enter
 // POST /rooms/:ws/:room/prompt/answer  { n, sig? }        re-reads the screen, presses option n only if that
 //                                                          same dialog is still open (else 409).
 import { createHash } from "crypto";
+import { herdrRuntime as defaultHerdrRuntime, type HerdrRuntime } from "../herdr/runtime";
+import { herdrFailure } from "../api";
 import { t } from "elysia";
-import { readScreen, pressKey, roomChannel, readLiveRooms, notifyPhones } from "./ctx";
+import { readScreen, pressKey, typeLiteral, roomChannel, readLiveRooms, notifyPhones } from "./ctx";
 import type { LiveRoom, ReplyChannel } from "./ctx";
 
 export type OptionKind = "allow" | "always" | "deny" | "other";
@@ -214,8 +217,66 @@ export interface MenuPrompt {
   footer: string;
   /** Numbered rows ("1. Yes") → number buttons. */
   numbers: number[];
+  /** The numbered rows as tappable answers. `free` = AskUserQuestion's "Type something." row (its label turns into the
+   *  typed text once typed) · `sel` = the cursor is on it · `hint` = the description line under it. */
+  options: MenuOption[];
+  /** AskUserQuestion's header "←  ☒ Colour  ☐ Fruit  ✔ Submit  →" — done = answered already. */
+  tabs: { label: string; done: boolean }[];
+  /** index of the open tab when the screen shows it (tmux), else null */
+  tab: number | null;
+  /** The question line under that header (or the dialog's title). */
+  question: string;
   sig: string;
   denyIn?: number;
+}
+export interface MenuOption { n: number; label: string; hint: string; sel: boolean; free: boolean }
+
+const OPT_ROW = /^\s*([❯›>▶])?\s*(\d)[.)]\s+(.+?)\s*$/;
+/** Numbered rows of a dialog body → options. The free-text row is the one AskUserQuestion closes with a rule
+ *  (below it only "Chat about this"), or the one still reading "Type something.". */
+export function menuOptions(body: string[]): MenuOption[] {
+  const out: MenuOption[] = [];
+  for (let i = 0; i < body.length; i++) {
+    const m = OPT_ROW.exec(body[i]); if (!m) continue;
+    const n = +m[2]; if (n < 1 || out.some(o => o.n === n)) continue;
+    let j = i + 1; while (j < body.length && !body[j].trim()) j++;
+    const next = body[j] ?? "";
+    const hint = next && !OPT_ROW.test(next) && !MENU_RULE.test(next) && /^\s{3,}\S/.test(next) ? next.trim() : "";
+    const label = m[3].trim();
+    const ruleAfter = MENU_RULE.test(hint ? (body[j + 1] ?? "") : next);
+    out.push({ n, label, hint, sel: !!m[1], free: /^type something\.?$/i.test(label) || ruleAfter });
+  }
+  return out;
+}
+/** Which tab of the header is the open one: Claude paints it with a background colour (tmux keeps it, `-e`;
+ *  Superset's reader returns plain text → null, the phone then keeps track itself). */
+export function currentTab(raw: string): number | null {
+  const line = raw.split("\n").find(l => /←/.test(l) && /→/.test(l) && /[☐☒✔✓]/.test(l));
+  if (!line || !line.includes("\x1b[")) return null;
+  let bg = false, k = -1, cur: number | null = null;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === "\x1b") {
+      const m = /^\x1b\[([0-9;]*)m/.exec(line.slice(i)); if (!m) continue;
+      const codes = m[1].split(";");
+      for (let j = 0; j < codes.length; j++) {
+        const c = +codes[j] || 0;
+        // 38/48;5;n and 38/48;2;r;g;b carry colour numbers that are not codes of their own
+        if (c === 38 || c === 48) { if (c === 48) bg = true; j += codes[j + 1] === "2" ? 4 : 2; continue; }
+        if (c === 0 || c === 49) bg = false;
+        else if ((c >= 40 && c <= 47) || (c >= 100 && c <= 107)) bg = true;
+      }
+      i += m[0].length - 1; continue;
+    }
+    if ("☐☒✔✓".includes(line[i])) { k++; if (bg) cur = k; }
+  }
+  return cur;
+}
+/** "←  ☒ Colour  ☐ Fruit  ✔ Submit  →" → [{Colour, done}, {Fruit}, {Submit}] · anything else → [] */
+export function menuTabs(line: string): { label: string; done: boolean }[] {
+  // several questions: "←  ☒ A  ☐ B  ✔ Submit  →" · one question: just " ☐ Card 33 " (no arrows, no Submit)
+  const several = /^\s*←.*→\s*$/.test(line), single = /^\s*[☐☒]\s*\S[^☐☒✔✓←→]*$/.test(line);
+  if (!(several || single) || !/[☐☒✔✓]/.test(line)) return [];
+  return [...line.matchAll(/([☐☒✔✓])\s*([^☐☒✔✓→]+?)(?=\s{2,}|\s*[☐☒✔✓→]|$)/g)].map(m => ({ label: m[2].trim(), done: m[1] === "☒" }));
 }
 
 const MENU_RULE = /^\s*[╭┌╰└]?[─━═╌┄┈▔▁-]{6,}[╮┐╯┘]?\s*$/;
@@ -271,7 +332,12 @@ export function parseMenu(raw: string): MenuPrompt | null {
   const footer = (lines[foot] ?? "").trim();
   const cd = splitCountdown(rest.join("\n").slice(0, MAX_DETAIL_CHARS)), text = cd.text;
   const sig = createHash("sha1").update(["menu", title, text, footer].join("\u0001")).digest("hex").slice(0, 12);
-  return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], sig, ...(cd.denyIn !== undefined ? { denyIn: cd.denyIn } : {}) };
+  const tabs = menuTabs(title);
+  // the question is every line above the first answer (a long one comes as a block: heading + bullets), not just the first
+  const firstOpt = rest.findIndex(l => OPT_ROW.test(l));
+  const qLines = tabs.length ? rest.slice(0, firstOpt < 0 ? rest.length : firstOpt) : [title];
+  const question = dedent(qLines.map(l => l.replace(/\s+$/, ""))).join("\n").replace(/^\n+|\n+$/g, "").replace(/\n{3,}/g, "\n\n");
+  return { kind: "menu", title, body: text, footer, numbers: [...new Set(numbers)], options: menuOptions(rest), tabs, tab: tabs.length ? currentTab(raw) : null, question, sig, ...(cd.denyIn !== undefined ? { denyIn: cd.denyIn } : {}) };
 }
 
 /** Keys the phone may press inside an open dialog. */
@@ -320,28 +386,109 @@ function watchDialogs(): void {
 }
 
 /** `deps` exists so tests can swap the terminal for a fake — production always uses the real helpers. */
-export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel } = { readScreen, pressKey, roomChannel }): void {
+/** Open tab of an AskUserQuestion card when the screen has no colours (Superset): the review page is the last tab;
+ *  else the one tab whose header word appears in the question on screen ("Fruit" ↔ "…favourite fruit?").
+ *  (Claude Code writes the question to its transcript only after it is answered — no help while it is open.) */
+export function tabFromScreen(menu: MenuPrompt): number | null {
+  if (!menu.tabs.length) return null;
+  if (menu.options.some(o => /^submit answers$/i.test(o.label))) return menu.tabs.length - 1;
+  const q = menu.question.split("\n")[0].toLowerCase();   // the heading line — bullets below may name other topics
+  const hits = menu.tabs.map((t, i) => (t.label.length >= 2 && !/^submit$/i.test(t.label) && q.includes(t.label.toLowerCase()) ? i : -1)).filter(i => i >= 0);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Herdr mutations never pass through legacy generic input helpers.
+const herdrBody = {
+  id: t.Optional(t.String({ maxLength: 128 })), generation: t.Optional(t.String({ maxLength: 256 })),
+  dialogToken: t.Optional(t.String({ maxLength: 256 })),
+};
+async function herdrPromptAction(herdrRuntime: HerdrRuntime, params: any, body: any, set: any, action: "key" | "answer") {
+  set.headers["cache-control"] = "no-store";
+  try {
+    await herdrRuntime.refresh();
+    const ch = herdrRuntime.resolve(params.ws, params.room);
+    if (!ch) { set.status = 409; return { ok: false, code: "agent_changed", error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
+    const result = await herdrRuntime.dispatch(ch, { id: body.id || "", action, expectedGeneration: body.generation || "",
+      expectedDialogToken: body.dialogToken, key: body.key, n: body.n, text: body.text });
+    if (!result.ok) set.status = 409;
+    return { ...result, error: result.ok ? undefined : "ยังยืนยันการส่งไม่ได้ — โหลดคำถามใหม่ก่อนตอบ" };
+  } catch (e) { return herdrFailure(e, set); }
+}
+
+export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel; typeLiteral?: typeof typeLiteral; pause?: (ms: number) => Promise<void>; herdr?: HerdrRuntime } = { readScreen, pressKey, roomChannel }): void {
+  const herdrRuntime = deps.herdr ?? defaultHerdrRuntime;
+  herdrRuntime.setDialogParser((raw: string) => {
+    const p = parsePrompt(raw) ?? parseMenu(raw);
+    if (p && p.kind === "menu" && p.tabs.length && p.tab == null) p.tab = tabFromScreen(p);
+    return p as any;
+  });
   const { readScreen: read, pressKey: press, roomChannel: chan } = deps;
+  const typeText = deps.typeLiteral ?? typeLiteral;
+  const pause = deps.pause ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
   if (deps.readScreen === readScreen) watchDialogs();   // the real server only — tests pass fakes
   app.get("/rooms/:ws/:room/prompt", async ({ params, set }: any) => {
+    if (params.ws.startsWith("herdr:")) {
+      set.headers["cache-control"] = "no-store";
+      try {
+        await herdrRuntime.refresh();
+        const hc = herdrRuntime.resolve(params.ws, params.room);
+        if (!hc) { set.status = 404; return { ok: false, error: "ไม่พบห้อง Herdr" }; }
+        return await herdrRuntime.dialog(hc);
+      } catch (e) { return herdrFailure(e, set); }
+    }
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
-    try { const raw = await read(ch, SCREEN_LINES); return { ok: true, prompt: parsePrompt(raw) ?? parseMenu(raw) }; }
-    catch { return { ok: true, prompt: null }; }
+    try {
+      const raw = await read(ch, SCREEN_LINES);
+      const prompt = parsePrompt(raw) ?? parseMenu(raw);
+      // no colours (Superset) → guess from the screen's own words; still unknown → the phone keeps count
+      if (prompt && prompt.kind === "menu" && prompt.tabs.length && prompt.tab == null) prompt.tab = tabFromScreen(prompt);
+      return { ok: true, prompt };
+    } catch { return { ok: true, prompt: null }; }
   });
 
   // one key into an open dialog (moving the cursor changes the dialog, so no sig — but a dialog must be open)
   app.post("/rooms/:ws/:room/prompt/key", async ({ params, body, set }: any) => {
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "key");
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
-    let open = false;
-    try { const raw = await read(ch, SCREEN_LINES); open = !!(parsePrompt(raw) ?? parseMenu(raw)); } catch { /* unreadable */ }
+    let open = false, menu: MenuPrompt | null = null;
+    try { const raw = await read(ch, SCREEN_LINES); menu = parseMenu(raw); open = !!(parsePrompt(raw) ?? menu); } catch { /* unreadable */ }
     if (!open) { set.status = 409; return { ok: false, error: "หน้าถามปิดไปแล้ว — ไม่ได้กดอะไร" }; }
+    // the cursor in AskUserQuestion's "Type something." row is a text field: a digit there is typed, not picked
+    // (seen 7 Nov: card 14 opened with the cursor still on that row and "4" landed in it) → step out first
+    if (/^\d$/.test(body.key) && menu?.options.find(o => o.sel)?.free) {
+      await press(ch, "up"); await pause(300);
+      try { const again = parseMenu(await read(ch, SCREEN_LINES)); if (again?.options.find(o => o.sel)?.free) { set.status = 409; return { ok: false, error: "ออกจากช่องพิมพ์คำตอบไม่ได้ — กด ↑ แล้วลองใหม่" }; } } catch { /* unreadable → press anyway */ }
+    }
     await press(ch, body.key);
     return { ok: true };
-  }, { body: t.Object({ key: t.Union(MENU_KEYS.map(k => t.Literal(k))) }) });
+  }, { body: t.Object({ ...herdrBody, key: t.Union(MENU_KEYS.map(k => t.Literal(k))) }) });
+
+  // AskUserQuestion's "Type something." row: put the cursor on it (its number), replace what is there with the text,
+  // Enter. Only into that row of the dialog still open — never into the chat input box.
+  app.post("/rooms/:ws/:room/prompt/type", async ({ params, body, set }: any) => {
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer");
+    const ch = chan(params.ws, params.room);
+    if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
+    const menu = async () => { try { return parseMenu(await read(ch, SCREEN_LINES)); } catch { return null; } };
+    let m = await menu();
+    const opt = () => m?.options.find(o => o.n === body.n);
+    if (!m || !opt()?.free) { set.status = 409; return { ok: false, error: "ช่องพิมพ์คำตอบปิดไปแล้ว — ไม่ได้พิมพ์อะไร", prompt: m }; }
+    if (!opt()!.sel) {
+      await press(ch, String(body.n)); await pause(450); m = await menu();
+      if (!opt()?.sel) { set.status = 409; return { ok: false, error: "เลือกช่องพิมพ์คำตอบไม่ได้ — ลองใหม่", prompt: m }; }
+    }
+    // text typed there before (label is no longer "Type something.") → clear it first
+    if (!/^type something\.?$/i.test(opt()!.label)) { await press(ch, "ctrlu"); await pause(250); }
+    await typeText(ch, body.text);
+    await pause(350);
+    await press(ch, "enter");
+    return { ok: true };
+  }, { body: t.Object({ ...herdrBody, n: t.Integer({ minimum: 1, maximum: 9 }), text: t.String({ minLength: 1, maxLength: 2000 }) }) });
 
   app.post("/rooms/:ws/:room/prompt/answer", async ({ params, body, set }: any) => {
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer");
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
     let prompt: PermissionPrompt | null = null;
@@ -353,5 +500,5 @@ export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey:
     if (opt.n > 4) { set.status = 409; return { ok: false, error: "ตัวเลือกนี้ต้องตอบจากเครื่อง Mac", prompt }; }
     await press(ch, String(opt.n));
     return { ok: true, answered: opt };
-  }, { body: t.Object({ n: t.Integer({ minimum: 1, maximum: 9 }), sig: t.Optional(t.String({ maxLength: 40 })) }) });
+  }, { body: t.Object({ ...herdrBody, n: t.Integer({ minimum: 1, maximum: 9 }), sig: t.Optional(t.String({ maxLength: 40 })) }) });
 }

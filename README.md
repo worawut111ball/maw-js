@@ -213,3 +213,11 @@ Plugins can be discovered and installed peer-to-peer (Shape A, no central
 registry required). See
 [`docs/plugins/shape-a-demo.md`](docs/plugins/shape-a-demo.md) for a
 7-step walkthrough — peers, federated search, `@peer` install, consent.
+
+## Herdr บน maw mobile
+
+งานเพิ่ม Herdr ใช้หน้าห้องเดิมร่วมกับ tmux/Superset บน Mac ผ่าน Tailscale เดิม ดู [Mobile feature packs](src/mobile/features/README.md) สำหรับ API, lifecycle และข้อจำกัดการส่งข้อความ การแก้โค้ดชุดนี้ยังต้องทดสอบ runtime ที่ deploy แล้วก่อนรับรองการใช้งานจริงจากมือถือ
+
+### Cross-agent continuity (กำลังพัฒนา · 8 พ.ย. 69)
+
+เพิ่มส่วนกลางสำหรับสลับ Codex/Claude โดยรักษา native session และประวัติห้อง ดู [ขอบเขต implementation และ release gate](src/mobile/continuity/README.md) ขณะนี้ยังไม่เปิดสลับจริงใน production และไม่ถือว่า fixture tests รับรอง Herdr/tmux/Superset แบบ live แล้ว

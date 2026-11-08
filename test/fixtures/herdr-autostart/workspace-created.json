@@ -1,0 +1,37 @@
+{
+  "id": "fixture-request",
+  "result": {
+    "type": "workspace_created",
+    "workspace": {
+      "workspace_id": "w7",
+      "number": 7,
+      "label": "demo-room",
+      "focused": false,
+      "pane_count": 1,
+      "tab_count": 1,
+      "active_tab_id": "w7:t1",
+      "agent_status": "unknown"
+    },
+    "tab": {
+      "tab_id": "w7:t1",
+      "workspace_id": "w7",
+      "label": "1",
+      "focused": false,
+      "pane_count": 1,
+      "agent_status": "unknown",
+      "number": 1
+    },
+    "root_pane": {
+      "pane_id": "w7:p1",
+      "terminal_id": "terminal-example",
+      "workspace_id": "w7",
+      "tab_id": "w7:t1",
+      "focused": false,
+      "agent_status": "unknown",
+      "revision": 1,
+      "agent": null,
+      "cwd": "/home/example/project",
+      "foreground_cwd": "/home/example/project"
+    }
+  }
+}

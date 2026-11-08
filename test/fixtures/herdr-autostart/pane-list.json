@@ -1,0 +1,20 @@
+{
+  "id": "fixture-request",
+  "result": {
+    "type": "pane_list",
+    "panes": [
+      {
+        "pane_id": "w7:p1",
+        "terminal_id": "terminal-example",
+        "workspace_id": "w7",
+        "tab_id": "w7:t1",
+        "focused": false,
+        "agent_status": "unknown",
+        "revision": 1,
+        "agent": null,
+        "cwd": "/home/example/project",
+        "foreground_cwd": "/home/example/project"
+      }
+    ]
+  }
+}

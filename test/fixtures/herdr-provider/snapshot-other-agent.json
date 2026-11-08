@@ -1,0 +1,194 @@
+{
+  "id": "fixture-request",
+  "result": {
+    "type": "session_snapshot",
+    "snapshot": {
+      "version": "0.9.5",
+      "protocol": 22,
+      "workspaces": [
+        {
+          "workspace_id": "w7",
+          "number": 7,
+          "label": "demo-team",
+          "focused": false,
+          "pane_count": 4,
+          "tab_count": 2,
+          "active_tab_id": "w7:t1",
+          "agent_status": "working"
+        }
+      ],
+      "tabs": [
+        {
+          "tab_id": "w7:t1",
+          "workspace_id": "w7",
+          "number": 1,
+          "label": "demo-tab-1",
+          "focused": false,
+          "pane_count": 2,
+          "agent_status": "working"
+        },
+        {
+          "tab_id": "w7:t2",
+          "workspace_id": "w7",
+          "number": 2,
+          "label": "demo-tab-2",
+          "focused": false,
+          "pane_count": 2,
+          "agent_status": "working"
+        }
+      ],
+      "panes": [
+        {
+          "pane_id": "w7:p1",
+          "terminal_id": "demo-terminal-1",
+          "workspace_id": "w7",
+          "tab_id": "w7:t1",
+          "focused": false,
+          "agent_status": "working",
+          "revision": 1,
+          "agent": "example-agent",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project"
+        },
+        {
+          "pane_id": "w7:p2",
+          "terminal_id": "demo-terminal-2",
+          "workspace_id": "w7",
+          "tab_id": "w7:t1",
+          "focused": false,
+          "agent_status": "blocked",
+          "revision": 1,
+          "agent": "claude",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000002"
+          }
+        },
+        {
+          "pane_id": "w7:p3",
+          "terminal_id": "demo-terminal-3",
+          "workspace_id": "w7",
+          "tab_id": "w7:t2",
+          "focused": false,
+          "agent_status": "idle",
+          "revision": 1,
+          "agent": "codex",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:codex",
+            "agent": "codex",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000003"
+          }
+        },
+        {
+          "pane_id": "w7:p4",
+          "terminal_id": "demo-terminal-4",
+          "workspace_id": "w7",
+          "tab_id": "w7:t2",
+          "focused": false,
+          "agent_status": "done",
+          "revision": 1,
+          "agent": "codex",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:codex",
+            "agent": "codex",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000004"
+          }
+        }
+      ],
+      "layouts": [],
+      "agents": [
+        {
+          "pane_id": "w7:p1",
+          "terminal_id": "demo-terminal-1",
+          "workspace_id": "w7",
+          "tab_id": "w7:t1",
+          "focused": false,
+          "agent_status": "working",
+          "revision": 1,
+          "agent": "example-agent",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "name": "demo-agent-1",
+          "interactive_ready": true,
+          "launch_pending": false
+        },
+        {
+          "pane_id": "w7:p2",
+          "terminal_id": "demo-terminal-2",
+          "workspace_id": "w7",
+          "tab_id": "w7:t1",
+          "focused": false,
+          "agent_status": "blocked",
+          "revision": 1,
+          "agent": "claude",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:claude",
+            "agent": "claude",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000002"
+          },
+          "name": "demo-agent-2",
+          "interactive_ready": true,
+          "launch_pending": false
+        },
+        {
+          "pane_id": "w7:p3",
+          "terminal_id": "demo-terminal-3",
+          "workspace_id": "w7",
+          "tab_id": "w7:t2",
+          "focused": false,
+          "agent_status": "idle",
+          "revision": 1,
+          "agent": "codex",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:codex",
+            "agent": "codex",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000003"
+          },
+          "name": "demo-agent-3",
+          "interactive_ready": true,
+          "launch_pending": false
+        },
+        {
+          "pane_id": "w7:p4",
+          "terminal_id": "demo-terminal-4",
+          "workspace_id": "w7",
+          "tab_id": "w7:t2",
+          "focused": false,
+          "agent_status": "done",
+          "revision": 1,
+          "agent": "codex",
+          "cwd": "/home/example/project",
+          "foreground_cwd": "/home/example/project",
+          "agent_session": {
+            "source": "herdr:codex",
+            "agent": "codex",
+            "kind": "id",
+            "value": "00000000-0000-4000-8000-000000000004"
+          },
+          "name": "demo-agent-4",
+          "interactive_ready": true,
+          "launch_pending": false
+        }
+      ],
+      "focused_workspace_id": null,
+      "focused_tab_id": null,
+      "focused_pane_id": null
+    }
+  }
+}
