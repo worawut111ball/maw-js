@@ -1650,7 +1650,7 @@ export interface MobileSendIO {
   pressKey: typeof pressKey;
   typeInto: typeof typeInto;
 }
-export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options: { herdr?: HerdrRuntime; continuity?: ContinuityFeatureOptions & ContinuityWriteOptions; sendIO?: Partial<MobileSendIO>; featureIO?: FeatureIO; findAgentRoom?: typeof findRoom; wakeIO?: {run: typeof ssAsync} } = {}) {
+export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options: { herdr?: HerdrRuntime; continuity?: ContinuityFeatureOptions & ContinuityWriteOptions; sendIO?: Partial<MobileSendIO>; featureIO?: FeatureIO; findAgentRoom?: typeof findRoom; wakeIO?: {run: typeof ssAsync}; /** Trusted read-only inventory source. Not selectable by HTTP/config. */ projectInventory?:()=>Promise<Project[]> } = {}) {
   const runtime = options.herdr ?? herdrRuntime;
   const writeGuard = createContinuityWriteGuard(options.continuity);
   const findAgentRoom = options.findAgentRoom ?? findRoom;
@@ -1715,13 +1715,20 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       return { ok: true };
     }, { body: t.Object({ key: t.String() }) })
     // ── projects / rooms ──
-    .get("/projects", async () => {
-      const projects = buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() });
+    .get("/projects", async ({set}) => {
       const owned=async(rows:any[])=>{
         if(!options.continuity?.owned?.inventory)return {projects:rows};
         try{return {projects:mergeOwnedInventory(rows,await options.continuity.owned.inventory()),continuity:{available:true}};}
         catch{return {projects:rows,continuity:{available:false,error:'อ่านสถานะห้อง protocol ไม่สำเร็จ'}};}
       };
+      if(options.projectInventory){
+        try{
+          const rows=await options.projectInventory();
+          if(!Array.isArray(rows))throw new Error('invalid_inventory');
+          return await owned(rows);
+        }catch{set.status=503;return {ok:false,code:'project_inventory_unavailable',error:'อ่านรายชื่อห้องไม่สำเร็จ'};}
+      }
+      const projects = buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() });
       try {
         const hp = await runtime.listProjects();
         // Lifecycle controller is mounted only in the real host. Display capability never bypasses fresh route guards.
