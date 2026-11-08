@@ -154,3 +154,81 @@ describe('Host selected effective toolHome binding',()=>{
   const wire=new Wire();for(const toolHome of ['relative-home','/home/example/../different',''])expect(()=>new CodexProtocolSession(wire,{...policy,toolHome})).toThrow('invalid_codex_policy');expect(wire.frames).toEqual([]);const h=fixture();expect((await h.session.open()).nativeId).toBe(threadId);
  });
 });
+
+const remoteStatus=(over:Record<string,unknown>={})=>({status:'disabled',serverName:'fixture-server',installationId:'fixture-installation',environmentId:null,...over});
+function startupFixture(params:unknown=remoteStatus(),method='remoteControl/status/changed'){
+ const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize'){h.wire.push({id:f.id,result:init});h.wire.push({method,params});}else if(f.method==='thread/start'||f.method==='thread/resume')h.wire.push({id:f.id,result:opened()});};return h;
+}
+for(const status of ['disabled','connecting','connected','errored'])test(`exact-pin remote-control startup ${status} is passive metadata only`,async()=>{
+ const h=startupFixture(remoteStatus({status}));const identity=await h.session.open();expect(identity.nativeId).toBe(threadId);expect(identity).not.toHaveProperty('installationId');expect(h.wire.frames.map(f=>f.method)).toEqual(['initialize','initialized','thread/start']);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);expect(h.session.pendingApproval).toBe(false);
+});
+for(const [name,params] of Object.entries({missingStatus:{serverName:'fixture',installationId:'fixture'},unknownStatus:remoteStatus({status:'ready'}),missingInstallation:{status:'disabled',serverName:'fixture'},wrongServer:remoteStatus({serverName:null}),wrongEnvironment:remoteStatus({environmentId:42}),foreignThread:remoteStatus({threadId:other}),foreignTurn:remoteStatus({turnId}),extraApproval:remoteStatus({approvalPolicy:'never'}),nullParams:null}))test(`malformed/scoped startup status ${name} fails closed`,async()=>{
+ const h=startupFixture(params);await expect(h.session.open()).rejects.toThrow('invalid_startup_notification');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);expect(h.session.idle).toBe(false);
+});
+test('remote-control status cannot stand in for a missing thread response or promote ready',async()=>{
+ const h=startupFixture(remoteStatus({status:'connected'}));h.wire.onSend=f=>{if(f.method==='initialize'){h.wire.push({id:f.id,result:init});h.wire.push({method:'remoteControl/status/changed',params:remoteStatus({status:'connected'})});}};
+ const opening=h.session.open();const outcome=opening.catch(e=>e);await tick();expect(h.session.idle).toBe(false);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);await h.wire.close();expect(await outcome).toBeInstanceOf(ProtocolError);
+});
+test('remote-control status before initialize response is outside startup window',async()=>{
+ const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({method:'remoteControl/status/changed',params:remoteStatus()});};await expect(h.session.open()).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.map(f=>f.method)).toEqual(['initialize']);
+});
+test('remote-control status after open cannot grant another lifecycle/turn scope',async()=>{
+ const h=fixture();await h.session.open();h.wire.push({method:'remoteControl/status/changed',params:remoteStatus()});await tick();expect(h.session.idle).toBe(false);await expect(h.session.turn('after-status','sample')).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+});
+test('remote-control status during an active turn is not an allowed turn notification',async()=>{
+ const h=fixture(),{pending}=await running(h);h.wire.push({method:'remoteControl/status/changed',params:remoteStatus()});await expect(pending).rejects.toThrow('notification_scope_mismatch');
+});
+test('unknown startup notification remains unsupported rather than blanket ignored',async()=>{
+ const h=startupFixture(remoteStatus(),'remoteControl/newUnknownStatus');await expect(h.session.open()).rejects.toThrow('unsupported_notification');expect(h.session.idle).toBe(false);
+});
+test('passive startup status cannot rescue mismatched initialize codexHome',async()=>{
+ const h=fixture({}, {toolHome:'/fixture/wrong-home'});h.wire.onSend=f=>{if(f.method==='initialize'){h.wire.push({id:f.id,result:init});h.wire.push({method:'remoteControl/status/changed',params:remoteStatus()});}};await expect(h.session.open()).rejects.toThrow('initialize_identity_mismatch');expect(h.wire.frames.some(f=>f.method==='thread/start')).toBe(false);
+});
+test.skipIf(!existsSync(schemaRoot))('remote-control startup fixtures match exact-pin generated status schema',()=>{
+ const schema=JSON.parse(readFileSync(join(schemaRoot,'v2/RemoteControlStatusChangedNotification.json'),'utf8'));
+ for(const status of ['disabled','connecting','connected','errored'])expect(schemaCheck(remoteStatus({status}),schema,schema)).toBe(true);
+ expect(schemaCheck(remoteStatus({status:'ready'}),schema,schema)).toBe(false);expect(schemaCheck(remoteStatus({environmentId:4}),schema,schema)).toBe(false);
+});
+
+const mcpStatus=(over:Record<string,unknown>={})=>({threadId,name:'synthetic-mcp',status:'ready',error:null,failureReason:null,...over});
+for(const status of ['starting','ready'])test(`scoped MCP lifecycle ${status} after open remains passive, with no tool/approval/user input`,async()=>{
+ const h=fixture();await h.session.open();h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus({status})});await tick();
+ expect(h.session.idle).toBe(true);expect(h.session.pendingApproval).toBe(false);expect(h.wire.frames.map(f=>f.method)).toEqual(['initialize','initialized','thread/start']);expect(h.session.diagnostics().lastFrame).toMatchObject({method:'mcpServer/startupStatus/updated',threadScope:'matches',status});
+});
+test('MCP lifecycle immediately after thread response binds that response UUID before open continuation',async()=>{
+ const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({id:f.id,result:init});if(f.method==='thread/start'){h.wire.push({id:f.id,result:opened()});h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus()});}};
+ expect((await h.session.open()).nativeId).toBe(threadId);await tick();expect(h.session.idle).toBe(true);expect(h.session.diagnostics().broken).toBe(false);
+});
+for(const thread of [undefined,null])test(`global MCP startup thread=${String(thread)} has no identity/readiness authority`,async()=>{
+ const params:any=mcpStatus({threadId:thread});if(thread===undefined)delete params.threadId;
+ const h=startupFixture(params,'mcpServer/startupStatus/updated');await h.session.open();expect(h.session.idle).toBe(true);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+});
+for(const [name,over,code] of [
+ ['foreign-thread',{threadId:other},'notification_scope_mismatch'],['global-after-open',{threadId:null},'notification_scope_mismatch'],
+ ['bad-uuid',{threadId:'same-label'},'invalid_mcp_startup_notification'],['wrong-name',{name:4},'invalid_mcp_startup_notification'],
+ ['unknown-state',{status:'connected'},'invalid_mcp_startup_notification'],['wrong-error',{error:4},'invalid_mcp_startup_notification'],
+ ['unknown-failure-reason',{failureReason:'maybe'},'invalid_mcp_startup_notification'],['foreign-turn',{turnId},'invalid_mcp_startup_notification'],
+ ['approval-injection',{approvalPolicy:'never'},'invalid_mcp_startup_notification'],['failed',{status:'failed'},'native_mcp_startup_failed'],
+ ['cancelled',{status:'cancelled'},'native_mcp_startup_failed'],['explicit-error',{error:'SYNTHETIC_PRIVATE_ERROR'},'native_mcp_startup_failed'],
+ ['reauth-required',{failureReason:'reauthenticationRequired'},'native_mcp_startup_failed'],
+] as const)test(`MCP lifecycle ${name} fails closed without readiness or input`,async()=>{
+ const h=fixture();await h.session.open();h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus(over)});await tick();expect(h.session.idle).toBe(false);await expect(h.session.turn('mcp-rejected','sample')).rejects.toThrow(code);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);expect(h.session.diagnostics().code).toBe(code);
+});
+test('scoped MCP ready during active turn cannot complete it or replace native terminal evidence',async()=>{
+ const h=fixture(),{pending}=await running(h);let completed=false;void pending.then(()=>{completed=true;});h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus()});await tick();expect(completed).toBe(false);expect(h.session.idle).toBe(false);expect(h.session.pendingApproval).toBe(false);complete(h.wire);expect((await pending).turnId).toBe(turnId);
+});
+test('global MCP metadata before initialize cannot establish scope',async()=>{
+ const h=fixture();h.wire.onSend=f=>{if(f.method==='initialize')h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus({threadId:null})});};await expect(h.session.open()).rejects.toThrow('notification_scope_mismatch');expect(h.wire.frames.map(f=>f.method)).toEqual(['initialize']);
+});
+test('unknown MCP method still poisons after open; safe diagnostics explain idle false without leaking values',async()=>{
+ const sentinel='SYNTHETIC_PRIVATE_VALUE_NEVER_EXPORT';const h=fixture();await h.session.open();h.wire.push({method:sentinel,params:{[sentinel]:sentinel,error:sentinel,threadId:other,name:sentinel,status:sentinel}});await tick();
+ const diagnostic=h.session.diagnostics();expect(diagnostic).toMatchObject({phase:'open',broken:true,idle:false,code:'unsupported_notification'});expect(diagnostic.lastFrame).toMatchObject({method:'[unsupported]',threadScope:'foreign',errorType:'string',status:'[other]',unknownKeys:1});expect(JSON.stringify(diagnostic)).not.toContain(sentinel);expect(JSON.stringify(diagnostic)).not.toContain(other);
+ diagnostic.lastFrame!.paramsKeys.push(sentinel);expect(JSON.stringify(h.session.diagnostics())).not.toContain(sentinel);expect(h.wire.frames.some(f=>f.method==='turn/start')).toBe(false);
+});
+test('MCP failure diagnostics never expose server name or error body',async()=>{
+ const h=fixture();await h.session.open();h.wire.push({method:'mcpServer/startupStatus/updated',params:mcpStatus({name:'SYNTHETIC_PRIVATE_NAME',error:'SYNTHETIC_PRIVATE_ERROR'})});await tick();const diagnostic=JSON.stringify(h.session.diagnostics());expect(diagnostic).not.toContain('SYNTHETIC_PRIVATE');expect(diagnostic).not.toContain(threadId);expect(h.session.diagnostics().code).toBe('native_mcp_startup_failed');
+});
+test.skipIf(!existsSync(schemaRoot))('MCP lifecycle fixtures conform to generated exact-pin status schema',()=>{
+ const schema=JSON.parse(readFileSync(join(schemaRoot,'v2/McpServerStatusUpdatedNotification.json'),'utf8'));
+ for(const status of ['starting','ready','failed','cancelled'])expect(schemaCheck(mcpStatus({status}),schema,schema)).toBe(true);expect(schemaCheck(mcpStatus({status:'connected'}),schema,schema)).toBe(false);expect(schemaCheck(mcpStatus({failureReason:'unknown'}),schema,schema)).toBe(false);
+});
