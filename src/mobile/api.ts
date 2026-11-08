@@ -1,3 +1,4 @@
+import { createContinuityWriteGuard, createContinuityWriteAttempt, continuityWriteFailure, type ContinuityWriteOptions } from './continuity/write-guard';
 /**
  * Mobile API — phone-friendly view of every coding agent on this machine.
  *
@@ -14,8 +15,9 @@
  */
 import { Elysia, t } from "elysia";
 import webpush from "web-push";
-import { mountFeatures } from "./features";
+import { mountFeatures, type FeatureIO } from "./features";
 import type { ContinuityFeatureOptions } from "./features/continuity";
+import {mergeOwnedInventory} from './continuity/protocol/inventory';
 import { herdrRuntime, HerdrError, type HerdrChannel, type HerdrRuntime } from "./herdr/runtime";
 import { execFileSync } from "child_process";
 import { closeSync, realpathSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "fs";
@@ -1640,10 +1642,23 @@ export const SUPERSET_KEYS: Record<string, string> = {
 const perfLog: { at: number; ua: string; rows: { k: string; n: number; med: number; max: number }[] }[] = [];
 const legacyRoomChannel = roomChannel;
 const legacyReadScreen = readScreen;
-export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options: { herdr?: HerdrRuntime; continuity?: ContinuityFeatureOptions } = {}) {
+/** Direct mobile input DI for send and agent reply/keys; defaults preserve existing transports. */
+export interface MobileSendIO {
+  roomChannel: typeof roomChannel;
+  readScreen: typeof readScreen;
+  clearInputBox: typeof clearInputBox;
+  pressKey: typeof pressKey;
+  typeInto: typeof typeInto;
+}
+export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options: { herdr?: HerdrRuntime; continuity?: ContinuityFeatureOptions & ContinuityWriteOptions; sendIO?: Partial<MobileSendIO>; featureIO?: FeatureIO; findAgentRoom?: typeof findRoom; wakeIO?: {run: typeof ssAsync} } = {}) {
   const runtime = options.herdr ?? herdrRuntime;
+  const writeGuard = createContinuityWriteGuard(options.continuity);
+  const findAgentRoom = options.findAgentRoom ?? findRoom;
+  // Configured continuity legacy-send attempts only: process/instance-local, bounded, no automatic uncertain eviction.
+  const continuitySends=new Map<string,{hash:string;state:'dispatching'|'acknowledged'|'uncertain'}>();
   const roomChannel = (ws: string, room: string): ReplyChannel | null => ws.startsWith("herdr:") ? runtime.resolve(ws, room) : legacyRoomChannel(ws, room);
   const readScreen = (ch: ReplyChannel, lines: number) => ch.kind === "herdr" ? runtime.screen(ch, lines) : legacyReadScreen(ch, lines);
+  const sendIO: MobileSendIO = { roomChannel, readScreen, clearInputBox, pressKey, typeInto, ...options.sendIO };
   const app = new Elysia({ prefix: "/mobile" })
     // Local hook receiver — guarded by its own token, never by Tailscale identity.
     .post("/hook", ({ body, headers, set }) => {
@@ -1676,35 +1691,46 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       catch { return { ok: true, live: false, content: x.agent.lastAssistant ?? "" }; }
     }, { query: t.Object({ lines: t.Optional(t.String()) }) })
     .post("/agents/:id/reply", async ({ params, body, set }) => {
-      const x = await findRoom(params.id);
+      if (options.continuity !== undefined && !options.continuity?.resolveChannel) return continuityWriteFailure(set);
+      let x: Awaited<ReturnType<typeof findRoom>>;
+      try { x = await findAgentRoom(params.id); } catch (error) { if (options.continuity !== undefined) return continuityWriteFailure(set); throw error; }
       if (!x) { set.status = 404; return { ok: false, error: "not found" }; }
       const ch = x.room?.channel;
       if (!ch || !x.agent.canReply) { set.status = 409; return { ok: false, error: "this room cannot be typed into" }; }
-      await typeInto(ch, body.text);
+      try { await writeGuard.assertChannel(ch); } catch { return continuityWriteFailure(set); }
+      await sendIO.typeInto(ch, body.text);
       return { ok: true, via: ch.kind };
     }, { body: t.Object({ text: t.String({ minLength: 1, maxLength: 8000 }) }) })
     // Quick keys for permission prompts / menus — whitelist only, never raw tmux key names from the client.
     .post("/agents/:id/keys", async ({ params, body, set }) => {
       if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
-      const x = await findRoom(params.id);
+      if (options.continuity !== undefined && !options.continuity?.resolveChannel) return continuityWriteFailure(set);
+      let x: Awaited<ReturnType<typeof findRoom>>;
+      try { x = await findAgentRoom(params.id); } catch (error) { if (options.continuity !== undefined) return continuityWriteFailure(set); throw error; }
       if (!x) { set.status = 404; return { ok: false, error: "not found" }; }
       const ch = x.room?.channel;
       if (!ch || !x.agent.canReply) { set.status = 409; return { ok: false, error: "this room cannot be typed into" }; }
-      await pressKey(ch, body.key);
+      try { await writeGuard.assertChannel(ch); } catch { return continuityWriteFailure(set); }
+      await sendIO.pressKey(ch, body.key);
       return { ok: true };
     }, { body: t.Object({ key: t.String() }) })
     // ── projects / rooms ──
     .get("/projects", async () => {
       const projects = buildProjects(supersetSnapshot(), readLiveRooms(), { folders: loadFolders(), panes: listTmuxPanes() });
+      const owned=async(rows:any[])=>{
+        if(!options.continuity?.owned?.inventory)return {projects:rows};
+        try{return {projects:mergeOwnedInventory(rows,await options.continuity.owned.inventory()),continuity:{available:true}};}
+        catch{return {projects:rows,continuity:{available:false,error:'อ่านสถานะห้อง protocol ไม่สำเร็จ'}};}
+      };
       try {
         const hp = await runtime.listProjects();
         // Lifecycle controller is mounted only in the real host. Display capability never bypasses fresh route guards.
         if (!options.herdr && process.env.NODE_ENV !== "test" && !process.env.MAW_TEST_MODE) for (const p of hp) for (const w of p.workspaces) for (const r of w.rooms) {
           r.capabilities.create = true; r.capabilities.close = ["codex", "claude"].includes(r.agent || "");
         }
-        return { projects: [...projects, ...hp], herdr: { available: true } };
+        return { ...await owned([...projects,...hp]), herdr: { available: true } };
       }
-      catch { return { projects, herdr: { available: false, error: "Herdr ไม่พร้อมหรืออ่านสถานะไม่ได้" } }; }
+      catch { return { ...await owned(projects), herdr: { available: false, error: "Herdr ไม่พร้อมหรืออ่านสถานะไม่ได้" } }; }
     })
     .get("/local/repos", () => {
       const pinned = new Set(loadFolders().map(f => f.path));
@@ -1895,12 +1921,14 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       return { ok: true, kind: "none" };
     }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()), epoch: t.Optional(t.String()) }) })
     .post("/rooms/:ws/:room/delivery/:id/resolve", async ({ params, body, set }) => {
+      try { await writeGuard.assertRoom(params.ws, params.room); } catch { return continuityWriteFailure(set); }
       set.headers["cache-control"] = "no-store";
       if (!params.ws.startsWith("herdr:") || body.confirmed !== true) { set.status = 400; return { ok: false, error: "ต้องยืนยันว่าตรวจข้อความแล้ว" }; }
       try {
         await runtime.refresh();
         const ch = runtime.resolve(params.ws, params.room);
         if (!ch || ch.generation !== body.generation) { set.status = 409; return { ok: false, error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
+        try { await writeGuard.assertRoom(params.ws, params.room); } catch { return continuityWriteFailure(set); }
         return { ...runtime.resolveDelivery(params.id, ch), ok: true };
       } catch (e) { return herdrFailure(e, set); }
     }, { body: t.Object({ confirmed: t.Boolean(), generation: t.String({ maxLength: 256 }) }) })
@@ -1959,66 +1987,89 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
     .post("/push/test", async () => { lastPush.delete("test" + "test"); return { ok: true, sent: await notifyPhones("test", "test", { title: "🔔 maw แจ้งเตือนได้แล้ว", body: "จะเด้งเมื่อ agent รอคำตอบ หรือทำงานเสร็จ" }) }; })
     .get("/system", async () => ({ ok: true, mac: await macHealth(), limits: { claude: claudeLimits(), codex: codexLimits() } }))
     .post("/rooms/:ws/:room/send", async ({ params, body, set }) => {
+      const attempt=createContinuityWriteAttempt(writeGuard,params.ws,params.room);
+      const localId=options.continuity!==undefined && !params.ws.startsWith('herdr:') && body.text && body.id ? JSON.stringify([params.ws,params.room,body.id]) : '';
+      const localHash=createHash('sha256').update(JSON.stringify(Object.keys(body).sort().map(k=>[k,(body as any)[k]]))).digest('hex');
+      const prior=localId?continuitySends.get(localId):undefined;
+      if(prior && prior.state!=='acknowledged')return attempt.uncertain(set);
+      const guardedKey=(ch:ReplyChannel,key:string)=>attempt.run(()=>sendIO.pressKey(ch,key));
+      const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>sendIO.typeInto(ch,text));
+      const guardedClear=(ch:ReplyChannel)=>attempt.run(()=>sendIO.clearInputBox(ch,async c=>{await attempt.check();return sendIO.readScreen(c,60);},guardedKey));
+      try {
+        await attempt.check();
       if (params.ws.startsWith("herdr:")) {
         try {
           await runtime.refresh();
           const hc = runtime.resolve(params.ws, params.room);
           if (!hc) { set.status = 409; return { ok: false, code: "agent_changed", error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
           if (body.clear || body.merge || body.key === "clearbox") { set.status = 409; return { ok: false, code: "unsupported", error: "แก้ข้อความค้างบนจอ Herdr ก่อนส่ง" }; }
-          const result = await runtime.dispatch(hc, {
+          const result = await attempt.run(() => runtime.dispatch(hc, {
             id: body.id || "", action: body.key === "ctrlc" ? "stop" : body.key ? "key" : "prompt", expectedGeneration: body.generation || "",
             ...(body.key ? { key: body.key } : { text: body.text }), continuityToken: body.continuityToken,
             offline: body.offline, createdAt: body.createdAt, parentId: body.parentId, resolveParent: body.resolveParent,
-          });
+          }));
           if (!result.ok) set.status = result.state === "uncertain" || result.state === "dispatching" ? 409 : 422;
           return { ...result, error: result.ok ? undefined : result.state === "uncertain" ? "ยังยืนยันการส่งไม่ได้" : ["room_changed", "agent_continuity_unverified"].includes(result.code || "") ? "agent เดิมปิดหรือเปลี่ยนแล้ว" : "พักข้อความ — ตรวจสถานะ agent ก่อนส่ง" };
-        } catch (e) { return herdrFailure(e, set); }
+        } catch (e) { return attempt.failure(e,set) ?? herdrFailure(e, set); }
       }
-      const ch = roomChannel(params.ws, params.room);
+      const ch = sendIO.roomChannel(params.ws, params.room);
       if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
       if (body.key === "clearbox") {
-        const empty = await clearInputBox(ch);
+        const empty = await guardedClear(ch);
         snapCache.at = 0;
         return empty ? { ok: true } : { ok: false, error: "ล้างช่องพิมพ์ไม่หมด" };
       } else if (body.key) {
         if (!QUICK_KEYS[body.key]) { set.status = 400; return { ok: false, error: "unknown key" }; }
-        await pressKey(ch, body.key);
+        await guardedKey(ch, body.key);
       } else if (body.text) {
         // a message queued on the phone while offline is retried when the link comes back; the reply to a send that did
         // reach the Mac may have been lost → the same id within 30 min is answered "ok" without typing it twice
         const sid = body.id ? `${params.ws}/${params.room}/${body.id}` : "";
-        if (sid && !sendLedger.claim(sid)) return { ok: true, dup: true };
-        // nothing typed → the id is free again (the phone retries it, or asks first about a draft in the PC's box)
-        const untyped = <T>(r: T) => { if (sid) sendLedger.release(sid); return r; };
+        if(localId){
+          const existing=continuitySends.get(localId);
+          if(existing){if(existing.state!=='acknowledged')return attempt.uncertain(set);if(existing.hash!==localHash){set.status=409;return {ok:false,code:'continuity_request_conflict',state:'definitely-rejected'};}return {ok:true,dup:true};}
+          if(continuitySends.size>=2000){set.status=409;return {ok:false,code:'continuity_attempt_capacity',state:'definitely-rejected'};}
+          continuitySends.set(localId,{hash:localHash,state:'dispatching'});
+        }else if (sid && !sendLedger.claim(sid)) return { ok: true, dup: true };
+        const untyped = (r:any) => {
+          if(localId){if(attempt.hasStarted()){continuitySends.set(localId,{hash:localHash,state:'uncertain'});return attempt.uncertain(set);}continuitySends.delete(localId);}
+          else if(sid)sendLedger.release(sid);
+          return r;
+        };
         try {
           // never type onto something already sitting in the box (it would go out glued to it) unless the phone said so:
           // clear = the phone holds that text itself (pulled back) · merge = the person chose "send together"
           if (!body.merge) {
-            const d = inputDraft(await readScreen(ch, 60).catch(() => ""));
+            const d = inputDraft(await sendIO.readScreen(ch, 60).catch(() => ""));
             if (d?.sure) {
               if (!body.clear) { set.status = 409; return untyped({ ok: false, code: "draft", draft: d.text, error: "ช่องพิมพ์ที่คอมมีข้อความค้าง" }); }
-              if (!(await clearInputBox(ch))) { set.status = 409; return untyped({ ok: false, code: "draft", draft: d.text, error: "ล้างช่องพิมพ์ที่คอมไม่หมด" }); }
+              if (!(await guardedClear(ch))) { set.status = 409; return untyped({ ok: false, code: "draft", draft: d.text, error: "ล้างช่องพิมพ์ที่คอมไม่หมด" }); }
             }
           }
-          await typeInto(ch, body.text);
-        } catch (e) { untyped(null); throw e; }
+          await guardedType(ch, body.text);
+        } catch (e) { const failure=untyped(null);if(failure)return failure;throw e; }
+        if(localId)continuitySends.set(localId,{hash:localHash,state:'acknowledged'});
       } else { set.status = 400; return { ok: false, error: "text or key required" }; }
       snapCache.at = 0;
       return { ok: true };
+      } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
     }, { body: t.Object({ text: t.Optional(t.String({ maxLength: 8000 })), key: t.Optional(t.String()), clear: t.Optional(t.Boolean()), merge: t.Optional(t.Boolean()), id: t.Optional(t.String({ maxLength: 128 })), generation: t.Optional(t.String({ maxLength: 256 })), continuityToken: t.Optional(t.String({ maxLength: 256 })), offline: t.Optional(t.Boolean()), createdAt: t.Optional(t.Number()), parentId: t.Optional(t.String({ maxLength: 128 })), resolveParent: t.Optional(t.Boolean()) }) })
     // Start a Superset tab that has not run since the Mac restarted: opening its workspace and focusing its pane makes the
     // desktop app start the terminal (and the agent it held — Claude/Codex continue the same chat). Its terminal id may change → answer with the id the room has now.
     .post("/workspaces/:ws/rooms/:room/wake", async ({ params, set }) => {
+      try { await writeGuard.assertRoom(params.ws, params.room); } catch { return continuityWriteFailure(set); }
       if (!/^[0-9a-f-]{36}$/i.test(params.ws)) { set.status = 400; return { ok: false, error: "bad workspace" }; }
-      const read = async () => (JSON.parse(await ssAsync(["snapshot", "--workspace", params.ws, "--json"])).workspaces ?? [])[0];
+      const run=options.wakeIO?.run??ssAsync;
+      const attempt=createContinuityWriteAttempt(writeGuard,params.ws,params.room);
+      const read = async () => (JSON.parse(await run(["snapshot", "--workspace", params.ws, "--json"])).workspaces ?? [])[0];
       try {
         const w = await read();
         const pane = (w?.layout?.tabs ?? []).flatMap((t: any) => t.panes ?? []).find((p: any) => p.terminalId === params.room);
         if (!pane) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้ใน Superset" }; }
         if ((w.terminals ?? []).some((t: any) => t.id === params.room)) return { ok: true, room: params.room };
         // the desktop app only starts terminals of the workspace it shows → open that workspace, then its tab
-        await ssAsync(["workspaces", "open", params.ws, "--local"]);
-        await ssAsync(["panes", "focus", "--workspace", params.ws, "--pane", String(pane.id)]);
+        await attempt.run(()=>run(["workspaces", "open", params.ws, "--local"]));
+        await attempt.run(()=>run(["panes", "focus", "--workspace", params.ws, "--pane", String(pane.id)]));
         const until = Date.now() + 7_000;                       // answer before Bun's 10 s idle timeout drops the request
         while (Date.now() < until) {
           await new Promise(r => setTimeout(r, 500));
@@ -2028,10 +2079,11 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
         }
         snapCache.at = 0;
         set.status = 504; return { ok: false, error: "Superset ยังเปิดห้องนี้ไม่เสร็จ — รอสักครู่แล้วดูอีกที หรือเปิดแท็บในแอปบน Mac" };
-      } catch (e: any) { set.status = 502; return { ok: false, error: String(e?.stderr || e?.message || e).slice(0, 300) }; }
+      } catch (e: any) { const failure=attempt.failure(e,set);if(failure)return failure;set.status = 502; return { ok: false, error: String(e?.stderr || e?.message || e).slice(0, 300) }; }
     })
     // Open a new room in a Superset workspace: an agent with a first prompt, or a plain shell.
     .post("/workspaces/:ws/rooms", async ({ params, body, set }) => {
+      try { await writeGuard.assertChannel(null); } catch { return continuityWriteFailure(set); }
       if (params.ws.startsWith("dir:")) {
         const dir = dirFromId(params.ws);
         if (!dir) { set.status = 400; return { ok: false, error: "เปิดโฟลเดอร์นี้ไม่ได้" }; }
@@ -2060,7 +2112,7 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       }
     });
   // feature packs (src/mobile/features/*) add their routes after the auth guard above
-  mountFeatures(app, { herdr: runtime, test: !!options.herdr, continuity: options.continuity });
+  mountFeatures(app, { herdr: runtime, test: !!options.herdr, continuity: options.continuity, writeGuard, featureIO: options.featureIO });
   setTimeout(() => compactMsPerToken(), 30_000).unref?.(); // warm the /compact estimate in the background
   return app;
 }

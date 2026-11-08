@@ -30,7 +30,9 @@ export function buildContext(input: {
   if (!input.archivePath.startsWith('/') || /[\r\n\0]/.test(input.archivePath)) throw new ContextError('archive_unavailable');
   const events = [...input.events].sort((a,b) => a.seq-b.seq);
   if (events.some((e,i) => !Number.isSafeInteger(e.seq) || e.seq < 1 || (i > 0 && e.seq <= events[i-1].seq))) throw new ContextError('invalid_event_sequence');
-  const throughSeq = events.at(-1)?.seq ?? input.binding?.cursor ?? 0;
+  const throughSeq = events.at(-1)?.seq ?? 0;
+  if(input.binding && (!Number.isSafeInteger(input.binding.cursor) || input.binding.cursor<0 || input.binding.cursor>throughSeq))
+    throw new ContextError('history_cursor_unavailable');
   const delta = events.filter(e => e.seq > (input.binding?.cursor ?? 0));
   const header = {
     version: 2, sourceTrust: { authority: 'reference-only', permitsActions: false, changesIdentity: false }, handoffId: input.handoffId, roomId: input.room.id, throughSeq,

@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { homedir } from "os";
 import { basename, dirname, join, relative } from "path";
 import { roomChannel, typeInto } from "./ctx";
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
 
 export const DOC_EXT = /\.(docx|xlsx|pptx|pdf|doc|xls|ppt|txt)$/i;   // txt: the README.txt some WPs (repository, software) hold
 export const WP_DIR = /^WP\d{2}\b/i;
@@ -265,7 +266,7 @@ export function marksMessage(docPath: string, marks: Pick<Mark, "page" | "note" 
   return `📄 ตรวจเอกสาร ${tilde(docPath)} — ขีดสีแดงไว้ ${marks.length} จุด ดูภาพแต่ละจุด (หน้าเอกสารที่ขีดทับจุดที่ต้องแก้) แล้วแก้ในไฟล์ให้ครบทุกจุด ตามกติกาของ /iso: ${items}`;
 }
 
-export function mount(app: any): void {
+export function mount(app: any, guard?: ContinuityWriteGuard): void {
   if (process.env.NODE_ENV !== "test") setTimeout(() => { ensureIndex(true); }, 20_000);
 
   app.get("/docs", async ({ query }: any) => {
@@ -342,12 +343,15 @@ export function mount(app: any): void {
   });
 
   app.post("/docs/marks/send", async ({ body, set }: any) => {
+    try { await guard?.assertRoom(String(body?.ws ?? ""), String(body?.room ?? "")); }
+    catch { return continuityWriteFailure(set); }
     const f = await fileOf(body?.id);
     const ch = roomChannel(String(body?.ws ?? ""), String(body?.room ?? ""));
     if (!f || !ch) { set.status = 400; return { ok: false, error: "เลือกห้องก่อน" }; }
     const all = loadMarks(), fam = familyOf(f.path);
     const todo = (all[fam] ?? []).filter(m => !m.sentAt).sort((a, b) => a.page - b.page);
     if (!todo.length) { set.status = 400; return { ok: false, error: "ยังไม่มีจุดที่ขีดไว้" }; }
+    try { await guard?.assertChannel(ch); } catch { return continuityWriteFailure(set); }
     await typeInto(ch, marksMessage(latestOf(f).path, todo));
     const now = Date.now();
     for (const m of todo) { m.sentAt = now; m.room = `${body.ws}|${body.room}`; }

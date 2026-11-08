@@ -29,12 +29,13 @@ src/mobile/
   features/*.ts     feature pack ฝั่ง server — mount(app) ลงทะเบียนใน features/index.ts · ใช้ helper จาก ctx.ts
 ```
 
-**จุดต่อขยายของ pack (`window.mawExt`)**: `onRoom` · `onPoll` · `onHome` · `onComposer` · `tabs` (แท็บในโปรเจค, `folder: true` = ขึ้นในโปรเจคโฟลเดอร์ด้วย) · `keys` (ปุ่มลัด) · `pages` (`{key, icon, title, summary(), mount(el), tile?: false}` = ช่องในเมนูหน้าแรก หรือในเมนู ⋯ ถ้า `tile: false`)
+**จุดต่อขยายของ pack (`window.mawExt`)**: `onRoom` · `onPoll` · `onHome` · `onComposer` · `beforeSend` (await ก่อนส่ง) · `tabs` (แท็บในโปรเจค, `folder: true` = ขึ้นในโปรเจคโฟลเดอร์ด้วย) · `keys` (ปุ่มลัด) · `pages` (`{key, icon, title, summary(), mount(el), tile?: false}` = ช่องในเมนูหน้าแรก หรือในเมนู ⋯ ถ้า `tile: false`)
 
 ## Feature pack
 
 | pack | หน้าจอ | route หลัก (ใต้ `/mobile`) |
 |---|---|---|
+| continuity | ปุ่ม header เปลี่ยน agent/model, reference preview, explicit facts, progress/uncertain และ stored history/held | `GET /continuity/capabilities` · `/rooms/:ws/:room/continuity` · `/facts/preview` · `/facts/selections` · `/switch` · `/operations/:id` · `/events` · `/held` |
 | permissions | การ์ดตอบหน้าขออนุญาต + การ์ดหน้าถามอื่น (trust folder, ตัวเลือก) · push เมื่อมีหน้าถามใหม่ | `GET /rooms/:ws/:room/prompt` · `POST …/prompt/answer` · `POST …/prompt/key` |
 | modes | ป้ายโหมด (» bypass / auto / ‖ plan) · model · effort | `GET …/mode` · `POST …/mode/cycle` · `POST …/model` |
 | activity | todo + วงกลม agent ลอย (งานเบื้องหลังของ Claude และ Codex) | `GET …/activity` |
@@ -50,6 +51,20 @@ src/mobile/
 | vault | เมนู "📦 คลังไฟล์": ฝากรูป/ไฟล์ต้นฉบับ (ไม่ย่อ) จากมือถือเครื่องไหนก็ได้ ≤4 GB/ไฟล์ · สตรีมลงดิสก์ · ปฏิเสธเมื่อ Mac เหลือ <5 GB · รูปย่อ (sips / pdftoppm / ffmpeg) · โหลด ≤5 ไฟล์ทีละไฟล์ · มากกว่านั้นเป็น zip · "บันทึก/แชร์" (share sheet → คลังภาพ iPhone) · ลิงก์โหลดเซ็นชื่ออายุ 15 นาที (ไม่ต้องแนบ token) · ลบ = ย้ายไป `.trash` 30 วัน · ข้อมูลอยู่ `~/.maw/vault/` | `GET /vault` · `POST /vault/upload` · `/vault/thumb/:id` · `POST /vault/link` · `GET /vault/dl/:id` · `POST /vault/zip` · `POST /vault/delete` |
 | docs | เมนู "📄 เอกสาร": เอกสาร ISO (โฟลเดอร์ `WP05 …`) ทุก repo · อ่านทีละหน้า (Mac แปลง Word/Excel/PDF → ภาพด้วย LibreOffice + pdftoppm, cache ใน `~/.maw/docs-cache`) · ไล่ `[TBD]` · ส่งคำตอบเข้าห้อง Claude · ✏️ ปากกาขีดทับหน้า + โน้ต → รายการรอส่ง → ส่งทีเดียวเข้าห้อง (ข้อความบรรทัดเดียว + path ภาพ) → เทียบก่อน/หลังกับรุ่นใหม่ (`~/.maw/docs-marks*`) · รุ่นเก่า (`_V1.0` เมื่อมี `_V1.1`) พับไว้ ไม่นับ TBD · อ่านอย่างเดียว | `GET /docs` · `POST /docs/render` · `GET /docs/page` · `/docs/marks*` · `GET /docs/mark-img` |
 
+## ปุ่มเปลี่ยน agent / โมเดล — 8 พ.ย. 69
+
+`ext/continuity.js` วางปุ่มใน `#ext-room-actions` ของ header จึงแยกจาก native quick keys. ปุ่มปิดเมื่อ capability/current room ยังไม่ยืนยัน; catalog มาจาก `models.agent/id/label` และสถานะปัจจุบันมาจาก room bindings เท่านั้น ไม่มี model/demo fallback และไม่มี picker Mind/Directเพิ่มในรุ่นแรก
+
+ผู้ใช้กดดูบริบทอ้างอิงจาก `GET …/facts/preview` แล้วเลือก goal/facts พร้อม provenanceเอง ไม่มีการ preselect หรือเดา goalจากข้อความ. ต้องบันทึก explicit selection ผ่าน `POST …/facts/selections` ก่อน `POST …/switch`; ทั้งคู่ใช้ operation IDเดียวกัน และ factsSelectionIdเท่ากับIDนั้น. Preview/receiptไม่ตรงหรือ service503จะพัก ไม่ fallbackไปส่งคำขอเก่าแบบไม่มี facts
+
+`scope` omitted/`all-backends` ใช้ gateครบสาม Backendเดิม. `room-backend` ใช้ได้เฉพาะ Backendใน current-room APIที่ hostรับรองพร้อม `ready`; UIไม่เดา Backendจากชื่อworkspaceและไม่เปิดreadyเอง. เปิด-ปิด/rolloutต้องคุมที่ host capability/service ไม่ใช่แก้ค่าบน browser
+
+Browserเก็บ immutable switch/facts intentพร้อม scope/revision/binding และตรวจ storage readbackก่อนแต่ละ POST. ACKหายแสดง uncertain ไม่สร้าง IDใหม่/ส่งซ้ำจากpoll/reload. ปุ่มตรวจคำขอเดิมใช้ scoped `GET …/operations/:id` เท่านั้น ผลเป็น historical receiptไม่ใช่ current native readinessและไม่ advanceให้อัตโนมัติ. ไม่มี receipt lookupของ facts-selectionเดี่ยว: ถ้า selection ACKหายก่อน /switchจะพักชัดว่าไม่เริ่มสลับ ไม่สร้างreceiptเอง
+
+Panelไม่ clear composer/files/native chat cache. Stored logical historyคงพร้อมป้ายข้อมูลก่อนหน้าเมื่อ revisionเปลี่ยนใน logical roomเดิม; ไม่ใช้ historyนี้อ้าง native conversation/epochใหม่. Guard physical generationแยกจาก continuity generation; เปลี่ยนห้อง/bindingระหว่างawaitหยุดก่อน POSTถัดไป. ไม่ส่ง held/draftหลังswitchสำเร็จเอง
+
+**ขอบเขต release:** รอบนี้แก้เฉพาะ working source และ browser fixtures. Productionมี scoped static candidateแยก; ห้าม copyทั้ง working `m.html`/รัน deploy.shทั้งชุดเองหรือ restartserverจากงานนี้. Rootถือการรวมserver/candidateและnative acceptance. ผล fake APIไม่ใช่ live certification
+
 ## ข้อมูลที่เก็บบน Mac (`~/.maw/`)
 
 `mobile.json` (token แอป + hook — ห้ามพิมพ์ค่า) · `push.json` (กุญแจ push — ห้ามพิมพ์ค่า) · `travel.json` · `autostart.json` · `prs.json` · `retro.json` · `folders.json` ·
@@ -57,12 +72,35 @@ src/mobile/
 
 ## กติกา (ห้ามพลาด)
 
-1. แก้ `m.html` / `ext/*.js` แล้วต้อง `deploy.sh` · แก้ `src/mobile/**` ต้องรีสตาร์ท maw — เทสก่อนรีสตาร์ทเสมอ (รีสตาร์ทแล้วมือถือหลุดชั่วครู่)
+1. แก้ source ต้องมี tests/READMEตรงกัน แล้วรวม releaseตามสิทธิ์ที่ได้รับแยกต่างหาก — ไม่ deploy/restartอัตโนมัติ. โดยเฉพาะ working HTMLที่มี unreleased featuresต้องแยกจาก scoped production candidate; การจัดการ serverเป็นงานของผู้ดูแลตามคำสั่งล่าสุด
 2. repo นี้ public — ห้ามใส่ token, hostname ของ Tailscale (`*.ts.net`), IP ภายใน, โดเมนบริษัท ลงโค้ด/คอมเมนต์
 3. คำสั่ง shell ที่ Mac รัน สร้างฝั่ง server จากตัวเลือกตายตัวเท่านั้น — มือถือส่งคำสั่งเข้ามาไม่ได้ (autostart · ports · clone)
 4. อนิเมชันบนมือถือต้องถูก: ห้าม animation วนไม่จบ / ไล่สีทุกเฟรม (เคยทำมือถือร้อนจน Chrome กิน CPU 160%) · หยุดทุกอย่างเมื่อ `document.hidden`
 5. ส่งข้อมูลให้มือถือแบบ gzip (ทำใน `src/core/server.ts`) และไฟล์แอปส่ง `Cache-Control: no-cache` — Android เคยเปิดแอปเวอร์ชันเก่าค้างหลายวัน
 6. AI ห้าม merge PR / ห้ามส่งข้อความเข้าห้องจริงตอนทดสอบ (ใช้ fake ในเทส)
+
+## พักข้อความระหว่าง continuity — 8 พ.ย. 69
+
+`ext/continuity.js` ใช้ `beforeSend` ที่ core รอผลจริงก่อนตอบ permission ผ่าน composer, upload และ provider send. `roomStateAvailable` มาจาก host แยกจาก `ready`; default ไม่ได้เปิด automatic switch. ห้องที่ host ยืนยันว่า unmanaged ใช้ทางส่งเดิม ส่วน managed room ที่ยังไม่มี operation จะเก็บข้อความในอุปกรณ์โดยไม่ส่ง.
+
+ข้อความ text-only ที่มี operation จะเก็บ intent พร้อม room/operation/revision/generation เดิมใน localStorage และตรวจ readback ก่อน `POST …/held`. Receipt ตรงกันจึงแสดง “ข้อความพักที่ Mac — ยังไม่ส่งถึง agent”. หาก ACK หายจะไม่ส่งซ้ำจาก reload/reconnect; ผู้ใช้กดตรวจคำขอเดิมได้โดยไม่เปลี่ยน ID หรือปลายทาง. ไฟล์แนบพักในอุปกรณ์ ไม่มี upload หรือส่งเฉพาะข้อความแทนไฟล์ที่หาย. Storage ไม่สำเร็จจะแจ้งให้คงหน้าไว้ ไม่รับรอง browser eviction หรือ OS crash.
+
+ข้อจำกัด: ไม่มี held delivery/discard/retarget ในรอบนี้. ข้อความที่เคยเริ่ม native delivery แล้วจะไม่ถูกเปลี่ยนเป็น held ใหม่; สำหรับ Herdr มีปุ่มตรวจ delivery เดิมผ่าน GET โดยตรวจ uid/generation ตรงเท่านั้น. ผลเป็นข้อมูลประกอบจาก ledger ไม่เปลี่ยนรายการเป็น sent ไม่ลบ ไม่ส่งซ้ำ และถ้า generation เปลี่ยนจะบอกว่า API ย้อนตรวจรุ่นเดิมไม่ได้. Mobile permission/raw/feature/lifecycle writers มี per-instance guard เพิ่มแล้ว แต่ keyboard/CLI/raw WebSocket และระบบอื่นนอก Mobile ยังไม่อยู่ใน guard นี้ จึงยังไม่ใช่ all-writer fence และคง production gate ปิด. การเปิดใช้จริงต้องต่อ host และผ่าน native acceptance ไม่ใช่เปลี่ยนค่า `ready` อย่างเดียว.
+
+
+### Owned protocol บน logical room เดิม — 8 พ.ย. 69
+
+`/projects` row ของ owned room ใช้ `transportKind/logicalRoomId/protocolBinding/revision/transportState` จาก host; identity guard รวม native ID/model/route ของ protocol แม้ Codex generation เดิม และ inventory ไม่ grant ready
+
+`ext/continuity.js` ใช้ GET `/rooms/:ws/:room/continuity/transport` เป็น authority ของ transport; การสลับสำเร็จหรือ native history เดิมไม่ให้สิทธิ์ส่ง protocol เอง เมื่อ host ประกาศ `kind:owned-protocol` หน้าเดิมแสดง stored `/events` ตาม cursor (เก็บในจอได้ 5000 รายการล่าสุด, อ่านสูงสุด 10 หน้าต่อรอบ) และปิด TUI keys/permissions/raw screen/suggestion ผ่าน awaited API guard ไม่มี native epoch จำลอง
+
+ส่งได้เฉพาะ text เมื่อ transport idle และ `capabilities.textTurn:true`; actual composer บันทึก immutable `{ws,room,roomId,body:{id,text,expectedRevision,binding}}` พร้อม localStorage readback ก่อน POST `/continuity/turns`. ก่อนส่งอ่าน current room/transport อีกครั้งและตรวจ draft/files/scope; receipt ต้องตรง ID/logical room/full binding/native final correlation จึงล้าง draft เดิมได้ ไฟล์แนบและ voice files ยังคงอยู่ใน draft/local pending ไม่ upload ไม่ส่งเฉพาะ text แทน
+
+บันทึก marker ของห้องที่เคยเป็น owned ไว้เพื่อห้าม fallback หลัง reload เท่านั้น marker ไม่ให้สิทธิ์ ready/textTurn; storage ไม่พร้อมอาจเก็บ marker ไม่ได้ แต่ turn intent ต้องผ่าน durable readback จึงส่งได้
+
+Lost ACK/reload ไม่มี auto-send/re-ID/retarget; ผู้ใช้ตรวจด้วย GET `/continuity/turns/:id` ตามคำขอเดิมเท่านั้น Historical completion ไม่ให้ ready authority สำหรับ turn ใหม่ ข้อความที่เคยเริ่ม native delivery และ stored held intent เดิมไม่ถูกเปลี่ยนเป็น owned turn อัตโนมัติ Backend ยังต้อง wire trusted owned registry/inventory และ host admission เอง; UI fixture tests ไม่ใช่ production/live certification และไม่อ้าง all-writer atomic
+
+Working source เท่านั้น ห้าม copy `m.html` นี้ทั้งไฟล์ขึ้น dist แทน scoped production candidate; ไม่ได้ deploy ในงานรอบนี้
 
 ## ประวัติ
 
@@ -70,6 +108,7 @@ src/mobile/
 |---|---|---|
 | 23 ต.ค. 69 | ไอ้แดง (Claude Code) | สร้าง README — สรุปโครง pack ทั้งหมด, deploy, ข้อมูลใน ~/.maw, กติกา (ประวัติละเอียดอยู่ใน PLAN-maw-mobile.md) |
 | 30 ต.ค. 69 | ไอ้แดง (Claude Code) | เพิ่ม pack docs (เมนูเอกสาร ISO) · ห้อง Superset "ยังไม่เปิด" + wake · autostart เหลือ shell เมื่อ agent ปิด |
+| 8 พ.ย. 69 | Codex ทีม1 | เพิ่ม awaited composer gate, durable held intent และเอกสารขอบเขตที่ยังไม่เปิด production |
 
 
 ## Herdr chat stability — 8 พ.ย. 69
@@ -81,3 +120,5 @@ Status/capability changes ใน session เดิมอัปเดต controls
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | ทีม1 | Herdr capability/transient history/cache ordering/pagination และ composer guards |
+| 8 พ.ย. 69 | Codex cmdmap/p5 | เพิ่ม header switch UI, explicit facts API, scoped capability, immutable intent/lookup และ regressions โดยไม่ deploy working source |
+| 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ optional owned transport/text turn/status, ปิด TUI fallback, เก็บไฟล์/draft และแก้ facts reference 1024 พร้อม browser fixtures |

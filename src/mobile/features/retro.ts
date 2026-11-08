@@ -262,15 +262,21 @@ export async function retroPass(d: RetroDeps): Promise<{ notified: string[]; ran
 }
 export const fmtMin = (m: number) => m >= 60 ? `${Math.floor(m / 60)} ชม.${m % 60 ? ` ${m % 60} นาที` : ""}` : `${m} นาที`;
 
-let looping = false;
-function startLoop(d: RetroDeps): void {
-  if (looping || process.env.NODE_ENV === "test") return;   // never auto-type into real rooms from a test run
-  looping = true;
-  let busy = false;
-  setInterval(async () => {
-    if (busy) return; busy = true;
-    try { await retroPass(d); } catch { /* next minute */ } finally { busy = false; }
-  }, LOOP_EVERY).unref?.();
+type LoopScheduler = (tick: () => Promise<void>, intervalMs: number) => () => void;
+const looping = new WeakMap<RetroDeps, () => void>();
+/** An injected scheduler runs the same callback without a real timer or global policy changes. */
+export function startRetroLoop(d: RetroDeps = realDeps, schedule?: LoopScheduler): () => void {
+  const existing = looping.get(d); if (existing) return existing;
+  if (!schedule && (process.env.NODE_ENV === "test" || process.env.MAW_TEST_MODE)) return () => {};
+  let busy = false, stopped = false;
+  const tick = async () => {
+    if (busy || stopped) return; busy = true;
+    try { await retroPass(d); } catch { /* retry observation on a later pass; guarded dependencies remain in force */ } finally { busy = false; }
+  };
+  const scheduler = schedule ?? ((run, ms) => { const timer = setInterval(() => { void run(); }, ms); timer.unref?.(); return () => clearInterval(timer); });
+  const cancel = scheduler(tick, LOOP_EVERY);
+  const stop = () => { if (stopped) return; stopped = true; cancel(); if (looping.get(d) === stop) looping.delete(d); };
+  looping.set(d, stop); return stop;
 }
 
 function payload(d: RetroDeps) {
@@ -279,8 +285,19 @@ function payload(d: RetroDeps) {
   return { ok: true, settings, skills: SKILLS.map(name => ({ name, available: d.skillExists(name) })), rooms: candidates(d, f) };
 }
 
-export function mount(app: any, d: RetroDeps = realDeps): void {
-  if (d === realDeps) startLoop(d);   // the real server only — tests pass fakes
+/** Keep the policy in this mount's dependencies, including background passes. */
+export function guardedRetroDeps(d: RetroDeps, guard?: { assertChannel(ch: ReplyChannel): Promise<void> }): RetroDeps {
+  if (!guard) return d;
+  return { ...d,
+    read: async (ch, lines) => { await guard.assertChannel(ch); return d.read(ch, lines); },
+    type: async (ch, text) => { await guard.assertChannel(ch); return d.type(ch, text); },
+  };
+}
+
+export function mount(app: any, d: RetroDeps = realDeps, guard?: { assertChannel(ch: ReplyChannel): Promise<void> }): void {
+  const production = d === realDeps;
+  d = guardedRetroDeps(d, guard);
+  if (production) startRetroLoop(d);   // the real server only — tests pass fakes
   app.get("/retro", () => payload(d));
   app.post("/retro/settings", ({ body, set }: any) => {
     const f = d.load();

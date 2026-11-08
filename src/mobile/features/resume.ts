@@ -1,3 +1,4 @@
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
 // Feature pack "resume" (P4 · PLAN-maw-mobile.md §9) — list past Claude Code sessions of a Superset
 // workspace ("ห้องเก่า") and reopen one in a new terminal: `superset agents create --agent claude --resume-session <id>`.
 //
@@ -195,7 +196,7 @@ export function resumeSession(ws: string, sessionId: string): { terminalId: stri
   return { terminalId: terminalIdFrom(out), via: "terminal" };
 }
 
-export function mount(app: any): void {
+export function mount(app: any, guard?: ContinuityWriteGuard): void {
   app.get("/workspaces/:ws/sessions", ({ params, set }: any) => {
     if (params.ws === "tmux" || !UUID_RE.test(params.ws)) { set.status = 400; return { ok: false, error: "ยังรองรับเฉพาะ Superset" }; }
     const cwd = deps.workspacePath(params.ws);
@@ -203,7 +204,8 @@ export function mount(app: any): void {
     return { ok: true, cwd, sessions: listPastSessions(cwd) };
   });
 
-  app.post("/workspaces/:ws/resume", ({ params, body, set }: any) => {
+  app.post("/workspaces/:ws/resume", async ({ params, body, set }: any) => {
+    try { await guard?.assertChannel(null); } catch { return continuityWriteFailure(set); }
     if (params.ws === "tmux" || !UUID_RE.test(params.ws)) { set.status = 400; return { ok: false, error: "ยังรองรับเฉพาะ Superset" }; }
     const sid = String(body?.sessionId ?? "");
     if (!UUID_RE.test(sid)) { set.status = 400; return { ok: false, error: "sessionId ไม่ถูกต้อง" }; }

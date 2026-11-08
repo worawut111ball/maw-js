@@ -28,6 +28,19 @@
   button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
   .app { display: flex; flex-direction: column; height: 100%; padding-top: env(safe-area-inset-top); }
   header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
+  #ext-room-actions { flex: none; max-width: 44%; }
+  .continuity-switch-trigger { border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; font-size: 12px; white-space: normal; line-height: 1.3; }
+  .continuity-switch-trigger:disabled { opacity: .55; cursor: default; }
+  .continuity-status { flex-basis: 100%; color: var(--dim); font-size: 12px; padding: 6px 0; }
+  .continuity-client-only { flex-basis: 100%; }
+  .continuity-status button, .continuity-client-only button { border: 1px solid var(--line); border-radius: 8px; margin: 5px 5px 0 0; padding: 6px 9px; }
+  .continuity-status[data-state="uncertain"], .continuity-client-status { color: var(--waiting); }
+  .continuity-status[data-state="failed"] { color: var(--danger); }
+  .continuity-status[data-state="ready-awaiting-user"] { color: var(--done); }
+  .continuity-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; padding: 10px; background: var(--card2); border-radius: 10px; }
+  .continuity-facts label { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; }
+  .continuity-facts input { flex: none; margin-top: 5px; }
+  .continuity-facts pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
   header h1 { font-size: 18px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .iconbtn { min-width: 40px; height: 40px; padding: 0 10px; border-radius: 12px; background: var(--card2); display: grid; place-items: center; font-size: 15px; flex: none; }
   main { flex: 1; overflow-y: auto; padding: 4px 12px 24px; }
@@ -449,7 +462,7 @@ const chatCache = new Map(), chatHtmlCache = new Map();
 // Writer generation is deliberately strict: capability/status changes are not identity changes.
 function chatBinding(ws, room) {
   const r = state.projects.flatMap(p => p.workspaces).find(w => w.id === ws)?.rooms.find(r => r.id === room);
-  return JSON.stringify([ws, room, r?.agent ?? null, r?.generation ?? null, r?.claudeSessionId ?? null]);
+  return JSON.stringify([ws, room, r?.agent ?? null, r?.generation ?? null, r?.claudeSessionId ?? null, r?.transportKind ?? null, r?.logicalRoomId ?? null, r?.protocolBinding ? [r.protocolBinding.agent, r.protocolBinding.nativeId, r.protocolBinding.generation, r.protocolBinding.model ?? null, r.protocolBinding.route ?? null] : null]);
 }
 function herdrCanCompose(room) { return !!room && !["ended", "asleep"].includes(room.status) && !!(room.capabilities?.prompt || room.capabilities?.answer); }
 function syncHerdrControls(room) {
@@ -486,7 +499,7 @@ function rememberChatHtml(room, html) {
 //   onRoom({p,w,room})  after a room view is drawn · onPoll({p,w,room,live}) every ~2.5 s in a room
 //   onHome()  after home is drawn · onComposer({w,room,msg})  composer ready · tabs [{key,label,render(w, el)}] extra project tabs
 //   keys [{label, cls, onClick({w,room})}] extra buttons at the start of the quick-keys row
-window.mawExt = { onRoom: [], onPoll: [], onHome: [], onComposer: [], tabs: [], keys: [], pages: [] };
+window.mawExt = { onRoom: [], onPoll: [], onHome: [], onComposer: [], beforeSend: [], tabs: [], keys: [], pages: [] };
 // pages [{key, icon, title, summary() → {text, badge?, tone?}, mount(el)}] — a tile in the home "เมนู" grid that opens its own screen
 const extCall = (name, arg) => { for (const f of mawExt[name]) { try { f(arg); } catch (e) { console.error("[ext]", name, e); } } };
 /** Helpers for packs: type into / press a key in the open room. */
@@ -521,6 +534,8 @@ async function api(path, opts = {}) {
 }
 const liveOnlyPath = path => /^\/rooms\/herdr(?::|%3a)[^/]*\/[^/]+\/chat(?:\?|$)/i.test(path) || /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path);
 async function apiRaw(path, opts = {}) {
+  // The optional protocol pack owns this awaited fence, including old permission/key closures.
+  await window.mawContinuityTransport?.guard(path);
   const get = !opts.method || opts.method === "GET", cacheable = get && !liveOnlyPath(path);
   // offline: what was last read stays readable (net.check() is what notices the link coming back)
   if (get && !net.online) { const hit = cacheable && await offlineCache.get(path); if (hit) return hit; throw net.error(); }
@@ -543,7 +558,7 @@ async function apiRaw(path, opts = {}) {
   net.up();
   if (res.status === 401) { renderLogin(); throw new Error("unauthorized"); }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) { const e = new Error(body.error || ("HTTP " + res.status)); e.body = body; throw e; }
+  if (!res.ok || body.ok === false) { const e = new Error(body.error || ("HTTP " + res.status)); e.body = body; e.status = res.status; throw e; }
   if (cacheable) offlineCache.put(path, body);
   return body;
 }
@@ -799,7 +814,7 @@ function renderProject() {
   }
   $app.dataset.view = ""; $app.innerHTML = `${""}
     <header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}
-      ${room ? `<span id="room-status" class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span>` : ""}</header>
+      ${room ? `<span id="room-status" class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span><div id="ext-room-actions"></div>` : ""}</header>
     ${seg}
     ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
     <div class="tabs" id="tabs">${(w?.rooms || []).map(r => `<button class="tab ${r.id === state.room ? "on" : ""}" data-r="${esc(r.id)}">${dot(r.status)}<span class="t">${esc(r.title)}</span></button>`).join("")}
@@ -903,8 +918,9 @@ function renderProject() {
       };
       const ph = msg.placeholder, pad = n => String(n).padStart(2, "0"), mmss = ms => `${Math.floor(ms / 60000)}:${pad(Math.floor(ms / 1000) % 60)}`;
       const type = () => ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find(t => MediaRecorder.isTypeSupported?.(t)) || "";
-      const sendVoice = f => {   // voice goes out alone — whatever is typed in the box stays there
+      const sendVoice = async f => {   // voice goes out alone — whatever is typed in the box stays there
         const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, generation: room.generation, continuityToken: room.continuityToken, lastUserI: null, text: "", files: [f], mode: "", at: Date.now(), state: "sending", note: "", pics: [], names: [f.name] };
+        if (await pendingSendGate(pend, "capture")) { paintPending(); return; }
         pendingSends.push(pend); savePending(pend); state.follow = true; paintPending(); queueSend(pend);
       };
       const show = () => {
@@ -988,49 +1004,56 @@ function renderProject() {
     send.onclick = doSend;
     async function doSend() {
       const raw = msg.value, text = raw.trim(), files = [...state.files]; if (!text && !files.length) return;
-      const herdr = isHerdr(w.id), origin = chatBinding(w.id, room.id);
-      const current = () => !herdr || (state.ws === w.id && state.room === room.id
-        && chatBinding(w.id, room.id) === origin && document.getElementById("msg") === msg
-        && herdrCanCompose(roomBinding(w.id, room.id)) && msg.value === raw
-        && state.files.length === files.length && files.every((f, i) => state.files[i] === f));
-      if (!current() || (herdr && msg._continuityCapturing)) return;
-      if (herdr) msg._continuityCapturing = true;
+      if (msg._continuityCapturing) return;
+      const capabilityAllowed = () => {
+        const owned = window.mawContinuityTransport?.known(w.id, room.id);
+        if (owned) return owned.state === "idle" && owned.capabilities.textTurn === true;
+        if (!isHerdr(w.id)) return true;
+        const current = roomBinding(w.id, room.id);
+        return !!current && !["ended", "asleep"].includes(current.status) && !!(current.capabilities?.prompt || current.capabilities?.answer);
+      };
+      if (!capabilityAllowed()) return;
+      const ws = w.id, roomId = room.id, filesRoom = state.filesRoom;
+      const bindingStamp = b => JSON.stringify([b?.agent ?? null, b?.generation ?? null, b?.continuityToken ?? null, b?.transportKind ?? null, b?.logicalRoomId ?? null, b?.revision ?? null, b?.protocolBinding ? [b.protocolBinding.agent, b.protocolBinding.nativeId, b.protocolBinding.generation, b.protocolBinding.model ?? null, b.protocolBinding.route ?? null] : null]);
+      const renderedBinding = bindingStamp(room), currentBinding = bindingStamp(roomBinding(ws, roomId));
+      const sameScope = () => state.ws === ws && state.room === roomId && w.id === ws && room.id === roomId
+        && document.getElementById("msg") === msg && document.getElementById("send") === send && state.filesRoom === filesRoom
+        && bindingStamp(room) === renderedBinding && bindingStamp(roomBinding(ws, roomId)) === currentBinding;
+      const sameDraft = () => sameScope() && capabilityAllowed() && msg.value === raw && state.files.length === files.length && files.every((f,i) => state.files[i] === f);
+      if (!sameDraft()) return;
+      msg._continuityCapturing = true;
       try {
-      // a question card is open: the dialog holds the keyboard on the Mac, so text typed here answers its
-      // "Type something." row (permissions pack) instead of being typed into the dialog as stray keys
-      if (text && !files.length && window.mawDialogAnswer) {
-        send.disabled = true;
-        const took = await window.mawDialogAnswer(text).catch(() => false);
-        if (!current()) return;
-        send.disabled = false;
-        if (took === "sent") { msg.value = ""; msg.oninput(); return; }
-        if (took === "kept") return;   // the card said why; the text stays in the box
-      }
-      // what's in the PC's box is checked again by the server right before it types (this view can be 2.5 s old):
-      // "clear" = empty it first · "merge" = type after it · nothing = the server refuses and asks back (409 draft)
-      let mode = "";
-      if (state.pulled && (state.macDraft === state.pulled || !state.macDraft)) mode = "clear";   // the phone holds that text itself (maybe edited)
-      else if (state.macDraft) {
-        send.disabled = true;
-        const how = await askMacDraft(state.macDraft);
-        if (!current()) return;
-        send.disabled = false;
-        if (!how) return;
-        mode = how;
-      }
-      if (!current()) return;
-      state.macDraft = null;
-      state.pulled = state.pulledText = null; state.pulledFiles = []; state.justSent = { room: room.id, text, at: Date.now() };
-      // optimistic: the bubble shows at once and the box is free again; upload + send run behind it
-      // newest user message already in the chat → anything after it is ours (pasted images come back as "[Image #12]", not our text)
-      const lastUserI = state.chat?.room === room.id ? Math.max(-1, ...[...state.chat.items.values()].filter(m => m.role === "user").map(m => m.i)) : null;
-      const pend = { id: ++pendSeq, key: dkey, ws: w.id, room: room.id, generation: room.generation, continuityToken: room.continuityToken, lastUserI, text, files, mode, at: Date.now(), state: "sending", note: "",
-        pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
-      pendingSends.push(pend); savePending(pend);
-      msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
-      paintPending(); queueSend(pend);
+        const captured = await captureComposerPending(w, room, text, files, msg, sameDraft);
+        if (!sameDraft() || captured) return;
+        // A deferred unmanaged verdict must not send a snapshot after the person changed their draft.
+        if (text && !files.length && window.mawDialogAnswer) {
+          send.disabled = true;
+          const took = await window.mawDialogAnswer(text).catch(() => false);
+          if (!sameDraft()) return;
+          if (took === "sent") { msg.value = ""; msg.oninput(); return; }
+          if (took === "kept") return;
+        }
+        let mode = "";
+        if (state.pulled && (state.macDraft === state.pulled || !state.macDraft)) mode = "clear";
+        else if (state.macDraft) {
+          send.disabled = true;
+          const how = await askMacDraft(state.macDraft);
+          if (!sameDraft() || !how) return;
+          mode = how;
+        }
+        if (!sameDraft()) return;
+        state.macDraft = null;
+        state.pulled = state.pulledText = null; state.pulledFiles = []; state.justSent = { room: roomId, text, at: Date.now() };
+        const lastUserI = state.chat?.room === roomId ? Math.max(-1, ...[...state.chat.items.values()].filter(m => m.role === "user").map(m => m.i)) : null;
+        const pend = { id: ++pendSeq, key: dkey, ws, room: roomId, generation: room.generation, continuityToken: room.continuityToken, lastUserI, text, files, mode, at: Date.now(), state: "sending", note: "",
+          pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) };
+        pendingSends.push(pend); savePending(pend);
+        msg.value = ""; state.files = []; drawAtt(); msg.oninput(); state.follow = true;
+        paintPending(); queueSend(pend);
       } finally {
-        if (herdr) { msg._continuityCapturing = false; if (document.getElementById("msg") === msg) syncHerdrControls(roomBinding(w.id, room.id)); }
+        msg._continuityCapturing = false;
+        // An old invocation never enables or clears a newly rendered room's controls.
+        if (sameScope()) send.disabled = (!msg.value.trim() && !state.files.length) || !capabilityAllowed();
       }
     }
     $app.querySelectorAll("[data-k]").forEach(b => b.onclick = async () => {
@@ -1185,7 +1208,7 @@ async function loadChat(scr, older) {
   const request = {}; scr._chatRequest = request;
   const c = await api(base + q).catch(e => { if (scr._chatRequest !== request) return { kind: "stale" }; throw e; });
   // the reply of a room we already left must not land in the room on screen now
-  if (scr._chatRequest !== request || state.ws !== ws || state.room !== room || state.mode !== mode || chatBinding(ws, room) !== binding || document.getElementById("screen") !== scr || !scr.isConnected) return { kind: "stale" };
+  if (scr.dataset.ownedProtocol || scr._chatRequest !== request || state.ws !== ws || state.room !== room || state.mode !== mode || chatBinding(ws, room) !== binding || document.getElementById("screen") !== scr || !scr.isConnected) return { kind: "stale" };
   // Offline HTTP cache is not a new verification of this writer/session binding.
   if (isHerdr(ws) && c._offlineAt) return { kind: "unavailable", reason: "history_unavailable" };
   if (c.kind !== "messages") return c;
@@ -1251,6 +1274,7 @@ async function herdrKey(ws, room, key) {
   return api(`/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/send`, { method: "POST", body: JSON.stringify({ key, id: requestId(), generation: binding?.generation }) });
 }
 async function checkHerdrDelivery(p) {
+  if (isContinuityPending(p)) return;
   try {
     const r = await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}`);
     if (r.state === "acknowledged") { p.state = "sent"; p.sentAt = Date.now(); }
@@ -1259,6 +1283,7 @@ async function checkHerdrDelivery(p) {
   savePending(); paintPending();
 }
 async function resolveHerdrPending(p) {
+  if (isContinuityPending(p)) return;
   if (!confirm("ตรวจจอแล้ว และไม่ต้องส่งข้อความนี้ซ้ำ ใช่ไหม?")) return;
   try {
     await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}/resolve`, { method: "POST", body: JSON.stringify({ confirmed: true, generation: p.generation }) });
@@ -1266,6 +1291,9 @@ async function resolveHerdrPending(p) {
   } catch (e) { toast(e.message); }
 }
 async function retargetHerdrPending(p) {
+  if (isContinuityPending(p)) return;
+  // Discover managed scope before legacy retarget can clear a prior delivery attempt's identity.
+  if (await pendingSendGate(p, "capture")) return;
   const priorStatus = p.uid ? await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/delivery/${encodeURIComponent(p.uid)}`).catch(() => null) : null;
   let data; try { data = await api("/projects"); } catch (e) { toast(e.message); return; }
   if (data._offlineAt) { toast("ต้องเชื่อมต่อก่อนเลือกปลายทางใหม่"); return; }
@@ -1284,18 +1312,116 @@ async function retargetHerdrPending(p) {
   document.body.appendChild(bg);
 }
 const pendingSends = []; let pendSeq = 0, sendChain = Promise.resolve();
-const queueSend = p => { sendChain = sendChain.then(() => runSend(p)); }; // one at a time → the Mac gets them in order
+// Awaited by composer, queued uploads and the final provider boundary. Continuity entries never enter legacy retry.
+const isContinuityPending = p => !!(p.continuityScope || p.continuityIntent || String(p.state || "").startsWith("continuity-"));
+// Diagnostic lookup only: never reuse checkHerdrDelivery's sent/expiry transition for parked entries.
+const nativeInspectionFlights = new WeakMap();
+const hasPriorNativeAttempt = p => isContinuityPending(p) && !!(p.requestStarted || p.continuityNativeAttempt);
+const nativeAttemptOrigin = p => p.continuityNativeAttempt || { uid: p.uid, ws: p.ws, room: p.room, generation: p.generation };
+const nativeAttemptKey = o => JSON.stringify([o?.uid,o?.ws,o?.room,o?.generation]);
+function nativeInspectionLimitation(p) {
+  const o = nativeAttemptOrigin(p);
+  if (!isHerdr(o.ws)) return "Backend นี้ยังไม่มี API ตรวจ delivery เดิม — ยังไม่ยืนยันว่าส่งถึง";
+  if (typeof o.uid !== "string" || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(o.uid) || typeof o.generation !== "string" || !o.generation || typeof o.room !== "string" || !o.room)
+    return "ข้อมูล uid/room/generation เดิมไม่ครบ — ตรวจ delivery ไม่ได้และจะไม่เลือกปลายทางแทน";
+  if (nativeAttemptKey(p) !== nativeAttemptKey(o)) return "ข้อมูลคำขอเดิมเปลี่ยน — ไม่ตรวจด้วยปลายทางหรือ generation ใหม่";
+  return "";
+}
+async function inspectContinuityNativeDelivery(p) {
+  if (!hasPriorNativeAttempt(p) || nativeInspectionFlights.has(p) || !pendingSends.includes(p)) return;
+  const original = Object.freeze({ ...nativeAttemptOrigin(p) });
+  const key = nativeAttemptKey(original), screen = document.getElementById("screen"), composer = document.getElementById("msg");
+  const sameEntry = () => pendingSends.includes(p) && hasPriorNativeAttempt(p) && nativeAttemptKey(p) === key && nativeAttemptKey(nativeAttemptOrigin(p)) === key;
+  const sameView = () => state.ws === original.ws && state.room === original.room && document.getElementById("screen") === screen && document.getElementById("msg") === composer;
+  const changedGeneration = () => { const current = roomBinding(original.ws, original.room); return current?.generation !== undefined && current.generation !== original.generation; };
+  const record = (outcome,message) => {
+    if (!sameEntry() || !sameView()) return;
+    p.continuityInspection = { ...original, outcome, message };
+    savePending(); // Diagnostic metadata only. Never change state, intent, uid, generation, sentAt or queue.
+  };
+  if (!sameView()) return;
+  const limited = nativeInspectionLimitation(p);
+  if (limited) { record("unavailable",limited); paintPending(); return; }
+  if (changedGeneration()) { record("generation-changed","agent generation เปลี่ยนแล้ว — API นี้ตรวจ delivery รุ่นเดิมไม่ได้ ไม่เลือกปลายทางใหม่"); paintPending(); return; }
+  const flight = {}; nativeInspectionFlights.set(p,flight); paintPending();
+  try {
+    const result = await api(`/rooms/${encodeURIComponent(original.ws)}/${encodeURIComponent(original.room)}/delivery/${encodeURIComponent(original.uid)}`, { cache: "no-store" });
+    if (!sameEntry() || !sameView()) return;
+    if (changedGeneration()) { record("generation-changed","agent generation เปลี่ยนระหว่างอ่านสถานะ — ไม่ยืนยันผลของคำขอเดิม"); return; }
+    if (result?.ok !== true || result.id !== original.uid) { record("identity-mismatch","ผลตรวจไม่ตรง uid เดิม — ยังไม่ยืนยันว่าส่งถึง"); return; }
+    if (result.state === "unknown" && result.generation === undefined) { record("unknown","ไม่พบคำขอเดิมในรุ่นปัจจุบัน — API นี้ย้อนตรวจ generation เดิมไม่ได้"); return; }
+    if (result.generation !== original.generation) { record("generation-mismatch","ผลตรวจไม่ตรง generation เดิม — ไม่ยืนยันว่าส่งถึงและไม่ส่งซ้ำ"); return; }
+    const messages = {
+      acknowledged: "delivery ledger มี ACK ของคำขอเดิม — ยังเก็บรายการพักไว้ ไม่ส่งซ้ำ",
+      "definitely-rejected": "delivery ledger ปฏิเสธคำขอเดิม — ยังพักไว้ ไม่มีการส่งใหม่",
+      dispatching: "คำขอเดิมอยู่ระหว่างตรวจการส่ง — ยังไม่ยืนยันผล",
+      uncertain: "delivery เดิมยังไม่ทราบผล — ไม่ส่งซ้ำอัตโนมัติ",
+      unknown: "ไม่พบผลของคำขอเดิม — ยังไม่ยืนยันว่าส่งถึง"
+    };
+    record(Object.hasOwn(messages,result.state) ? result.state : "unavailable", Object.hasOwn(messages,result.state) ? messages[result.state] : "รูปแบบสถานะไม่รองรับ — ยังไม่ยืนยันว่าส่งถึง");
+  } catch (e) {
+    const message = e.status === 404 ? "API ตรวจ delivery เดิมไม่พร้อม — ยังไม่ยืนยันว่าส่งถึง" : e.body?.code === "agent_changed" ? "agent เดิมเปลี่ยนแล้ว — API นี้ตรวจ delivery รุ่นเดิมไม่ได้" : "อ่านสถานะ delivery เดิมไม่ได้ — คงรายการพักไว้ ไม่ส่งซ้ำ";
+    record("unavailable",message);
+  } finally {
+    if (nativeInspectionFlights.get(p) === flight) nativeInspectionFlights.delete(p);
+    paintPending();
+  }
+}
+
+async function pendingSendGate(p, phase, unchanged) {
+  if (isContinuityPending(p) && phase !== "reconcile") return true;
+  const persist = () => {
+    if (!pendingSends.includes(p)) pendingSends.push(p);
+    return savePending(p);
+  };
+  try {
+    for (const hook of mawExt.beforeSend || []) {
+      const result = await hook({ pending: p, phase, persist, unchanged });
+      if (result?.handled) { if (!pendingSends.includes(p)) pendingSends.push(p); paintPending(); return true; }
+    }
+    return false;
+  } catch {
+    p.continuityScope = true; p.state = "continuity-local"; p.err = "ตรวจสถานะไม่ได้ — พักไว้ในอุปกรณ์ ยังไม่ส่ง";
+    persist(); paintPending(); return true;
+  }
+}
+async function reconcileContinuityPending(p) {
+  if (p.busy || !isContinuityPending(p) || !(p.continuityIntent || p.continuityTurnIntent) || p.continuityMissingFiles || p.requestStarted || ["continuity-held", "continuity-completed"].includes(p.state)) return;
+  p.busy = true;
+  try { await pendingSendGate(p, "reconcile"); } finally { p.busy = false; paintPending(); }
+}
+async function captureComposerPending(w, room, text, files, msg, unchanged) {
+  const raw = msg?.value, fileScope = state.filesRoom;
+  const canClear = unchanged || (() => state.ws === w.id && state.room === room.id && state.filesRoom === fileScope && document.getElementById("msg") === msg && msg?.value === raw && state.files.length === files.length && files.every((f,i) => state.files[i] === f));
+  const prior = msg?._continuityPending;
+  if (prior && pendingSends.includes(prior) && prior.ws === w.id && prior.room === room.id && prior.text === text && prior.files.length === files.length && prior.files.every((f,i) => f === files[i])) {
+    toast(prior.err || "ข้อความนี้พักไว้แล้ว — ยังไม่ส่ง"); return true;
+  }
+  const p = { id: ++pendSeq, key: w.id + "/" + room.id, ws: w.id, room: room.id, generation: room.generation, continuityToken: room.continuityToken,
+    text, files: [...files], at: Date.now(), state: "sending", mode: "", note: "", pics: [], names: files.map(f => f.name) };
+  if (!await pendingSendGate(p, "capture", canClear)) return false;
+  if (msg) msg._continuityPending = p;
+  // Clearing is allowed only after the actual stored receipt and only for this unchanged composer.
+  if (["continuity-held", "continuity-completed"].includes(p.state) && msg && canClear() && !files.length) {
+    msg.value = ""; msg.oninput?.();
+    if (p.state === "continuity-completed") delete msg._continuityPending;
+  }
+  return true;
+}
+
+const queueSend = p => (sendChain = sendChain.then(() => runSend(p))); // one at a time → the Mac gets them in order
 async function runSend(p) {
-  if (p.busy || p.state === "sent" || !pendingSends.includes(p)) return;   // two flushes racing / deleted meanwhile
+  if (isContinuityPending(p) || p.busy || p.state === "sent" || !pendingSends.includes(p)) return;   // two flushes racing / deleted meanwhile
   if (isHerdr(p.ws)) {
     if (["uncertain", "held"].includes(p.state)) return;
     if (pendingSends.some(q => q !== p && q.id < p.id && q.ws === p.ws && q.room === p.room && ["uncertain", "held"].includes(q.state))) { p.state = "waiting"; savePending(); return; }
   }
   p.busy = true;
-  // the Mac remembers this id for 30 min → a retry after a lost reply is not typed twice
-  p.uid ||= (crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2));
-  p.state = "sending"; p.err = ""; paintPending(); savePending();
   try {
+    if (await pendingSendGate(p, "before-upload")) return;
+    // the Mac remembers this id for 30 min → a retry after a lost reply is not typed twice
+    p.uid ||= (crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2));
+    p.state = "sending"; p.err = ""; paintPending(); savePending();
     if (!net.online) throw net.error();   // queue it now; flushWaiting() sends it when the link is back
     const paths = isHerdr(p.ws) && p.paths?.length ? [...p.paths] : [];
     for (const [k, f] of (paths.length ? [] : p.files).entries()) {
@@ -1315,7 +1441,8 @@ async function runSend(p) {
     p.paths = paths;
     for (;;) {
       try {
-        if (isHerdr(p.ws)) { p.requestStarted = true; savePending(); }
+        if (await pendingSendGate(p, "before-provider")) return;
+        p.requestStarted = true; savePending();
         await api(`/rooms/${encodeURIComponent(p.ws)}/${encodeURIComponent(p.room)}/send`, { method: "POST", signal: AbortSignal.timeout(60_000), body: JSON.stringify({ text, clear: p.mode === "clear", merge: p.mode === "merge", id: p.uid, ...(isHerdr(p.ws) ? { generation: p.generation, continuityToken: p.continuityToken, offline: !!p.offline, createdAt: p.at, parentId: p.parentId, resolveParent: !!p.resolveParent } : {}) }) }); break;
       }
       catch (e) {
@@ -1330,6 +1457,10 @@ async function runSend(p) {
     if (state.filesRoom !== p.key || (!box?.value.trim() && !state.files.length)) clearDraft(p.key); // keep a newer draft typed meanwhile
     paintPending(); setTimeout(loadScreen, 400);
   } catch (e) {
+    if (e.body?.code === "continuity_delivery_not_certified") {
+      p.continuityScope = true; p.state = "continuity-uncertain"; p.err = "ปลายทาง continuity ยังไม่เปิดส่ง — เก็บข้อความเดิมไว้ ไม่ส่งซ้ำ";
+      savePending(); paintPending(); return;
+    }
     if (isHerdr(p.ws) && p.requestStarted) {
       if (e.body?.state === "definitely-rejected" || ["agent_changed", "generation_mismatch", "continuity_lost", "unsupported"].includes(e.body?.code)) {
         p.state = "held"; p.err = e.body.error || "agent เดิมปิดหรือเปลี่ยนแล้ว";
@@ -1353,29 +1484,48 @@ async function runSend(p) {
 const STALE_MS = 30 * 60_000;
 function flushWaiting() {
   for (const p of [...pendingSends].sort((a, b) => a.id - b.id)) {
-    if (p.state !== "waiting") continue;
+    if (isContinuityPending(p) || p.state !== "waiting") continue;
     if (Date.now() - (p.at || 0) > STALE_MS) { p.state = "stale"; continue; }
     queueSend(p);
   }
   savePending(); paintPending(); paintNet();
 }
-function dropPending(p, quiet) { const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); forgetPendingFiles(p); savePending(); if (!quiet) paintPending(); }
+function dropPending(p, quiet) { if (isContinuityPending(p)) return false; const k = pendingSends.indexOf(p); if (k >= 0) pendingSends.splice(k, 1); p.pics.forEach(u => URL.revokeObjectURL(u)); forgetPendingFiles(p); savePending(); if (!quiet) paintPending(); }
 // Android may kill the page mid-send (camera, app switch) → keep the bubbles: list in localStorage, files in Cache Storage
 const PEND_KEY = "maw-pend", PEND_CACHE = "maw-pend";
 function savePending(withFiles) {
-  try { store.set(PEND_KEY, JSON.stringify(pendingSends.map(({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, uid, mode, generation, continuityToken, requestStarted, offline, parentId, resolveParent, paths }) => ({ id, key, ws, room, text, at, state, err, sentAt, names, lastUserI, uid, mode, generation, continuityToken, requestStarted, offline, parentId, resolveParent, paths, n: 0 })).map((x, i) => ({ ...x, n: pendingSends[i].files.length })))); } catch { /* full / private mode */ }
-  if (withFiles && withFiles.files.length && "caches" in window)
-    caches.open(PEND_CACHE).then(box => Promise.all(withFiles.files.map((f, i) => box.put(`${location.origin}/pend/${withFiles.id}/${i}`, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }))))).catch(() => {});
+  let verified = false;
+  try {
+    const encoded = JSON.stringify(pendingSends.map(p => {
+      const row = {};
+      for (const key of ["id","key","ws","room","text","at","state","err","sentAt","names","lastUserI","uid","mode","generation","continuityToken","requestStarted","offline","parentId","resolveParent","paths","continuityScope","continuityTurnIntent","continuityIntent","continuityBinding","continuityReceipt","continuityAttempted","continuityMissingFiles","continuityNativeAttempt","continuityInspection"])
+        if (p[key] !== undefined) row[key] = p[key];
+      row.n = p.expectedFiles ?? p.files.length;
+      return row;
+    }));
+    // Do not use store.set: legacy helper intentionally swallows quota/access errors.
+    localStorage.setItem(PEND_KEY, encoded);
+    verified = localStorage.getItem(PEND_KEY) === encoded;
+  } catch { /* legacy callers can ignore false; continuity requires a verified readback before POST */ }
+  try {
+    if (withFiles && withFiles.files.length && "caches" in window)
+      caches.open(PEND_CACHE).then(box => Promise.all(withFiles.files.map((f, i) => box.put(`${location.origin}/pend/${withFiles.id}/${i}`, new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name || "file") } }))))).catch(() => {});
+  } catch { /* attachment persistence is best effort; these records remain locally blocked */ }
+  return verified;
 }
 function forgetPendingFiles(p) {
   if (!p.files.length || !("caches" in window)) return;
   caches.open(PEND_CACHE).then(box => Promise.all(p.files.map((_, i) => box.delete(`${location.origin}/pend/${p.id}/${i}`)))).catch(() => {});
 }
+function freezePendingIntent(value) {
+  if (value && typeof value === "object") { Object.values(value).forEach(freezePendingIntent); Object.freeze(value); }
+  return value;
+}
 async function restorePending() {
   let list = []; try { list = JSON.parse(store.get(PEND_KEY) || "[]"); } catch { /* broken → start clean */ }
   const box = "caches" in window ? await caches.open(PEND_CACHE).catch(() => null) : null;
   for (const x of list) {
-    if (x.state === "sent" && Date.now() - (x.sentAt || 0) > 60_000) continue;
+    if (!isContinuityPending(x) && x.state === "sent" && Date.now() - (x.sentAt || 0) > 60_000) continue;
     const files = [];
     for (let i = 0; i < (x.n || 0); i++) {
       const r = await box?.match(`${location.origin}/pend/${x.id}/${i}`).catch(() => null);
@@ -1383,9 +1533,13 @@ async function restorePending() {
     }
     // it may or may not have reached the Mac before the page died: with an id the Mac drops a repeat → safe to queue
     // again; an old bubble without one is never resent on its own
-    const state = x.state === "sending" ? (isHerdr(x.ws) ? (x.requestStarted ? "uncertain" : "waiting") : (x.uid ? "waiting" : "failed")) : x.state;
-    pendingSends.push({ ...x, files, state, err: x.state === "sending" && !x.uid ? "แอปถูกปิดระหว่างส่ง — ดูในแชทก่อนกดลองใหม่" : x.err, note: "",
-      pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: files.filter(f => !/^image\//.test(f.type)).map(f => f.name) });
+    const continuity = isContinuityPending(x), missing = (x.n || 0) > files.length || !!x.continuityMissingFiles;
+    const restoredState = continuity ? (String(x.state).startsWith("continuity-") ? x.state : "continuity-local") : x.state;
+    const restored = continuity ? restoredState : x.state === "sending" ? (isHerdr(x.ws) ? (x.requestStarted ? "uncertain" : "waiting") : (x.uid ? "waiting" : "failed")) : x.state;
+    pendingSends.push({ ...x, files, state: restored, expectedFiles: x.n || 0,
+      ...(continuity ? { continuityScope: true, continuityMissingFiles: missing, continuityIntent: x.continuityIntent ? Object.freeze(x.continuityIntent) : undefined, continuityNativeAttempt: x.continuityNativeAttempt ? Object.freeze(x.continuityNativeAttempt) : undefined, continuityTurnIntent: x.continuityTurnIntent ? freezePendingIntent(x.continuityTurnIntent) : undefined } : {}),
+      err: continuity && missing ? "ไฟล์แนบในอุปกรณ์ไม่ครบ — พักไว้ ไม่ส่งเฉพาะข้อความ" : x.state === "sending" && !x.uid ? "แอปถูกปิดระหว่างส่ง — ดูในแชทก่อนกดลองใหม่" : x.err, note: "",
+      pics: files.filter(f => /^image\//.test(f.type)).map(f => URL.createObjectURL(f)), names: continuity && Array.isArray(x.names) ? x.names : files.filter(f => !/^image\//.test(f.type)).map(f => f.name) });
     pendSeq = Math.max(pendSeq, x.id || 0);
   }
   savePending(); paintPending();
@@ -1395,7 +1549,7 @@ async function restorePending() {
 function reconcilePending(list) {
   const mine = list.filter(m => m.role === "user").slice(-12), claimed = new Set();
   for (const p of [...pendingSends].sort((a, b) => a.id - b.id)) {
-    if (p.state !== "sent" || p.ws !== state.ws || p.room !== state.room) continue;
+    if (isContinuityPending(p) || p.state !== "sent" || p.ws !== state.ws || p.room !== state.room) continue;
     const head = (p.text || p.paths?.[0] || "").slice(0, 40).trim();
     let hit = mine.find(m => !claimed.has(m.i) && (!m.ts || Date.parse(m.ts) >= p.at - 120_000) && head && String(m.text || "").includes(head));
     // no text match (images only, or the agent rewrote it): the first user message newer than what was there at send time
@@ -1410,24 +1564,34 @@ function paintPending() {
   // the screen view shows only what still needs the person (waiting for the link, held too long, failed)
   const onlyOpen = state.mode !== "chat";
   // a slash command (/rewind, /clear …) runs in the agent's UI and is never written as a message → its bubble goes soon
-  for (const p of [...pendingSends]) if (p.state === "sent" && Date.now() - p.sentAt > (/^\s*\/\S/.test(p.text) && !p.files.length ? 3_000 : 60_000)) dropPending(p, true);
-  const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room && (!onlyOpen || ["waiting", "stale", "failed", "uncertain", "held"].includes(p.state)));
+  for (const p of [...pendingSends]) if (!isContinuityPending(p) && p.state === "sent" && Date.now() - p.sentAt > (/^\s*\/\S/.test(p.text) && !p.files.length ? 3_000 : 60_000)) dropPending(p, true);
+  const mine = pendingSends.filter(p => p.ws === state.ws && p.room === state.room && (!onlyOpen || isContinuityPending(p) || ["waiting", "stale", "failed", "uncertain", "held"].includes(p.state)));
   if (!mine.length) return;
   const atBottom = state.follow || scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60;
   for (const p of mine) {
     const mins = Math.max(1, Math.round((Date.now() - (p.at || Date.now())) / 60_000));
-    const who = p.state === "uncertain" ? "⏸ ยังยืนยันการส่งไม่ได้ — ไม่ส่งซ้ำอัตโนมัติ" : p.state === "held" ? `⏸ ${esc(p.err || "agent เดิมปิดหรือเปลี่ยนแล้ว")}` : p.state === "failed" ? `⚠️ ส่งไม่ได้ · ${esc(p.err)}` : p.state === "sent" ? "✓ ส่งแล้ว"
+    const who = isContinuityPending(p) ? esc(p.err || (p.state === "continuity-held" ? "ข้อความพักที่ Mac — ยังไม่ส่งถึง agent" : "ข้อความพักในอุปกรณ์ — ไม่ส่งอัตโนมัติ")) : p.state === "uncertain" ? "⏸ ยังยืนยันการส่งไม่ได้ — ไม่ส่งซ้ำอัตโนมัติ" : p.state === "held" ? `⏸ ${esc(p.err || "agent เดิมปิดหรือเปลี่ยนแล้ว")}` : p.state === "failed" ? `⚠️ ส่งไม่ได้ · ${esc(p.err)}` : p.state === "sent" ? "✓ ส่งแล้ว"
       : p.state === "waiting" ? "📴 รอเน็ต · จะส่งเองเมื่อเชื่อมต่อได้"
       : p.state === "stale" ? `⏸ ค้างมา ${mins} นาที · ห้องอาจเปลี่ยนเรื่องแล้ว — ส่งตอนนี้ไหม?`
       : `⏳ ${p.note ? esc(p.note) + "…" : "กำลังส่ง…"}`;
     const el = document.createElement("div");
     el.className = `msg me pend ${p.state}`;
-    const acts = ["uncertain", "held"].includes(p.state) ? `<button data-a="status">ตรวจสถานะ</button><button data-a="retarget">เลือกปลายทางและส่งใหม่</button><button data-a="resolve">ตรวจแล้ว · ไม่ส่งซ้ำ</button><button data-a="drop">เก็บไว้บนจอจริง · เอารายการนี้ออก</button>` : p.state === "failed" ? `<button data-a="retry">↻ ลองใหม่</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button>`
+    const inspectable = hasPriorNativeAttempt(p), limitation = inspectable ? nativeInspectionLimitation(p) : "";
+    const inspection = p.continuityInspection && nativeAttemptKey(p.continuityInspection) === nativeAttemptKey(nativeAttemptOrigin(p)) ? p.continuityInspection : null;
+    const acts = isContinuityPending(p) ? (inspectable ? (!limitation ? `<button data-a="continuity-delivery-status" ${nativeInspectionFlights.has(p) ? "disabled" : ""}>ตรวจสถานะ delivery เดิม · อ่านอย่างเดียว</button>` : "") : (p.continuityIntent || p.continuityTurnIntent) && !p.requestStarted && !p.continuityMissingFiles && !["continuity-held","continuity-completed"].includes(p.state) ? `<button data-a="continuity-reconcile">${p.continuityTurnIntent ? "ตรวจสถานะ protocol เดิม · อ่านอย่างเดียว" : "ตรวจการบันทึกด้วยคำขอเดิม"}</button>` : "") : ["uncertain", "held"].includes(p.state) ? `<button data-a="status">ตรวจสถานะ</button><button data-a="retarget">เลือกปลายทางและส่งใหม่</button><button data-a="resolve">ตรวจแล้ว · ไม่ส่งซ้ำ</button><button data-a="drop">เก็บไว้บนจอจริง · เอารายการนี้ออก</button>` : p.state === "failed" ? `<button data-a="retry">↻ ลองใหม่</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button>`
       : p.state === "stale" ? `<button data-a="retry">ส่งเลย ↑</button><button data-a="edit">✎ แก้ไข</button><button data-a="drop">ลบ</button>`
       : p.state === "waiting" ? `<button data-a="edit">✎ แก้ไข</button><button data-a="drop">ยกเลิก</button>` : "";
     el.innerHTML = `<div class="who">${who}</div><div class="bubble">${p.pics.length ? `<div class="pics">${p.pics.map(u => `<img class="upimg" src="${u}" data-zoom="${u}">`).join("")}</div>` : ""}${esc(p.text)}${p.names.map(n => `<div class="upfile">📎 ${esc(n)}</div>`).join("")}</div>`
       + (acts ? `<div class="pact">${acts}</div>` : "");
+    if (inspectable) {
+      const note = document.createElement("p"); note.className = "delivery-inspection-note";
+      note.textContent = limitation || (nativeInspectionFlights.has(p) ? "กำลังอ่านสถานะ delivery เดิม" : (inspection ? "ผลตรวจครั้งล่าสุดของคำขอเดิม: " + inspection.message : "อ่านสถานะด้วย uid และ generation เดิมเท่านั้น — ไม่ส่งหรือลบรายการ"));
+      el.appendChild(note);
+    }
     el.querySelectorAll("[data-a]").forEach(b => b.onclick = () => {
+      if (b.dataset.a === "continuity-delivery-status") return inspectContinuityNativeDelivery(p);
+      if (b.dataset.a === "continuity-reconcile") return reconcileContinuityPending(p);
+      if (isContinuityPending(p)) return;
       if (b.dataset.a === "resolve") return resolveHerdrPending(p);
       if (b.dataset.a === "status") return checkHerdrDelivery(p);
       if (b.dataset.a === "retarget") return retargetHerdrPending(p);
@@ -1606,8 +1770,10 @@ async function loadScreen() {
   const current = () => binding === chatBinding(state.ws, state.room) && state.mode === mode && document.getElementById("screen") === scr && scr.isConnected;
   if (loadScreen.busy?.key === key && Date.now() - loadScreen.busy.at < 15_000) return;
   const mine = loadScreen.busy = { key, at: Date.now() };
-  loadSuggestion();
   try {
+    if (await window.mawContinuityTransport?.screen(scr, state.ws, state.room, current)) return;
+    if (!current()) return;
+    loadSuggestion();
     if (state.mode === "chat") {
       const c = await loadChat(scr);
       if (!current() || c.kind === "stale") return;

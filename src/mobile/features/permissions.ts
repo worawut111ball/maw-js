@@ -1,3 +1,4 @@
+import { continuityWriteFailure, createContinuityWriteAttempt, type ContinuityWriteGuard } from '../continuity/write-guard';
 // Feature pack "permissions" (P1) — answer Claude Code / Codex permission prompts from the phone.
 // GET  /rooms/:ws/:room/prompt         → { ok, prompt }   the dialog open at the bottom of the screen, or null
 // POST /rooms/:ws/:room/prompt/type    { n, text }     AskUserQuestion "Type something." → that row, text, Enter
@@ -402,20 +403,21 @@ const herdrBody = {
   id: t.Optional(t.String({ maxLength: 128 })), generation: t.Optional(t.String({ maxLength: 256 })),
   dialogToken: t.Optional(t.String({ maxLength: 256 })),
 };
-async function herdrPromptAction(herdrRuntime: HerdrRuntime, params: any, body: any, set: any, action: "key" | "answer") {
+async function herdrPromptAction(herdrRuntime: HerdrRuntime, params: any, body: any, set: any, action: "key" | "answer", attempt: ReturnType<typeof createContinuityWriteAttempt>) {
   set.headers["cache-control"] = "no-store";
   try {
     await herdrRuntime.refresh();
     const ch = herdrRuntime.resolve(params.ws, params.room);
     if (!ch) { set.status = 409; return { ok: false, code: "agent_changed", error: "agent เดิมปิดหรือเปลี่ยนแล้ว" }; }
-    const result = await herdrRuntime.dispatch(ch, { id: body.id || "", action, expectedGeneration: body.generation || "",
-      expectedDialogToken: body.dialogToken, key: body.key, n: body.n, text: body.text });
+    const result = await attempt.run(() => herdrRuntime.dispatch(ch, { id: body.id || "", action, expectedGeneration: body.generation || "",
+      expectedDialogToken: body.dialogToken, key: body.key, n: body.n, text: body.text }));
     if (!result.ok) set.status = 409;
     return { ...result, error: result.ok ? undefined : "ยังยืนยันการส่งไม่ได้ — โหลดคำถามใหม่ก่อนตอบ" };
-  } catch (e) { return herdrFailure(e, set); }
+  } catch (e) { return attempt.failure(e,set) ?? herdrFailure(e, set); }
 }
 
-export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel; typeLiteral?: typeof typeLiteral; pause?: (ms: number) => Promise<void>; herdr?: HerdrRuntime } = { readScreen, pressKey, roomChannel }): void {
+export interface PermissionsDeps { readScreen: typeof readScreen; pressKey: typeof pressKey; roomChannel: typeof roomChannel; typeLiteral?: typeof typeLiteral; pause?: (ms: number) => Promise<void>; herdr?: HerdrRuntime; writeGuard?: ContinuityWriteGuard }
+export function mount(app: any, deps: PermissionsDeps = { readScreen, pressKey, roomChannel }): void {
   const herdrRuntime = deps.herdr ?? defaultHerdrRuntime;
   herdrRuntime.setDialogParser((raw: string) => {
     const p = parsePrompt(raw) ?? parseMenu(raw);
@@ -449,7 +451,12 @@ export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey:
 
   // one key into an open dialog (moving the cursor changes the dialog, so no sig — but a dialog must be open)
   app.post("/rooms/:ws/:room/prompt/key", async ({ params, body, set }: any) => {
-    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "key");
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>press(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>typeText(ch,text));
+    try {
+      await attempt.check();
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "key", attempt);
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
     let open = false, menu: MenuPrompt | null = null;
@@ -458,17 +465,23 @@ export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey:
     // the cursor in AskUserQuestion's "Type something." row is a text field: a digit there is typed, not picked
     // (seen 7 Nov: card 14 opened with the cursor still on that row and "4" landed in it) → step out first
     if (/^\d$/.test(body.key) && menu?.options.find(o => o.sel)?.free) {
-      await press(ch, "up"); await pause(300);
+      await guardedPress(ch, "up"); await pause(300);
       try { const again = parseMenu(await read(ch, SCREEN_LINES)); if (again?.options.find(o => o.sel)?.free) { set.status = 409; return { ok: false, error: "ออกจากช่องพิมพ์คำตอบไม่ได้ — กด ↑ แล้วลองใหม่" }; } } catch { /* unreadable → press anyway */ }
     }
-    await press(ch, body.key);
+    await guardedPress(ch, body.key);
     return { ok: true };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   }, { body: t.Object({ ...herdrBody, key: t.Union(MENU_KEYS.map(k => t.Literal(k))) }) });
 
   // AskUserQuestion's "Type something." row: put the cursor on it (its number), replace what is there with the text,
   // Enter. Only into that row of the dialog still open — never into the chat input box.
   app.post("/rooms/:ws/:room/prompt/type", async ({ params, body, set }: any) => {
-    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer");
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>press(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>typeText(ch,text));
+    try {
+      await attempt.check();
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer", attempt);
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
     const menu = async () => { try { return parseMenu(await read(ch, SCREEN_LINES)); } catch { return null; } };
@@ -476,19 +489,25 @@ export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey:
     const opt = () => m?.options.find(o => o.n === body.n);
     if (!m || !opt()?.free) { set.status = 409; return { ok: false, error: "ช่องพิมพ์คำตอบปิดไปแล้ว — ไม่ได้พิมพ์อะไร", prompt: m }; }
     if (!opt()!.sel) {
-      await press(ch, String(body.n)); await pause(450); m = await menu();
+      await guardedPress(ch, String(body.n)); await pause(450); m = await menu();
       if (!opt()?.sel) { set.status = 409; return { ok: false, error: "เลือกช่องพิมพ์คำตอบไม่ได้ — ลองใหม่", prompt: m }; }
     }
     // text typed there before (label is no longer "Type something.") → clear it first
-    if (!/^type something\.?$/i.test(opt()!.label)) { await press(ch, "ctrlu"); await pause(250); }
-    await typeText(ch, body.text);
+    if (!/^type something\.?$/i.test(opt()!.label)) { await guardedPress(ch, "ctrlu"); await pause(250); }
+    await guardedType(ch, body.text);
     await pause(350);
-    await press(ch, "enter");
+    await guardedPress(ch, "enter");
     return { ok: true };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   }, { body: t.Object({ ...herdrBody, n: t.Integer({ minimum: 1, maximum: 9 }), text: t.String({ minLength: 1, maxLength: 2000 }) }) });
 
   app.post("/rooms/:ws/:room/prompt/answer", async ({ params, body, set }: any) => {
-    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer");
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>press(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>typeText(ch,text));
+    try {
+      await attempt.check();
+    if (params.ws.startsWith("herdr:")) return herdrPromptAction(herdrRuntime, params, body, set, "answer", attempt);
     const ch = chan(params.ws, params.room);
     if (!ch) { set.status = 404; return { ok: false, error: "ไม่พบห้องนี้" }; }
     let prompt: PermissionPrompt | null = null;
@@ -498,7 +517,8 @@ export function mount(app: any, deps: { readScreen: typeof readScreen; pressKey:
     const opt = prompt.options.find(o => o.n === body.n);
     if (!opt) { set.status = 409; return { ok: false, error: `ไม่มีตัวเลือกที่ ${body.n}`, prompt }; }
     if (opt.n > 4) { set.status = 409; return { ok: false, error: "ตัวเลือกนี้ต้องตอบจากเครื่อง Mac", prompt }; }
-    await press(ch, String(opt.n));
+    await guardedPress(ch, String(opt.n));
     return { ok: true, answered: opt };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   }, { body: t.Object({ ...herdrBody, n: t.Integer({ minimum: 1, maximum: 9 }), sig: t.Optional(t.String({ maxLength: 40 })) }) });
 }

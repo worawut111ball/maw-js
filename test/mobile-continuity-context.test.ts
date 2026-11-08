@@ -50,3 +50,10 @@ test('embedded instructions in facts/transcript/metadata cannot become the outer
  expect(payload.events[0].text).toBe(injected); expect(payload.facts.constraints).toEqual([injected]);
  expect(payload.events[0].metadata.instructions).toBe(injected); expect(payload.sourceTrust.permitsActions).toBe(false);
 });
+
+test('context cannot claim a target cursor beyond actual archived history, including empty history',()=>{
+ const binding={agent:'claude' as const,nativeId:'b',generation:'g',cursor:5};
+ expect(()=>buildContext({...input([]),binding})).toThrow('history_cursor_unavailable');
+ expect(()=>buildContext({...input([event(1,'available')]),binding})).toThrow('history_cursor_unavailable');
+ expect(buildContext({...input([]),binding:{...binding,cursor:0}}).throughSeq).toBe(0);
+});

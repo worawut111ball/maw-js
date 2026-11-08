@@ -1,3 +1,4 @@
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
 /** Lifecycle routes only; mounted beneath the existing /mobile auth guard by the host. */
 import { LifecycleError, type Binding, type Lifecycle, type Receipt } from '../herdr/lifecycle';
 
@@ -12,7 +13,7 @@ let configured: HerdrFeatureOptions | undefined;
 export function configureHerdrFeature(options: HerdrFeatureOptions): void { configured = options; }
 const validText = (s: unknown): s is string => typeof s === 'string' && s.length > 0 && s.length <= 160;
 
-export function mount(app: any, injected?: HerdrFeatureOptions): void {
+export function mount(app: any, injected?: HerdrFeatureOptions, guard?: ContinuityWriteGuard): void {
   const use = () => injected ?? configured ?? (() => { throw new LifecycleError('lifecycle_unavailable', 503); })();
   const handler = (fn: (ctx: any, deps: HerdrFeatureOptions) => any) => async (ctx: any = {}) => {
     ctx.set ??= {}; ctx.set.headers ??= {};
@@ -23,25 +24,29 @@ export function mount(app: any, injected?: HerdrFeatureOptions): void {
       return { ok: false, code: typeof e?.code === 'string' && /^[a-z_]+$/.test(e.code) ? e.code : 'lifecycle_unavailable', error: 'ดำเนินการ Herdr ไม่สำเร็จ กรุณาตรวจสถานะล่าสุด' };
     }
   };
+  const mutation = (fn: (ctx: any, deps: HerdrFeatureOptions) => any) => async (ctx: any) => {
+    try { await guard?.assertChannel(null); } catch { return continuityWriteFailure(ctx.set); }
+    return handler(fn)(ctx);
+  };
   app.get('/herdr/status', handler((_ctx, { lifecycle }) => ({ ok: true, operations: lifecycle.list(), readiness: lifecycle.readiness })));
-  app.post('/herdr/create', handler(async ({ body }, { lifecycle }) => ({ ok: true, operation: await lifecycle.create(body) })));
+  app.post('/herdr/create', mutation(async ({ body }, { lifecycle }) => ({ ok: true, operation: await lifecycle.create(body) })));
   app.get('/herdr/operations/:id', handler(({ params }, { lifecycle }) => ({ ok: true, operation: lifecycle.status(params.id) })));
   app.get('/herdr/operations/:id/rules', handler(({ params, set }, { lifecycle }) => { set.headers['content-type'] = 'text/markdown; charset=utf-8'; return lifecycle.rulesMarkdown(params.id); }));
-  app.post('/herdr/operations/:id/continue', handler(async ({ params }, { lifecycle }) => ({ ok: true, operation: await lifecycle.continueOperation(params.id) })));
-  app.post('/herdr/operations/:id/autostart', handler(({ params, body }, { lifecycle }) => {
+  app.post('/herdr/operations/:id/continue', mutation(async ({ params }, { lifecycle }) => ({ ok: true, operation: await lifecycle.continueOperation(params.id) })));
+  app.post('/herdr/operations/:id/autostart', mutation(({ params, body }, { lifecycle }) => {
     if (typeof body?.on !== 'boolean' || (body.memberId !== undefined && !validText(body.memberId))) throw new LifecycleError('invalid_autostart', 400);
     return { ok: true, operation: lifecycle.setAutostart(params.id, body.on, body.memberId) };
   }));
-  app.post('/herdr/close/preview', handler(async ({ body }, { lifecycle }) => {
+  app.post('/herdr/close/preview', mutation(async ({ body }, { lifecycle }) => {
     if (!validText(body?.workspaceId) || (body.paneId !== undefined && !validText(body.paneId))) throw new LifecycleError('invalid_close_target', 400);
     return { ok: true, preview: await lifecycle.closePreview({ workspaceId: body.workspaceId, ...(body.paneId ? { paneId: body.paneId } : {}) }) };
   }));
   app.get('/herdr/close/:id', handler(async ({ params }, { lifecycle }) => ({ ok: true, close: await lifecycle.closeStatus(params.id) })));
-  app.post('/herdr/close/confirm', handler(async ({ body }, { lifecycle }) => {
+  app.post('/herdr/close/confirm', mutation(async ({ body }, { lifecycle }) => {
     if (!validText(body?.previewId)) throw new LifecycleError('invalid_confirmation', 400);
     return { ok: true, close: await lifecycle.closeConfirm(body.previewId) };
   }));
-  app.post('/herdr/stop', handler(async ({ body }, deps) => {
+  app.post('/herdr/stop', mutation(async ({ body }, deps) => {
     if (!deps.resolve || !validText(body?.ws) || !validText(body?.room) || !validText(body?.generation) || !validText(body?.id)) throw new LifecycleError('invalid_stop', 400);
     const target = await deps.resolve(body.ws, body.room, body.generation);
     return { ok: true, delivery: await deps.lifecycle.stop(target, body.id, target.instanceId ?? '') };

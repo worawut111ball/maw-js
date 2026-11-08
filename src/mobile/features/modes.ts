@@ -1,3 +1,4 @@
+import { continuityWriteFailure, createContinuityWriteAttempt, type ContinuityWriteGuard } from '../continuity/write-guard';
 // Feature pack "modes" (P2) — permission mode chip, model / effort switch, compact, rewind.
 // Routes (under /mobile, behind auth):
 //   GET  /rooms/:ws/:room/mode?sid=&agent=   → { mode, model, modelId, effort, fast }
@@ -87,6 +88,7 @@ export function readModelInfo(sid: string | undefined | null, dir = join(homedir
 }
 
 export interface ModesDeps {
+  writeGuard?: ContinuityWriteGuard;
   readScreen: (ch: ReplyChannel, lines: number) => Promise<string>;
   pressKey: (ch: ReplyChannel, label: string) => Promise<void>;
   typeInto: (ch: ReplyChannel, text: string) => Promise<void>;
@@ -98,7 +100,8 @@ const defaults: ModesDeps = { readScreen, pressKey, typeInto, roomChannel, wait:
 
 const isCodex = (agent: unknown) => typeof agent === "string" && agent !== "" && agent !== "claude";
 
-export function mount(app: any, deps: ModesDeps = defaults): void {
+export function mount(app: any, overrides: Partial<ModesDeps> = {}): void {
+  const deps: ModesDeps = { ...defaults, ...overrides };
   const chan = (params: any, set: any) => {
     const ch = deps.roomChannel(params.ws, params.room);
     if (!ch) { set.status = 404; return null; }
@@ -118,6 +121,11 @@ export function mount(app: any, deps: ModesDeps = defaults): void {
   });
 
   app.post("/rooms/:ws/:room/mode/cycle", async ({ params, query, body, set }: any) => {
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>deps.pressKey(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>deps.typeInto(ch,text));
+    try {
+      await attempt.check();
     const ch = chan(params, set);
     if (!ch) return { ok: false, error: "ไม่พบห้องนี้" };
     const agent = body?.agent ?? query?.agent;
@@ -126,30 +134,43 @@ export function mount(app: any, deps: ModesDeps = defaults): void {
       set.status = 400;
       return { ok: false, error: isCodex(agent) ? "สลับโหมดได้เฉพาะห้อง Claude" : "อ่านโหมดจากจอไม่ได้ — ปิดเมนู/คำถามที่ค้างอยู่ก่อน" };
     }
-    await deps.pressKey(ch, "btab");
+    await guardedPress(ch, "btab");
     await deps.wait(400);
     return { ok: true, before, mode: parseMode(await screen(ch)) };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   });
 
   app.post("/rooms/:ws/:room/model", async ({ params, body, set }: any) => {
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>deps.pressKey(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>deps.typeInto(ch,text));
+    try {
+      await attempt.check();
     const model = String(body?.model ?? "");
     if (!(MODEL_ALIASES as readonly string[]).includes(model)) { set.status = 400; return { ok: false, error: "ไม่รู้จัก model นี้" }; }
     const ch = chan(params, set);
     if (!ch) return { ok: false, error: "ไม่พบห้องนี้" };
     if (isCodex(body?.agent)) { set.status = 400; return { ok: false, error: "เปลี่ยน model ได้เฉพาะห้อง Claude" }; }
     if (await busy(ch)) { set.status = 409; return { ok: false, error: "Claude กำลังทำงานอยู่ — รอให้เสร็จก่อนค่อยเปลี่ยน model" }; }
-    await deps.typeInto(ch, `/model ${model}`);
+    await guardedType(ch, `/model ${model}`);
     return { ok: true, model };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   });
 
   app.post("/rooms/:ws/:room/effort", async ({ params, body, set }: any) => {
+    const attempt=createContinuityWriteAttempt(deps.writeGuard,params.ws,params.room);
+    const guardedPress=(ch:ReplyChannel,key:string)=>attempt.run(()=>deps.pressKey(ch,key));
+    const guardedType=(ch:ReplyChannel,text:string)=>attempt.run(()=>deps.typeInto(ch,text));
+    try {
+      await attempt.check();
     const level = String(body?.level ?? "");
     if (!(EFFORT_LEVELS as readonly string[]).includes(level)) { set.status = 400; return { ok: false, error: "ไม่รู้จักระดับ effort นี้" }; }
     const ch = chan(params, set);
     if (!ch) return { ok: false, error: "ไม่พบห้องนี้" };
     if (isCodex(body?.agent)) { set.status = 400; return { ok: false, error: "ปรับ effort ได้เฉพาะห้อง Claude" }; }
     if (await busy(ch)) { set.status = 409; return { ok: false, error: "Claude กำลังทำงานอยู่ — รอให้เสร็จก่อนค่อยปรับ effort" }; }
-    await deps.typeInto(ch, `/effort ${level}`);
+    await guardedType(ch, `/effort ${level}`);
     return { ok: true, level };
+    } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   });
 }

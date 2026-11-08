@@ -160,3 +160,84 @@ UI `ui/mobile/ext/continuity.js` แยก view identity ปิด modal เก�
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex ทีม1/ทีม2 review | strict Read provenance, UI stale-state protection และ final validation แยก historical/workflow/production |
+
+## นำเข้าประวัติแบบ atomic — 8 พ.ย. 69
+
+`ContinuityStore.importHistory(room, records)` เป็น host-only storage boundary รวม registration และ append ทุก batch ใน transaction เดียว มีเพดาน100000events/64MiB. ตรวจ exact current room/revision/binding และปฏิเสธ operation ที่ยัง active; events ต้องมาจาก active agent/native UUID. Conflict ช่วงท้าย rollback ทั้งหมด รวม room ใหม่. ไม่อ่าน native file หรือพิสูจน์ runtime เอง ผู้เรียกต้องยืนยัน binding ก่อน/หลังอ่าน; ไม่ใช่ API ให้ client ระบุ path.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | Codex ทีม1 | เพิ่ม atomic history import และ regression tests rollback/dedup/stale binding |
+
+## Facts snapshot — 8 พ.ย. 69
+
+`EngineOptions.facts(room, snapshot)` ได้ roomRevision/sourceBinding/throughSeq/archivePath/archiveHash/events จาก checkpoint เดียวกับ context. Arguments เป็น detached clone ไม่ให้ callback เปลี่ยน authoritative room/events. นี่เป็น integration seam ไม่ใช่ structured facts resolver: caller ยังต้องตรวจ explicit selection/provenance และไม่ใช้ global latest หรือเดา goal; ยังไม่รับรอง semantic truth/approval จาก hash.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | Codex ทีม1 + ทีม2 contract | ผูก callback กับ archive snapshot และทดสอบ mutation isolation |
+
+`history-import.ts` เพิ่ม host-only import ที่ตรวจ exact room/native UUID/cwd/generation/model/route ก่อนและหลังอ่าน full bounded native records แล้วเรียก atomic Store. ไม่มี public path input ไม่มี latest lookup/launch/keys. ผลเป็นhistoricalเท่านั้น; NativeRecords shapeไม่รับรองfull-file attestationด้วยตัวเอง ต้องใช้trusted full readerจริง ไม่อ้างpre/postcheckเป็นatomicruntimeproof. `AUTO-history-import.md` ในvaultระบุข้อจำกัดและfreeze.
+
+Engine และ context builder ปฏิเสธ cursor ที่เกินประวัติจริง (`history_cursor_unavailable`); emptyhistoryไม่ใช้targetcursorเติมthroughSeq. Engineหยุดก่อนarchive/facts/launch. ทีม2รันpurebuilderและreviewnegativecasesอิสระแล้ว.
+
+ผลรอบต่อ: continuity453pass/0fail/2554assertions/13files; targetedtypes4modules+testsและdiffcheckexit0. เป็นtemporarySQLite/parserfixtures/adapterfixtures ไม่มีnewlive/deploy.
+
+## Explicit facts และ durable selection — 8 พ.ย. 69
+
+`facts-resolver.ts` รับ snapshot กับ explicit selections จาก trusted host เท่านั้น ตรวจ archiveHash/cursor/roomRevision/sourceBindingHash/eventHash และเก็บ provenance ราย field. ไม่เลือก goal จากข้อความอิสระหรือ metadata approval; ไม่มี goal คืน missing และหลาย goal ขัดกันคืน conflict. v1 รับ compact JSON.stringify envelope ทั้ง event เท่านั้น ไม่รองรับ pretty/prose/projectMemory/supersedes และไม่ normalize ประวัติเก่าเอง. hash/provenanceไม่ใช่หลักฐานการอนุญาตหรือsemantic truth
+
+`facts-selection.ts` เป็น host-only immutable private store: approve ตรวจresolverก่อนเขียนไฟล์0600ในdirectory0700, fsynccontentก่อนatomiclinkและfsyncdirectory. ExactIDretryคืนข้อมูลเดิมหรือrejectconflict ไม่มีlatestlookup/overwrite. read ตรวจprivate regular fileด้วยO_NOFOLLOW|O_NONBLOCK, ขอบเขตsize/snapshot/provenanceทั้งหมด และทำdirectorydurabilitybarrierก่อนคืนผล แม้publisherหยุดหลังlink. StoredactorIdเป็นlabelจากtrustedcaller ไม่ใช่authenticationที่moduleตรวจเอง
+
+`createFactsProvider` ต่อ engine ด้วย explicit persisted selection ID และ detached checkpoint. ไม่มี selection blockก่อนlaunch; ไม่มีAPIauth/selectionUIproducerในรอบนี้จึงยังไม่ปิดproductionfactsgate. การเลือกข้อความquoted/tool/assistantเป็นreferenceclaim ไม่ยกระดับเป็นคำสั่งหรือสิทธิ์. Resolverเป็นpure; selectionstoreมีfilesystemeffectsเฉพาะhostcallและreadมีdurabilityflush ไม่เรียกว่าpure
+
+## Held acceptance v2 และหน้าดูข้อมูล — 8 พ.ย. 69
+
+`holdForOperation` transactionเดียวตรวจexpectedOperationId/expectedRevision/sourcegenerationและidentityตรงกับoperation.from เก็บserverderivedoriginและintendedBinding. ExactIDretryหลังcomplete/cancelคืนstoredreceiptเดิมได้; freshIDหลังoperationจบreject. Legacyholdภายในยังคงเดิมและไม่rewriteข้อมูลเก่า; productionrouteใช้v2เท่านั้น. ไม่มีhelddelivery/discard/retarget/consume และไม่มีauto-send
+
+UIอ่าน `/events?after=seq&limit=100` เมื่อผู้ใช้กด แสดงเป็น “ประวัติที่บันทึกไว้ · อาจไม่รวมข้อความล่าสุด” ไม่แต่งtotal/epoch/เวลาหรือmodel และไม่แทนnative livechat. รับทีละpageครบก่อนappend ปฏิเสธsequenceผิด แสดงtextContent ไม่มีrawmetadata/HTMLexecution. Room/revisionเปลี่ยนหรือcapabilityถอนต้องทิ้งlate response. Heldlistแสดงเป็นข้อความพักที่บันทึกไว้ ไม่ใช่sent. ยังอยู่ใต้capabilitygateเดิม ไม่มีเปิด read surface ใน production; composer hook เพิ่มในรอบถัดมาด้านล่างและยังต้องมี host integration
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | ทีม1 + ทีม2 | รวมpurefactsresolver/durableexplicitselection, heldv2transaction/routes, storedhistory/heldreadUI; productionยังปิด |
+
+Durabilityเพิ่มเติม: provision/readsyncAncestors bottom-upถึงfilesystemroot เพื่อไม่สมมติว่าparentที่mkdirใหม่หรือconcurrentcreatorสร้างไว้durableแล้ว. Readมีdurabilityflush; fault-injectiontestsตรวจparentflushfailureไม่คืนfacts. ไม่ใช่powerlosstest และไม่มีreboot.
+
+Rootfinal:main2138pass12skip0fail/127files, browser48pass, targetedtypesและtemporaryCLIbuildexit0. NativecomposercontractยังBLOCK รายงานvault `native-feasibility-and-facts-20261108/RESULT.md`. ยังไม่deployการแก้รอบนี้
+
+## Composer และ managed send guard — 8 พ.ย. 69
+
+Core mobile รอ `beforeSend` ก่อน permission diversion/upload/provider. Managed text-only intent ผูก operation/revision/source binding และตรวจ localStorage readback ก่อน held POST; receipt ไม่ใช่ delivery. Lost ACK/reload ไม่ส่งอัตโนมัติหรือ retarget. `roomStateAvailable` เป็น host-derived flag แยกจาก all-backend readiness. `/send` ยอมผ่านเฉพาะ resolver คืน exact null; error/non-null ปฏิเสธก่อน transport. ข้อความส่วนนี้เป็นขอบเขต ณ composer freeze เดิม; รอบ finish-to-done เพิ่ม Mobile permissions/raw/feature/lifecycle guards แล้วตามหัวข้อถัดไป แต่ไม่ครอบ native keyboard/CLI และไม่แทน atomic input contract. Default production ยังปิด.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | Codex ทีม1 | รวม composer held กับ managed send guard; แยก stored receipt ออกจาก sent และคง all-writer/native gate |
+
+### Composer final validation — 8 พ.ย. 69
+
+Root รัน main2156pass/12skip/0fail/128files และ browser132pass (Chromium iphone-xr/desktop, mocked API + actual core). P1 deferred draft-loss แก้และ independent source review ปิดแล้ว. Targeted6modules/types exit0; typecheckรวมAPIยังมี6diagnosticsตามรายงานp2 ไม่อ้างทั้งrepoผ่าน. หลักฐาน vault `plans/cross-provider-handoff/composer-final-20261108/RESULT.md`. Sourceรอบนี้ยังไม่deploy; direct permission/raw/all-writer/native gates คง BLOCK.
+
+
+### Mobile writer policy รอบ finish-to-done — 8 พ.ย. 69
+
+`write-guard.ts` สร้าง policy ต่อ host instance: ไม่มี options ใช้พฤติกรรมเดิม; configured room ต้องได้ exact null จึงถือว่า unmanaged. Resolver error/non-null ปิดการเขียน; raw channel ที่ไม่มี canonical room attestation ปิดไว้แม้ resolver คืน null. Guard ถูกส่งเข้า API/permissions/modes และ feature mounts ไม่ใช้ mutable global policy.
+
+Docs/ports/PRS/retro ตรวจ guard ก่อน effects; scheduled PR/retro callbacks ถือ guarded dependencies ของ instance และ dispose หยุด future ticksเท่านั้น. Herdr/resume/Superset/autostart mutations ที่ยังไม่มี trusted scope ถูกปิดก่อน launch/config effects. ไม่ได้ยกระดับ low-level primitives หรือ raw WS/CLI/keyboard ให้เป็น shared writer service. การตรวจซ้ำก่อน helper ไม่ใช่ atomic enqueue กับ native composer และไม่ยกเลิก effects ภายใน helper ที่เริ่มแล้ว.
+
+ถ้า policy เปลี่ยนหลังเริ่มคำสั่งแล้ว ต้องรายงาน uncertain และหยุดลำดับที่เหลือ ไม่อ้างว่าไม่มี effects. Production continuity คง default off; ไม่มี all-backend live acceptance จาก patch นี้. ผลทดสอบสุดท้ายเก็บแยกใน vault `finish-validation-20261108/RESULT.md`.
+
+
+Configured legacy `/send` text+ID เก็บ attempt ต่อ API instance (dispatching/acknowledged/uncertain) และตรวจ state ทั้งก่อนและหลัง await. Partial ID ไม่ release และ duplicate ที่ยัง uncertain ไม่ตอบ ACK. Map จำกัด2000แล้ว reject ไม่ล้างอัตโนมัติ; ไม่ durable ข้าม restart/process/instance และไม่ครอบไม่มี ID. Default unconfigured legacy ledgerยังคงเดิม. Mainล่าสุด2222pass/browser168passเป็นfixtures; targetedtypecheckยัง6diagnosticsและproductiongateไม่เปลี่ยน.
+
+
+## การรวม protocol และ facts UI — 8 พ.ย.69
+
+`Adapter.launchWithContext` รองรับ nativeที่ส่งidentityหลังfirstuser โดยenginepersistdelivering-contextก่อนcall แล้วตรวจexactbinding/receipt/inspectionก่อนcomplete. ไม่มี fallbackส่งcontextซ้ำหลังuncertain. `facts-ui.ts` แสดงstructuredreferencecandidatesจากsnapshotจริง ให้ผู้ใช้เลือกเอง แล้วpersistผ่านFactsSelectionStore; actorมาจากtrustedhost ไม่รับclientactor. snapshotเปลี่ยนต้องpreviewใหม่; ไม่infergoalจากprose. Routefactsserviceที่ยังไม่mountคืน503ไม่ให้UIสร้างreceiptเอง.
+
+Capabilities `scope:room-backend` เป็นexplicitopt-inสำหรับรุ่นแรกหนึ่งเส้นทาง; omittedคงall-backends. ไม่ได้เปิดproductionด้วยschemaนี้. `protocol/entry.ts` มีv2mappingแยกversion/effectiveToolHome/homeEnvironmentและsessionselection consistency; presenceไม่ใช่accountproof.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย.69 | Codex root | stagedengine, factsUIservice/routes, explicitone-backendrolloutscope และv2entrymapping; integrationยังไม่live |
+
+8 พ.ย.69 root review fixes: replayfingerprintรวมfactsSelectionIdและคืนhistoricalก่อนfreshfactscheck; safe-pointบังคับboolean; stagedtargetPolicyexplicitก่อนlaunch; previewจำกัด256KiBต่อsnapshot/64itemsและ413หากcandidatesเกิน256ไม่truncate; archivefsyncfileและparentdirectoriesก่อนreturn. Testใหม่ฝั่งroutes/engine/factsUI. การfsyncไม่ใช่ผลทดสอบpowerloss.

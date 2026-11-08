@@ -89,3 +89,28 @@ POST บันทึก config เท่านั้น ไม่เปิด/�
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex ทีม 1 | บันทึก opt-in entry wiring และขอบเขต fixture tests |
+
+## Continuity held v2 — 8 พ.ย. 69
+
+POST `/mobile/rooms/:ws/:room/continuity/held` รับ `{id,text,intendedGeneration,expectedOperationId,expectedRevision}`; text1–8000chars. ใช้hostroomresolver+authเดิมแล้วเรียกatomicStore.holdForOperation ไม่ตัดสินactiveoperationจากsnapshotก่อนtransaction. Exact lost-ACK replayหลังcomplete/cancelคืนreceiptเดิมได้; fresh/stale/conflictingrequestปฏิเสธ. Responseเป็นstoredmessageมีversion2/originOperationId/originRevision/intendedBinding ไม่ใช่deliveryACK ไม่มีtargetretargetหรือautosendendpointเพิ่ม
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | Codex ทีม1 ensure/cmdmap | เปลี่ยนheldrouteเป็นatomicv2และเก็บauth/scope/no-storeเดิม |
+
+## Continuity input/lifecycle policy — 8 พ.ย. 69
+
+`mountFeatures` รับ guard ของ API instance เดียวกัน ไม่ใช้ global mutable guard. เมื่อ configure continuity: exact room lookup คืน null จึงใช้เส้นทางเดิม; managed/malformed/error ปฏิเสธด้วย409 `continuity_delivery_not_certified` ก่อน input. Raw channel และ lifecycle ที่ไม่มี canonical scope ปฏิเสธทั้งหมดในโหมดนี้ รวม mapping callback คืนnull เพราะไม่ถือว่าเป็น unmanaged proof. Default ไม่มี continuity options คง behavior เดิม. นี่เป็นการปิดทางส่งที่ยังไม่รับรอง ไม่ใช่ native atomic input implementation.
+
+ครอบ API send/reply/keys, permission key/type/answer, mode/model/effort, delivery resolve, wake/create ตาม guard ที่ host ต่อ. `docs` ตรวจ room ก่อน lookup และ channel ก่อนส่ง; `ports` ตรวจ channel ก่อน kill และทุก key; ไม่มี terminal ให้ถือว่า unknown. `prs`/`retro` ใช้ read/type dependencies ที่ห่อ guard ต่อ mount รวม background passes ไม่ย้อนกลับไปใช้ global unguarded dependencies. Loop registration แยกต่อ dependency object พร้อม dispose; startRetroLoop/startPrsLoop รับ scheduler จำลองเพื่อทดสอบ callback จริงโดยไม่เปิด timer production.
+
+`herdr` mutation routes, Superset workspace/automation/task/script mutations, resume และ legacy autostart config/boot pass ปฏิเสธ unknown scope เมื่อ configure continuity. Herdr production readiness loop ไม่เริ่มใน configuration นี้จนมี lifecycle contract; GET status และการอ่านไม่ได้แปลว่าพร้อมส่ง. `ensureGuarded` ตรวจ policy ก่อนโหลดรายการ/สร้าง terminal. ไม่มีการเปลี่ยน runtime production ในรอบแก้ source.
+
+External CLI/native keyboard และ daemon ที่เปิดนอก API instance ไม่ถูก guard นี้ครอบ จึงคง production gate ปิด. ต้องมี native/session ownership contract ก่อนใช้สลับจริง ไม่ใช้ guard callback อย่างเดียวอ้าง all-writer atomic.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 8 พ.ย. 69 | Codex root/ensure | ต่อ guard ผ่าน API/features/background/lifecycle และเพิ่ม fake-transport tests โดยคง default behavior |
+
+
+8 พ.ย.69 — continuityเพิ่มauthenticatedfacts preview/selection callbacksและverifyก่อนswitch; noactor/archivepathจากclient. ไม่มีserviceคืน503. scope room-backendเปิดได้เฉพาะtrustedcapabilityและbackendของroomพร้อม; defaultall-backendsเดิม. Sourceมีpreparedseams ยังไม่เปิดproduction.

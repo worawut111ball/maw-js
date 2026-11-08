@@ -1,16 +1,21 @@
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { ContinuityArchive } from './archive';
 import { buildContext, type ContextFacts } from './context';
-import { ContinuityError, type Adapter, type Backend, type BeginRequest, type Binding, type Operation, type Room, type RoomEvent, type Store } from './types';
+import { ContinuityError, type Adapter, type Backend, type BeginRequest, type Binding, type DeliveryReceipt, type Operation, type Room, type RoomEvent, type Store } from './types';
 
+export interface FactsSnapshot {
+  roomId: string; roomRevision: number; sourceBinding: Binding;
+  throughSeq: number; archivePath: string; archiveHash: string; events: RoomEvent[];
+}
 export interface EngineOptions {
   archiveRoot?: string;
-  facts?: (room:Room) => Promise<ContextFacts>;
+  facts?: (room:Room, snapshot:FactsSnapshot) => Promise<ContextFacts>;
   maxContextBytes?: number;
 }
 const same = (a:Binding,b:Binding) => a.agent===b.agent && a.nativeId===b.nativeId && a.generation===b.generation && a.route===b.route && a.model===b.model;
-const safe = (s:Awaited<ReturnType<Adapter['inspect']>>) => s.idle && !s.pendingTools && !s.pendingPermission && !s.uncertainDelivery;
+const safe = (s:Awaited<ReturnType<Adapter['inspect']>>) => s.idle===true && s.pendingTools===false && s.pendingPermission===false && s.uncertainDelivery===false;
 /** Durable state before each irreversible boundary. Restart never blindly repeats launch/delivery. */
 export class ContinuityEngine {
   private advancing = new Map<string,Promise<Operation>>();
@@ -90,10 +95,21 @@ export class ContinuityEngine {
       if(records.some(e=>e.agent!==op.from.agent || e.nativeId!==op.from.nativeId))return this.update(op,'blocked','history_identity_changed');
       this.importCheckpoint(room.id,op.from,records);
       const events=this.allEvents(room.id);
+      const availableThrough=events.at(-1)?.seq??0;
+      if(op.from.cursor>availableThrough || (room.bindings[op.target]?.cursor??0)>availableThrough)
+        return this.update(op,'blocked','history_cursor_unavailable');
       const archive=new ContinuityArchive(this.options.archiveRoot??join(homedir(),'.maw','continuity','archive'));
       const archivePath=archive.snapshot(room.id,events);
       if(!this.options.facts)return this.update(op,'blocked','context_facts_unavailable');
-      const facts=await this.options.facts(room);
+      // The resolver receives the exact archived checkpoint, never an implicit "latest" transcript.
+      // Detached inputs prevent a callback from changing engine routing/binding/event state.
+      const snapshot:FactsSnapshot={roomId:room.id,roomRevision:room.revision,sourceBinding:structuredClone(op.from),
+        throughSeq:events.at(-1)?.seq??0,archivePath,
+        archiveHash:createHash('sha256').update(events.map(e=>JSON.stringify(e)).join('\n')+'\n').digest('hex'),
+        events:structuredClone(events)};
+      let facts:ContextFacts;
+      try{facts=structuredClone(await this.options.facts(structuredClone(room),snapshot));}
+      catch(e){if(e instanceof ContinuityError&&e.code.startsWith('facts_'))return this.update(op,'blocked',e.code);throw e;}
       if(!facts.goal?.trim())return this.update(op,'blocked','context_goal_missing');
       const context=buildContext({room,binding:room.bindings[op.target],events,facts,handoffId:id,archivePath,maxBytes:this.options.maxContextBytes});
       // Events can arrive while preparing context. Revalidate the source before switching.
@@ -102,21 +118,40 @@ export class ContinuityEngine {
       const latest=await adapter.checkpoint(room);
       const inserted=this.importCheckpoint(room.id,op.from,latest);
       if(inserted)return this.update(op,'blocked','history_changed_during_checkpoint');
+      const intended=adapter.targetPolicy?await adapter.targetPolicy(room,op.target,room.bindings[op.target],op.model):undefined;
+      if(adapter.launchWithContext && (!intended||intended.agent!==op.target))return this.update(op,'blocked','target_policy_unverified');
       op={...op,checkpointSeq:context.throughSeq,contextHash:context.hash};
       op=this.update(op,'preparing-target');
       let binding:Binding;
-      try { binding=await adapter.launch(room,op.target,room.bindings[op.target],op.model); }
-      catch { return this.update(op,'uncertain','launch_unverified_source_preserved'); }
+      let stagedReceipt:DeliveryReceipt|undefined;
+      const delivery={id,text:context.text,hash:context.hash,throughSeq:context.throughSeq};
+      try {
+        if(adapter.launchWithContext) {
+          // Persist the first context intent before a staged protocol can write it.
+          op=this.update(op,'delivering-context');
+          const staged=await adapter.launchWithContext(room,op.target,delivery,room.bindings[op.target],op.model);
+          binding=staged.binding;stagedReceipt=staged.receipt;
+        } else binding=await adapter.launch(room,op.target,room.bindings[op.target],op.model);
+      }
+      catch { return this.update(op,'uncertain',adapter.launchWithContext?'staged_source_target_unverified':'launch_unverified_source_preserved'); }
       const existing=room.bindings[op.target];
       if(binding.agent!==op.target || !binding.nativeId || !binding.generation ||
+        (intended&&(binding.agent!==intended.agent||binding.route!==intended.route||binding.model!==intended.model)) ||
         (existing && existing.nativeId!==binding.nativeId) || (op.model && binding.model!==op.model)) {
         return this.update(op,'uncertain',existing?'resume_identity_mismatch':'target_identity_unverified');
       }
       const targetRoom:Room={...room,active:op.target,bindings:{...room.bindings,[op.target]:binding}};
-      const beforeDelivery=await adapter.inspect(targetRoom);
-      if(!same(beforeDelivery.binding,binding) || !safe(beforeDelivery))return this.update(op,'uncertain','target_not_ready_for_context');
-      op={...op,targetBinding:binding};op=this.update(op,'delivering-context');
-      const receipt=await adapter.deliver(room,binding,{id,text:context.text,hash:context.hash,throughSeq:context.throughSeq});
+      let receipt:DeliveryReceipt;
+      if(adapter.launchWithContext) {
+        // Identity is observed after first context; no synthetic pre-delivery inspect.
+        op={...op,targetBinding:binding};op=this.update(op,'delivering-context');
+        receipt=stagedReceipt!;
+      } else {
+        const beforeDelivery=await adapter.inspect(targetRoom);
+        if(!same(beforeDelivery.binding,binding) || !safe(beforeDelivery))return this.update(op,'uncertain','target_not_ready_for_context');
+        op={...op,targetBinding:binding};op=this.update(op,'delivering-context');
+        receipt=await adapter.deliver(room,binding,delivery);
+      }
       if(receipt.state!=='acknowledged' || receipt.nativeId!==binding.nativeId || receipt.hash!==context.hash || receipt.throughSeq!==context.throughSeq) {
         return this.update(op,'uncertain','context_receipt_unverified');
       }

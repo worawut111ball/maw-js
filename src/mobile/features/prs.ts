@@ -375,17 +375,22 @@ export async function autoPass(st: AutoState, d: PrsDeps = deps, quiet = false):
   return { notified, sent: null };
 }
 
-let looping = false;
-function startLoop(): void {
-  if (looping || process.env.NODE_ENV === "test") return;
-  looping = true;
-  const st: AutoState = { tried: new Map(), told: new Set() };
-  let first = true, running = false;
-  setInterval(async () => {
-    if (running) return; running = true;
-    try { await autoPass(st, deps, first); first = false; } catch { /* gh offline */ }   // first pass after a restart only remembers old verdicts
-    finally { running = false; }
-  }, AUTO_EVERY).unref?.();
+type LoopScheduler = (tick: () => Promise<void>, intervalMs: number) => () => void;
+const looping = new WeakMap<PrsDeps, () => void>();
+/** An injected scheduler runs the same callback without a real timer or global policy changes. */
+export function startPrsLoop(d: PrsDeps = deps, schedule?: LoopScheduler): () => void {
+  const existing = looping.get(d); if (existing) return existing;
+  if (!schedule && (process.env.NODE_ENV === "test" || process.env.MAW_TEST_MODE)) return () => {};
+  let busy = false, stopped = false;
+  const st: AutoState = { tried: new Map(), told: new Set() }; let first = true;
+  const tick = async () => {
+    if (busy || stopped) return; busy = true;
+    try { await autoPass(st, d, first); first = false; } catch { /* retry observation on a later pass; guarded dependencies remain in force */ } finally { busy = false; }
+  };
+  const scheduler = schedule ?? ((run, ms) => { const timer = setInterval(() => { void run(); }, ms); timer.unref?.(); return () => clearInterval(timer); });
+  const cancel = scheduler(tick, AUTO_EVERY);
+  const stop = () => { if (stopped) return; stopped = true; cancel(); if (looping.get(d) === stop) looping.delete(d); };
+  looping.set(d, stop); return stop;
 }
 
 // ── merge ────────────────────────────────────────────────────────
@@ -414,9 +419,20 @@ export async function mergePr(repo: string, n: number, method: string, deleteBra
 
 // ── routes ───────────────────────────────────────────────────────
 
-export function mount(app: any, d: PrsDeps = deps): void {
-  if (d === deps) {
-    startLoop();   // the real server only — tests pass their own deps
+/** Keep the policy in this mount's dependencies, including background passes. */
+export function guardedPrsDeps(d: PrsDeps, guard?: { assertChannel(ch: ReplyChannel): Promise<void> }): PrsDeps {
+  if (!guard) return d;
+  return { ...d,
+    read: async (ch, lines) => { await guard.assertChannel(ch); return d.read(ch, lines); },
+    type: async (ch, text) => { await guard.assertChannel(ch); return d.type(ch, text); },
+  };
+}
+
+export function mount(app: any, d: PrsDeps = deps, guard?: { assertChannel(ch: ReplyChannel): Promise<void> }): void {
+  const production = d === deps;
+  d = guardedPrsDeps(d, guard);
+  if (production) {
+    startPrsLoop(d);   // the real server only — tests pass their own deps
     // fill the cache shortly after start so the first PR page is instant (cold = ~9 s of gh calls), then every 80 s
     const warm = () => listPrs(false, d).catch(() => {});
     if (process.env.NODE_ENV !== "test") { setTimeout(warm, 15_000); setInterval(warm, 80_000); }

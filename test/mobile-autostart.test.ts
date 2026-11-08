@@ -27,18 +27,18 @@ describe("autostart", () => {
     expect(calls.find(a => a[0] === "new-session")).toEqual(["new-session", "-d", "-s", "down", "-c", "/Users/x/p", commandFor({ session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true })]);
   });
 
-  test("routes add, update and remove; live tmux sessions offered", () => {
+  test("routes add, update and remove; live tmux sessions offered", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "as-")), "autostart.json");
     const routes: Record<string, Function> = {};
     mount({ get: (p: string, h: Function) => { routes["GET " + p] = h; }, post: (p: string, h: Function) => { routes["POST " + p] = h; } },
       { file, allow, tmux: () => "", panes: () => [{ id: "%1", session: "team2", window: "w", cwd: "/Users/x", agent: "claude" }] as any });
-    const post = (body: any) => { const set: any = {}; const r = routes["POST /autostart"]({ body, set }); return { status: set.status ?? 200, ...r }; };
+    const post = async (body: any) => { const set: any = {}; const r = await routes["POST /autostart"]({ body, set }); return { status: set.status ?? 200, ...r }; };
     expect(routes["GET /autostart"]().live).toEqual([{ session: "team2", dir: "/Users/x", agent: "claude" }]);
-    expect(post({ session: "team2", dir: "/Users/x", agent: "claude", on: true }).status).toBe(200);
+    expect((await post({ session: "team2", dir: "/Users/x", agent: "claude", on: true })).status).toBe(200);
     expect(load(file, allow)).toHaveLength(1);
     expect(routes["GET /autostart"]().rooms[0].running).toBe(true);
-    expect(post({ session: "team2", skipPermissions: true, on: true }).rooms[0].skipPermissions).toBe(true);   // update keeps the folder
-    expect(post({ session: "bad name!", dir: "/Users/x" }).status).toBe(400);
-    expect(post({ session: "team2", on: false }).rooms).toHaveLength(0);
+    expect((await post({ session: "team2", skipPermissions: true, on: true })).rooms[0].skipPermissions).toBe(true);   // update keeps the folder
+    expect((await post({ session: "bad name!", dir: "/Users/x" })).status).toBe(400);
+    expect((await post({ session: "team2", on: false })).rooms).toHaveLength(0);
   });
 });

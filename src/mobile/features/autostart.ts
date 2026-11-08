@@ -1,3 +1,4 @@
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
 // Feature pack "autostart" — tmux rooms that come back by themselves after the Mac restarts.
 // GET  /autostart                         → { ok, rooms: [{session, dir, agent, skipPermissions, running}], live: [tmux sessions not in the list] }
 // POST /autostart {session, dir?, agent?, skipPermissions?, on}  → add / update / remove one room
@@ -55,10 +56,16 @@ export function ensure(list: AutoRoom[], tmux: Tmux = realTmux, buildCommand: ty
   return started;
 }
 
-export function mount(app: any, opts: { file?: string; tmux?: Tmux; commandFor?: typeof commandFor; allow?: typeof allowedDir; panes?: typeof listTmuxPanes } = {}): void {
+/** Resolve policy before loading configuration or starting any terminal. */
+export async function ensureGuarded(loadRooms: () => AutoRoom[], tmux: Tmux, buildCommand: typeof commandFor = commandFor, guard?: ContinuityWriteGuard): Promise<string[]> {
+  await guard?.assertChannel(null);
+  return ensure(loadRooms(), tmux, buildCommand);
+}
+
+export function mount(app: any, opts: { file?: string; tmux?: Tmux; commandFor?: typeof commandFor; allow?: typeof allowedDir; panes?: typeof listTmuxPanes } = {}, guard?: ContinuityWriteGuard): void {
   const file = opts.file ?? FILE, tmux = opts.tmux ?? realTmux, allow = opts.allow ?? allowedDir, panes = opts.panes ?? listTmuxPanes;
   // real server only: after a reboot maw starts at login → bring the rooms back (twice, in case tmux was slow)
-  if (!opts.file && process.env.NODE_ENV !== "test") { setTimeout(() => ensure(load(file, allow), tmux, opts.commandFor), 5_000); setTimeout(() => ensure(load(file, allow), tmux, opts.commandFor), 60_000); }
+  if (!opts.file && process.env.NODE_ENV !== "test") { setTimeout(() => { void ensureGuarded(() => load(file, allow), tmux, opts.commandFor, guard).catch(() => {}); }, 5_000); setTimeout(() => { void ensureGuarded(() => load(file, allow), tmux, opts.commandFor, guard).catch(() => {}); }, 60_000); }
 
   app.get("/autostart", () => {
     const list = load(file, allow), live = panes();
@@ -71,7 +78,8 @@ export function mount(app: any, opts: { file?: string; tmux?: Tmux; commandFor?:
     return { ok: true, rooms: list.map(r => ({ ...r, running: running.has(r.session) })), live: [...extra.values()] };
   });
 
-  app.post("/autostart", ({ body, set }: any) => {
+  app.post("/autostart", async ({ body, set }: any) => {
+    try { await guard?.assertChannel(null); } catch { return continuityWriteFailure(set); }
     const list = load(file, allow);
     const session = String(body?.session ?? "");
     if (!SESSION_RE.test(session)) { set.status = 400; return { ok: false, error: "ชื่อห้องไม่ถูกต้อง" }; }

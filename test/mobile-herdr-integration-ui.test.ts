@@ -7,6 +7,8 @@ const source = html.slice(html.indexOf("const isHerdr ="), html.indexOf("/** Lin
 function harness(online: boolean, request: (path: string, options: any) => Promise<any>) {
   let snapshots: any[] = [];
   const deps: Record<string, any> = {
+    // Legacy queue fixture: no continuity extension is installed in this harness.
+    mawExt: { beforeSend: [] },
     crypto: { randomUUID: () => "test-request" }, state: { projects: [], filesRoom: "other", files: [] },
     net: { online, error: () => Object.assign(new Error("offline"), { offline: true }) },
     api: request, paintPending() {}, paintNet() {}, playSound() {}, clearDraft() {}, loadScreen() {},

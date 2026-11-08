@@ -1,3 +1,4 @@
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
 // Feature pack "superset" (P6) — Superset power features for the phone (PLAN-maw-mobile.md §9).
 // New workspace + agent · automations · tasks · scripts · archive workspace · "why is it stuck" (agents explain).
 // Every CLI call goes through `runner` (argv array, never a shell string) so tests can inject a mock.
@@ -199,7 +200,11 @@ const bodyOf = (ctx: any) => (ctx.body && typeof ctx.body === "object" ? ctx.bod
 
 async function scriptsList(): Promise<any[]> { return arr(await call(["scripts", "list", "--json"]), "scripts"); }
 
-export function mount(app: any): void {
+export function mount(app: any, guard?: ContinuityWriteGuard): void {
+  const mutation = (fn: (ctx: any) => Promise<any>) => async (ctx: any) => {
+    try { await guard?.assertChannel(null); } catch { return continuityWriteFailure(ctx.set); }
+    return handle(fn)(ctx);
+  };
   // Everything the tab needs about the open workspace: its Superset project, all projects, agent presets.
   app.get("/superset/workspaces/:ws/meta", handle(async ({ params }) => {
     const ws = vUuid(params.ws, "workspace");
@@ -216,7 +221,7 @@ export function mount(app: any): void {
   }));
 
   // A. new workspace + agent
-  app.post("/superset/workspaces", handle(async (ctx) => {
+  app.post("/superset/workspaces", mutation(async (ctx) => {
     const b = bodyOf(ctx);
     const name = vName(b.name);
     const args = argvCreateWorkspace({
@@ -229,7 +234,7 @@ export function mount(app: any): void {
   }));
 
   // E. archive the workspace (worktree folder + uncommitted changes go, branch stays)
-  app.post("/superset/workspaces/:ws/archive", handle(async ({ params }) => {
+  app.post("/superset/workspaces/:ws/archive", mutation(async ({ params }) => {
     const ws = vUuid(params.ws, "workspace");
     const w = await call(["workspaces", "get", ws, "--local", "--json"]);
     need(w?.type !== "local", "นี่คือ workspace หลักของโปรเจค (checkout เดิม) — ไม่เก็บจากมือถือ");
@@ -239,7 +244,7 @@ export function mount(app: any): void {
 
   // B. automations
   app.get("/superset/automations", handle(async () => ({ automations: arr(await call(["automations", "list", "--json"]), "automations").map(normalizeAutomation) })));
-  app.post("/superset/automations", handle(async (ctx) => {
+  app.post("/superset/automations", mutation(async (ctx) => {
     const b = bodyOf(ctx);
     need(["daily", "weekdays", "weekly"].includes(b.preset), "เลือกรอบเวลา");
     const args = argvCreateAutomation({
@@ -250,7 +255,7 @@ export function mount(app: any): void {
     const d = await call(args, 60_000);
     return { automation: d && typeof d === "object" ? normalizeAutomation(d) : null };
   }));
-  app.post("/superset/automations/:id/:action", handle(async ({ params }) => {
+  app.post("/superset/automations/:id/:action", mutation(async ({ params }) => {
     const id = vUuid(params.id, "automation");
     need(["pause", "resume", "delete"].includes(params.action), "คำสั่งไม่ถูกต้อง");
     await call(argvAutomationAction(params.action as "pause" | "resume" | "delete", id));
@@ -259,7 +264,7 @@ export function mount(app: any): void {
 
   // C. tasks (+ start an agent on one = a new workspace linked with --task)
   app.get("/superset/tasks", handle(async () => ({ tasks: arr(await call(["tasks", "list", "--limit", "30", "--json"]), "tasks").map(normalizeTask) })));
-  app.post("/superset/tasks/:id/start", handle(async (ctx) => {
+  app.post("/superset/tasks/:id/start", mutation(async (ctx) => {
     const b = bodyOf(ctx);
     const task = str(ctx.params.id); need(RE_TASK.test(task) && !task.startsWith("-"), "task ไม่ถูกต้อง");
     const name = vName(b.name);
@@ -277,7 +282,7 @@ export function mount(app: any): void {
     const list = (await scriptsList()).filter((s: any) => !pid || !Array.isArray(s.projectIds) || s.projectIds.includes(pid));
     return { scripts: list.map((s: any) => ({ id: String(s.id), name: String(s.name ?? s.id), description: s.description ?? "", command: scriptCommand(s) })).filter((s: any) => s.command) };
   }));
-  app.post("/superset/workspaces/:ws/scripts/:id/run", handle(async ({ params }) => {
+  app.post("/superset/workspaces/:ws/scripts/:id/run", mutation(async ({ params }) => {
     const ws = vUuid(params.ws, "workspace"), id = vUuid(params.id, "script");
     const s = (await scriptsList()).find((x: any) => x.id === id);
     need(!!s, "ไม่พบ script นี้แล้ว");

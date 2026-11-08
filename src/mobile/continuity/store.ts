@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, chmodSync, existsSync, openSync, closeSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
-import { ContinuityError, type AgentKind, type Binding, type Room, type RoomEvent, type Operation, type BeginRequest, type HeldMessage, type Store, type OperationState } from './types';
+import { ContinuityError, type AgentKind, type Binding, type Room, type RoomEvent, type Operation, type BeginRequest, type HeldMessage, type HeldForOperationRequest, type HeldForOperationMessage, type Store, type OperationState } from './types';
 export { ContinuityError, ContinuityError as StoreError } from './types';
 const agents: AgentKind[] = ['codex','claude'];
 const states: OperationState[] = ['waiting-safe-point','checkpointed','preparing-target','delivering-context','ready-awaiting-user','blocked','failed','uncertain'];
@@ -113,6 +113,29 @@ export class ContinuityStore implements Store {
       return clone(input);
     });
   }
+  /** Host-only snapshot import. Registration and every batch commit together; never retarget a room. */
+  importHistory(input:Room,records:Omit<RoomEvent,'seq'>[]):{room:Room;inserted:RoomEvent[]} {
+    room(input);
+    if(input.operationId!==undefined)fail('cannot_import_active_operation',400);
+    if(!Array.isArray(records)||records.length>100_000)fail('invalid_history_import',400);
+    const source=input.bindings[input.active]!;
+    let bytes=0;
+    for(const e of records){
+      event(e);
+      if(Object.hasOwn(e,'seq'))fail('event_sequence_is_server_owned',400);
+      if(e.agent!==source.agent||e.nativeId!==source.nativeId)fail('history_identity_changed');
+      bytes+=Buffer.byteLength(canonical(e));
+      if(bytes>64*1024*1024)fail('history_import_too_large',400);
+    }
+    return this.transaction(()=>{
+      const current=this.readRoom(input.id);
+      if(current?.operationId)fail('operation_in_progress');
+      if(current&&canonical(current)!==canonical(input))fail('history_room_changed');
+      const registered=current??this.register(input),inserted:RoomEvent[]=[];
+      for(let offset=0;offset<records.length;offset+=2000)inserted.push(...this.append(input.id,records.slice(offset,offset+2000)));
+      return {room:clone(registered),inserted};
+    });
+  }
   events(roomId:string,after=0,limit=500):RoomEvent[]{
     if(!uint(after)||!uint(limit)||limit<1||limit>10_000)fail('invalid_event_page',400);
     return this.access(()=>{this.requiredRoom(roomId);return (this.database().query('SELECT body FROM continuity_events WHERE room_id=? AND seq>? ORDER BY seq LIMIT ?').all(roomId,after,limit) as {body:string}[]).map(row=>{const e=JSON.parse(row.body);event(e);if(!uint(e.seq)||e.seq<1)fail('store_corrupt',503);return e;});});
@@ -133,7 +156,8 @@ export class ContinuityStore implements Store {
   }
   begin(roomId:string,request:BeginRequest):Operation {
     if(!request||!text(request.id,256)||!agents.includes(request.target)||!uint(request.expectedRevision)||(request.model!==undefined&&!text(request.model,256)))fail('invalid_switch_request',400);
-    const fingerprint=digest({roomId,id:request.id,target:request.target,model:request.model,expectedRevision:request.expectedRevision});
+    if(request.factsSelectionId!==undefined&&request.factsSelectionId!==request.id)fail('facts_selection_scope_mismatch',400);
+    const fingerprint=digest({roomId,id:request.id,target:request.target,model:request.model,expectedRevision:request.expectedRevision,...(request.factsSelectionId!==undefined?{factsSelectionId:request.factsSelectionId}:{})});
     return this.transaction(()=>{
       const row=this.database().query('SELECT room_id,request_hash FROM continuity_operations WHERE id=?').get(request.id) as any;
       if(row){if(row.room_id!==roomId||row.request_hash!==fingerprint)fail('request_id_conflict');return clone(this.readOperation(request.id)!);}
@@ -226,6 +250,36 @@ export class ContinuityStore implements Store {
       this.requiredRoom(roomId);const existing=this.database().query('SELECT room_id,fingerprint,body FROM continuity_held WHERE id=?').get(message.id) as any;
       if(existing){if(existing.room_id!==roomId||existing.fingerprint!==fingerprint)fail('held_message_conflict');return JSON.parse(existing.body);}
       this.database().query('INSERT INTO continuity_held(id,room_id,fingerprint,body) VALUES(?,?,?,?)').run(message.id,roomId,fingerprint,canonical(message));return clone(message);
+    });
+  }
+  /** Atomic v2 held acceptance. Exact retries replay the immutable stored receipt before live-room checks. */
+  holdForOperation(roomId:string,input:HeldForOperationRequest):HeldForOperationMessage {
+    if(!text(roomId,256)||!object(input)||Object.keys(input).some(k=>!['id','text','intendedGeneration','expectedOperationId','expectedRevision'].includes(k))
+      ||!text(input.id,256)||typeof input.text!=='string'||input.text.length<1||input.text.length>8000||input.text.includes('\0')
+      ||!text(input.intendedGeneration,512)||!text(input.expectedOperationId,256)||!uint(input.expectedRevision))fail('invalid_held_request',400);
+    const request=clone(input),fingerprint=digest({kind:'held-operation-v2',roomId,request});
+    return this.transaction(()=>{
+      const existing=this.database().query('SELECT room_id,fingerprint,body FROM continuity_held WHERE id=?').get(request.id) as {room_id:string;fingerprint:string;body:string}|null;
+      if(existing){
+        if(existing.room_id!==roomId||existing.fingerprint!==fingerprint)fail('held_message_conflict');
+        let stored:HeldForOperationMessage;
+        try{stored=JSON.parse(existing.body);binding({...stored.intendedBinding,cursor:0});}
+        catch{return fail('store_corrupt',503);}
+        if(stored.version!==2||stored.id!==request.id||stored.text!==request.text||stored.intendedGeneration!==request.intendedGeneration
+          ||stored.originOperationId!==request.expectedOperationId||stored.originRevision!==request.expectedRevision||stored.intendedBinding.generation!==request.intendedGeneration)fail('store_corrupt',503);
+        return clone(stored); // No live lookup, dispatch, rebinding or lock change on a lost-ACK replay.
+      }
+      const r=this.requiredRoom(roomId);
+      const operationId=r.operationId??fail('no_switch_in_progress');
+      if(operationId!==request.expectedOperationId)fail('operation_changed');
+      if(r.revision!==request.expectedRevision)fail('stale_room_revision');
+      const op=this.readOperation(operationId)??fail('store_corrupt',503),source=r.bindings[r.active]!;
+      if(op.roomId!==roomId||op.id!==request.expectedOperationId||op.expectedRevision!==r.revision)fail('operation_changed');
+      if(source.generation!==request.intendedGeneration||canonical(targetIdentity(source))!==canonical(targetIdentity(op.from)))fail('target_changed');
+      const stored:HeldForOperationMessage={id:request.id,text:request.text,intendedGeneration:source.generation,version:2,
+        originOperationId:op.id,originRevision:r.revision,intendedBinding:clone(targetIdentity(source))};
+      this.database().query('INSERT INTO continuity_held(id,room_id,fingerprint,body) VALUES(?,?,?,?)').run(stored.id,roomId,fingerprint,canonical(stored));
+      return clone(stored);
     });
   }
   held(roomId:string):HeldMessage[]{return this.access(()=>{this.requiredRoom(roomId);return (this.database().query('SELECT body FROM continuity_held WHERE room_id=? ORDER BY ordinal').all(roomId) as {body:string}[]).map(r=>JSON.parse(r.body));});}

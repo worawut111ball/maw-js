@@ -75,3 +75,107 @@ describe('Continuity cancel and durable operation display',()=>{
   const children=['cancel','claim'].map(action=>Bun.spawn([process.execPath,'-e',script,s.path,action],{stdout:'pipe',stderr:'pipe'}));const outcomes=await Promise.all(children.map(async p=>{const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);expect(code).toBe(0);expect(err).toBe('');return JSON.parse(out);}));expect(outcomes.filter(v=>v.won)).toHaveLength(1);const state=s.operation('switch-1')!,r=s.room('logical-room-1')!;if(state.state==='checkpointed'){expect(r.revision).toBe(0);expect(r.operationId).toBe(state.id);}else{expect(state).toMatchObject({state:'failed',reason:'canceled_by_user'});expect(r.revision).toBe(1);expect(r.operationId).toBeUndefined();}
  });
 });
+
+describe('Atomic host history import',()=>{
+ test('imports registration and history together, deduplicates after reopening',()=>{
+  const s=open(),r=room();expect(s.importHistory(r,[event()]).inserted).toHaveLength(1);
+  s.close();const again=open(s.path);expect(again.importHistory(r,[event()]).inserted).toEqual([]);
+  expect(again.events(r.id)).toHaveLength(1);expect(again.room(r.id)).toEqual(r);
+ });
+ test('conflict in a later batch rolls back new room and every previous batch',()=>{
+  const s=open(),r=room(),records=Array.from({length:2001},(_,i)=>event('row-'+i));
+  records.push(event('row-0',{text:'changed'}));
+  expect(()=>s.importHistory(r,records)).toThrow('event_source_conflict');expect(s.room(r.id)).toBeNull();
+  expect(s.importHistory(r,[event()]).inserted[0].seq).toBe(1);
+ });
+ test('later batch conflict preserves existing history and room unchanged',()=>{
+  const s=open(),r=room();s.importHistory(r,[event('original')]);
+  const records=Array.from({length:2001},(_,i)=>event('new-'+i));records.push(event('original',{text:'conflict'}));
+  expect(()=>s.importHistory(r,records)).toThrow('event_source_conflict');expect(s.events(r.id)).toHaveLength(1);expect(s.room(r.id)).toEqual(r);
+ });
+ test('rejects stale revision, replacement generation and current active operation',()=>{
+  const s=open(),r=room();s.register(r);
+  expect(()=>s.importHistory({...r,revision:1},[event()])).toThrow('history_room_changed');
+  expect(()=>s.importHistory({...r,bindings:{codex:{...codex,generation:'replacement'}}},[event()])).toThrow('history_room_changed');
+  s.begin(r.id,req());expect(()=>s.importHistory(r,[event()])).toThrow('operation_in_progress');expect(s.events(r.id)).toEqual([]);
+ });
+ test('foreign native history and caller supplied sequence cannot create room',()=>{
+  const s=open(),r=room();expect(()=>s.importHistory(r,[event('wrong',{nativeId:'another'})])).toThrow('history_identity_changed');
+  expect(()=>s.importHistory(r,[{...event(),seq:8} as any])).toThrow('event_sequence_is_server_owned');expect(s.room(r.id)).toBeNull();
+ });
+ test('physical room coordinate alias cannot acquire a second logical history',()=>{
+  const s=open(),r=room();s.importHistory(r,[event()]);expect(()=>s.importHistory({...r,id:'alias'},[event()])).toThrow('room_alias_conflict');expect(s.room('alias')).toBeNull();
+ });
+});
+
+const heldRequest=(id='held-v2')=>({id,text:'ข้อความพักตัวอย่าง',intendedGeneration:codex.generation,expectedOperationId:'switch-1',expectedRevision:0});
+describe('Held acceptance v2 immutable operation receipt',()=>{
+ test('server derives origin/binding and never consumes, retargets or dispatches on completion',()=>{
+  const s=open(),r=room();r.bindings.codex={...codex,model:'example-model',route:'example-route'};s.register(r);s.append(r.id,[event()]);prepare(s);
+  const held=s.holdForOperation(r.id,heldRequest());expect(held).toEqual({id:'held-v2',text:'ข้อความพักตัวอย่าง',intendedGeneration:codex.generation,version:2,originOperationId:'switch-1',originRevision:0,intendedBinding:{agent:'codex',nativeId:codex.nativeId,generation:codex.generation,model:'example-model',route:'example-route'}});
+  expect(Object.keys(held).sort()).toEqual(['id','text','intendedGeneration','version','originOperationId','originRevision','intendedBinding'].sort());expect(held.intendedBinding).not.toHaveProperty('cursor');
+  s.complete('switch-1',{...claude,cursor:1});expect(s.held(r.id)).toEqual([held]);expect(s.room(r.id)).toMatchObject({active:'claude',revision:1});
+ });
+ for(const finish of ['complete','cancel'] as const)test(`lost hold ACK exact retry after ${finish} returns original receipt even across reopen and a newer operation`,()=>{
+  const s=open(),r=room();s.register(r);if(finish==='complete'){s.append(r.id,[event()]);prepare(s);}else s.begin(r.id,req());
+  const request=heldRequest(),stored=s.holdForOperation(r.id,request);
+  if(finish==='complete')s.complete('switch-1',{...claude,cursor:1});else s.cancel('switch-1',0);
+  s.close();const again=open(s.path),ended=again.room(r.id)!;expect(again.holdForOperation(r.id,request)).toEqual(stored);expect(again.room(r.id)).toEqual(ended);
+  expect(()=>again.holdForOperation(r.id,{...request,id:'fresh-after-end'})).toThrow('no_switch_in_progress');
+  again.begin(r.id,req('switch-new',1,finish==='complete'?'codex':'claude'));const current=again.room(r.id)!;
+  expect(again.holdForOperation(r.id,request)).toEqual(stored);expect(again.room(r.id)).toEqual(current);expect(again.held(r.id)).toEqual([stored]);
+  expect(()=>again.holdForOperation(r.id,{...request,id:'fresh-stale-origin'})).toThrow('operation_changed');
+ });
+ test('same ID with changed body, room, operation, revision or generation conflicts before current-state checks',()=>{
+  const s=open(),r=room();s.register(r);s.register(room('second'));s.begin(r.id,req());const request=heldRequest(),stored=s.holdForOperation(r.id,request);s.cancel('switch-1',0);
+  for(const patch of [{text:'เปลี่ยนข้อความ'},{intendedGeneration:'another'},{expectedOperationId:'different'},{expectedRevision:1}])expect(()=>s.holdForOperation(r.id,{...request,...patch})).toThrow('held_message_conflict');
+  expect(()=>s.holdForOperation('second',request)).toThrow('held_message_conflict');expect(s.held(r.id)).toEqual([stored]);expect(s.held('second')).toEqual([]);
+ });
+ test('fresh requests validate active operation/revision/source generation atomically',()=>{
+  const s=open(),r=room();s.register(r);expect(()=>s.holdForOperation(r.id,heldRequest())).toThrow('no_switch_in_progress');s.begin(r.id,req());
+  expect(()=>s.holdForOperation(r.id,{...heldRequest(),expectedOperationId:'wrong'})).toThrow('operation_changed');expect(()=>s.holdForOperation(r.id,{...heldRequest(),expectedRevision:99})).toThrow('stale_room_revision');expect(()=>s.holdForOperation(r.id,{...heldRequest(),intendedGeneration:'wrong'})).toThrow('target_changed');expect(s.held(r.id)).toEqual([]);
+ });
+ test('source binding replacement cannot be accepted merely by supplying its new generation',()=>{
+  for(const patch of [{nativeId:'replacement-native'},{generation:'replacement-process'},{model:'replacement-model'},{route:'replacement-route'}]){
+   const s=open(),r=room();s.register(r);s.begin(r.id,req());const current=s.room(r.id)!;current.bindings.codex={...current.bindings.codex!,...patch};
+   const db=new Database(s.path);db.query('UPDATE continuity_rooms SET body=? WHERE id=?').run(JSON.stringify(current),r.id);db.close();
+   expect(()=>s.holdForOperation(r.id,{...heldRequest(),intendedGeneration:current.bindings.codex!.generation})).toThrow('target_changed');expect(s.held(r.id)).toEqual([]);expect(s.room(r.id)).toEqual(current);
+  }
+ });
+ test('closed request schema and 8000-character bound prevent fake server origin and oversized text',()=>{
+  const s=open(),r=room();s.register(r);s.begin(r.id,req());
+  for(const patch of [{text:''},{text:'x'.repeat(8001)},{text:'invalid\0text'},{expectedRevision:-1},{originOperationId:'forged'},{intendedBinding:codex},{version:2}])expect(()=>s.holdForOperation(r.id,{...heldRequest(),...patch} as any)).toThrow('invalid_held_request');
+  const exact=s.holdForOperation(r.id,{...heldRequest(),text:'ก'.repeat(8000)});expect(exact.text.length).toBe(8000);expect(s.held(r.id)).toHaveLength(1);
+ });
+ test('receipt/request clones are immutable from caller perspective and replay ignores field insertion order',()=>{
+  const s=open(),r=room();s.register(r);s.begin(r.id,req());const request=heldRequest(),stored=s.holdForOperation(r.id,request),original=structuredClone(stored);stored.intendedBinding.nativeId='mutated';stored.originRevision=99;request.text='mutated';
+  const retry={expectedRevision:0,expectedOperationId:'switch-1',intendedGeneration:codex.generation,text:'ข้อความพักตัวอย่าง',id:'held-v2'};expect(s.holdForOperation(r.id,retry)).toEqual(original);expect(s.held(r.id)).toEqual([original]);
+ });
+ test('legacy rows retain exact stored body/fingerprint and cannot be promoted by replaying ID through v2',()=>{
+  const s=open(),r=room();s.register(r);const legacy={id:'legacy-held',text:'ข้อความเดิม',intendedGeneration:codex.generation};s.hold(r.id,legacy);
+  const db=new Database(s.path),before=db.query('SELECT body,fingerprint FROM continuity_held WHERE id=?').get(legacy.id);s.begin(r.id,req());expect(()=>s.holdForOperation(r.id,{...heldRequest(),id:legacy.id,text:legacy.text})).toThrow('held_message_conflict');
+  const added=s.holdForOperation(r.id,heldRequest());expect(()=>s.hold(r.id,{id:added.id,text:added.text,intendedGeneration:added.intendedGeneration})).toThrow('held_message_conflict');expect(db.query('SELECT body,fingerprint FROM continuity_held WHERE id=?').get(legacy.id)).toEqual(before);expect(s.held(r.id)[0]).toEqual(legacy);expect(s.held(r.id)[0]).not.toHaveProperty('version');db.close();
+ });
+ test('failed insert rolls back acceptance without changing lock/revision/history and retry succeeds once',()=>{
+  const s=open(),r=room();s.register(r);s.begin(r.id,req());const previous=s.room(r.id);const db=new Database(s.path);db.exec("CREATE TRIGGER reject_held BEFORE INSERT ON continuity_held BEGIN SELECT RAISE(ABORT,'synthetic held failure'); END;");
+  expect(()=>s.holdForOperation(r.id,heldRequest())).toThrow('store_unavailable');expect(s.held(r.id)).toEqual([]);expect(s.room(r.id)).toEqual(previous);expect(s.operation('switch-1')?.state).toBe('waiting-safe-point');
+  db.exec('DROP TRIGGER reject_held');const stored=s.holdForOperation(r.id,heldRequest());expect(s.holdForOperation(r.id,heldRequest())).toEqual(stored);expect(s.held(r.id)).toEqual([stored]);expect(db.query('SELECT ordinal FROM continuity_held').get()).toEqual({ordinal:1});db.close();
+ });
+});
+async function heldRace(s:ContinuityStore,actions:string[]):Promise<any[]>{
+ const source=join(import.meta.dir,'../src/mobile/continuity/store.ts');
+ const script=`import {ContinuityStore} from ${JSON.stringify(source)};const s=new ContinuityStore(process.argv[1]);const action=process.argv[2];let result;try{if(action.startsWith('hold'))result={action,ok:true,receipt:s.holdForOperation('logical-room-1',${JSON.stringify(heldRequest())})};else if(action==='cancel'){s.cancel('switch-1',0);result={action,ok:true};}else{s.complete('switch-1',${JSON.stringify({...claude,cursor:1})});result={action,ok:true};}}catch(e){result={action,ok:false,code:e.code};}process.stdout.write(JSON.stringify(result));s.close();`;
+ const children=actions.map(action=>Bun.spawn([process.execPath,'-e',script,s.path,action],{stdout:'pipe',stderr:'pipe'}));
+ return Promise.all(children.map(async p=>{const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);expect(code).toBe(0);expect(err).toBe('');return JSON.parse(out);}));
+}
+describe('Held v2 cross-process SQLite acceptance races',()=>{
+ test('two independent processes accepting the same request return one identical immutable receipt',async()=>{
+  const s=open();s.register(room());s.begin('logical-room-1',req());const results=await heldRace(s,['hold-a','hold-b']);expect(results.every(r=>r.ok)).toBe(true);expect(results[0].receipt).toEqual(results[1].receipt);expect(s.held('logical-room-1')).toEqual([results[0].receipt]);
+ });
+ for(const finish of ['cancel','complete'] as const)test(`hold versus ${finish} has only a stored-before-end or rejected-after-end outcome`,async()=>{
+  const s=open();s.register(room());if(finish==='complete'){s.append('logical-room-1',[event()]);prepare(s);}else s.begin('logical-room-1',req());
+  const results=await heldRace(s,['hold',finish]),held=results.find(r=>r.action==='hold'),ended=results.find(r=>r.action===finish);expect(ended.ok).toBe(true);const after=s.room('logical-room-1')!;expect(after.revision).toBe(1);expect(after.operationId).toBeUndefined();
+  if(held.ok){expect(s.holdForOperation('logical-room-1',heldRequest())).toEqual(held.receipt);expect(s.held('logical-room-1')).toEqual([held.receipt]);expect(held.receipt.intendedBinding.nativeId).toBe(codex.nativeId);}else{expect(held.code).toBe('no_switch_in_progress');expect(s.held('logical-room-1')).toEqual([]);}
+  expect(()=>s.holdForOperation('logical-room-1',heldRequest('fresh-ended'))).toThrow('no_switch_in_progress');expect(s.room('logical-room-1')).toEqual(after);
+ });
+});

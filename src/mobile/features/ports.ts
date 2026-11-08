@@ -8,6 +8,8 @@ import { homedir } from "os";
 import { Tmux } from "../../core/transport/tmux-class";
 import { pressKey, readLiveRooms, supersetSnapshot, workspacePath, type ReplyChannel } from "./ctx";
 
+import { continuityWriteFailure, type ContinuityWriteGuard } from "../continuity/write-guard";
+
 const LSOF = "/usr/sbin/lsof", PS = "/bin/ps";
 const CACHE_MS = 3_000, CMD_MAX = 200;
 
@@ -202,7 +204,16 @@ const portFree = (ports: number[]) => !ports.some(port => run(LSOF, ["-nP", `-iT
 const RE_WS = /^([0-9a-f-]{36}|dir:[A-Za-z0-9_-]+)$/i;
 const fail = (set: any, code: number, error: string) => { set.status = code; return { ok: false, error }; };
 
-export function mount(app: any): void {
+export interface PortControlDeps {
+  portsOf: typeof portsOf;
+  kill: (pid: number, signal: "SIGKILL" | "SIGTERM") => void;
+  waitGone: typeof waitGone;
+  pressKey: typeof pressKey;
+  sleep: typeof sleep;
+  portFree: typeof portFree;
+}
+const controlDefaults: PortControlDeps = { portsOf, kill: (pid, signal) => { process.kill(pid, signal); }, waitGone, pressKey, sleep, portFree };
+export function mount(app: any, guard?: ContinuityWriteGuard, control: PortControlDeps = controlDefaults): void {
   app.get("/workspaces/:ws/ports", async ({ params, set }: any) => {
     if (!RE_WS.test(params.ws)) return fail(set, 400, "workspace ไม่ถูกต้อง");
     const { root, list } = await portsOf(params.ws);
@@ -220,28 +231,37 @@ export function mount(app: any): void {
   app.post("/workspaces/:ws/ports/:pid/stop", async ({ params, body, set }: any) => {
     if (!RE_WS.test(params.ws)) return fail(set, 400, "workspace ไม่ถูกต้อง");
     const pid = +params.pid;
-    const x = (await portsOf(params.ws, true)).list.find(p => p.pid === pid);
+    const x = (await control.portsOf(params.ws, true)).list.find(p => p.pid === pid);
     if (!x) return fail(set, 409, "โปรเซสนี้ไม่ได้เปิดพอร์ตในโปรเจคนี้แล้ว — รีเฟรชดูใหม่");
+    try { await guard?.assertChannel(x.terminal ?? null); } catch { return continuityWriteFailure(set); }
     const force = !!body?.force;
-    try { process.kill(pid, force ? "SIGKILL" : "SIGTERM"); } catch (e: any) { if (e?.code !== "ESRCH") return fail(set, 500, "หยุดไม่ได้: " + (e?.message ?? e)); }
-    const stopped = await waitGone(pid, 3_000);
+    try { control.kill(pid, force ? "SIGKILL" : "SIGTERM"); } catch (e: any) { if (e?.code !== "ESRCH") return fail(set, 500, "หยุดไม่ได้: " + (e?.message ?? e)); }
+    const stopped = await control.waitGone(pid, 3_000);
     scanCache.at = 0;
-    return { ok: true, stopped, portFree: portFree(x.ports), ports: x.ports };
+    return { ok: true, stopped, portFree: control.portFree(x.ports), ports: x.ports };
   });
 
   app.post("/workspaces/:ws/ports/:pid/restart", async ({ params, set }: any) => {
     if (!RE_WS.test(params.ws)) return fail(set, 400, "workspace ไม่ถูกต้อง");
     const pid = +params.pid;
-    const x = (await portsOf(params.ws, true)).list.find(p => p.pid === pid);
+    const x = (await control.portsOf(params.ws, true)).list.find(p => p.pid === pid);
     if (!x) return fail(set, 409, "โปรเซสนี้ไม่ได้เปิดพอร์ตในโปรเจคนี้แล้ว — รีเฟรชดูใหม่");
     if (!x.terminal) return fail(set, 409, "หา terminal ที่รันอยู่ไม่เจอ — หยุดได้อย่างเดียว");
     if (x.agent) return fail(set, 409, "agent เป็นคนรันพอร์ตนี้ — กด ctrl+c จะไปหยุด agent แทน · หยุดได้อย่างเดียว");
-    await pressKey(x.terminal, "ctrlc");
-    if (!(await waitGone(pid, 3_000))) { scanCache.at = 0; return fail(set, 409, "กด ctrl+c แล้วแต่โปรเซสยังไม่หยุด — ลอง \"หยุด\" แทน"); }
-    await sleep(1_200); // let the shell print its prompt back
-    await pressKey(x.terminal, "up");
-    await sleep(300);
-    await pressKey(x.terminal, "enter");
+    let effectStarted = false;
+    const denied = () => ({ ...continuityWriteFailure(set), ...(effectStarted ? {
+      state: "uncertain", code: "continuity_write_interrupted", error: "เริ่มส่งคำสั่งแล้วแต่สถานะเปลี่ยน — หยุดคำสั่งที่เหลือ ไม่ส่งซ้ำอัตโนมัติ",
+    } : {}) });
+    try { await guard?.assertChannel(x.terminal); } catch { return denied(); }
+    effectStarted = true;
+    await control.pressKey(x.terminal, "ctrlc");
+    if (!(await control.waitGone(pid, 3_000))) { scanCache.at = 0; return fail(set, 409, "กด ctrl+c แล้วแต่โปรเซสยังไม่หยุด — ลอง \"หยุด\" แทน"); }
+    await control.sleep(1_200); // let the shell print its prompt back
+    try { await guard?.assertChannel(x.terminal); } catch { return denied(); }
+    await control.pressKey(x.terminal, "up");
+    await control.sleep(300);
+    try { await guard?.assertChannel(x.terminal); } catch { return denied(); }
+    await control.pressKey(x.terminal, "enter");
     scanCache.at = 0;
     return { ok: true, terminal: x.terminal.label };
   });
