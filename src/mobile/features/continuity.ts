@@ -18,6 +18,7 @@ export interface ContinuityCapabilities {
   /** Explicit rollout scope; omitted retains the original all-backend gate. */
   scope?:'all-backends'|'room-backend';
   factsSelectionAvailable?:boolean;
+  switchDirections?:{from:'codex'|'claude';to:'codex'|'claude';state:'available'|'development';reason?:string}[];
   backends: { backend: Backend; ready: boolean; reason?: string }[];
   models: { agent: 'codex'|'claude'; id: string; label: string }[];
 }
@@ -63,6 +64,10 @@ export function mount(app:any,options?:ContinuityFeatureOptions):void {
       if(!c.ready || !c.backends.some(b=>b.backend===room.backend&&b.ready))throw new ContinuityError('room_backend_not_ready',503);
     } else if(!c.ready || !(['herdr','tmux','superset'] as const).every(b=>c.backends.some(x=>x.backend===b&&x.ready)))throw new ContinuityError('all_backends_required',503);
     return c;
+  };
+  const direction=(c:ContinuityCapabilities,room:Room,target:'codex'|'claude')=>{
+    if(c.switchDirections!==undefined&&!c.switchDirections.some(d=>d.from===room.active&&d.to===target&&d.state==='available'))
+      throw new ContinuityError('switch_direction_in_development',409);
   };
   app.get('/continuity/capabilities',guarded(async()=>({ok:true,...await caps(),roomStateAvailable:Boolean(options)})));
   app.get(base,guarded(async({params})=>{
@@ -115,6 +120,7 @@ export function mount(app:any,options?:ContinuityFeatureOptions):void {
     // current revision. No fresh facts/preflight/runtime dispatch on a lost HTTP ACK retry.
     if(options!.engine.store.operation(body.id))return {ok:true,operation:await options!.engine.request(room.id,body)};
     const c=await ready(room);
+    direction(c,room,body.target);
     if(body.model && !c.models.some(m=>m.agent===body.target&&m.id===body.model))throw new ContinuityError('model_unavailable');
     if(options!.factsUI || body.factsSelectionId!==undefined) {
       if(!options!.factsUI)throw new ContinuityError('facts_selection_unavailable',503);
@@ -129,6 +135,7 @@ export function mount(app:any,options?:ContinuityFeatureOptions):void {
     const room=await resolve(params);await ready(room);
     const op=options!.engine.store.operation(params.operation);
     if(!op || op.roomId!==room.id)throw new ContinuityError('operation_not_found',404);
+    direction(await caps(),room,op.target);
     return {ok:true,operation:await options!.engine.advance(op.id)};
   }));
   app.get(base+'/operations/:operation',guarded(async({params})=>{
@@ -141,6 +148,7 @@ export function mount(app:any,options?:ContinuityFeatureOptions):void {
     const room=await resolve(params);await ready(room);
     const op=options!.engine.store.operation(params.operation);
     if(!op || op.roomId!==room.id)throw new ContinuityError('operation_not_found',404);
+    direction(await caps(),room,op.target);
     return {ok:true,operation:await options!.engine.retry(op.id)};
   }));
   app.post(base+'/operations/:operation/cancel',guarded(async({params,body})=>{

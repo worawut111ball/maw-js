@@ -38,6 +38,8 @@ export interface ProcessSupervisorOptions {
   preflight(candidate: unknown, permit: Readonly<ProcessLaunchPermit>): Promise<ApprovedProcessSpec>;
   /** Trusted host-owned turn/tool/approval accounting, never an HTTP boolean. Errors fail closed. */
   pendingWork(): boolean;
+  /** Trusted host-only production ownership; does not grant admission or replay. */
+  lifetimeMode?:'bounded'|'owned-session';
   limits?: Partial<ProcessSupervisorLimits>;
 }
 const defaults: ProcessSupervisorLimits = {
@@ -112,9 +114,12 @@ export class ProtocolProcessSupervisor {
   private preflight: ProcessSupervisorOptions['preflight'];
   private pendingWork: ProcessSupervisorOptions['pendingWork'];
   private limits: ProcessSupervisorLimits;
+  private lifetimeMode:'bounded'|'owned-session';
   constructor(options: ProcessSupervisorOptions) {
     if (typeof options?.preflight !== 'function' || typeof options?.pendingWork !== 'function') throw failure('protocol_process_preflight_required');
     this.preflight = options.preflight; this.pendingWork = options.pendingWork;
+    this.lifetimeMode=options.lifetimeMode??'bounded';
+    if(!['bounded','owned-session'].includes(this.lifetimeMode))throw failure('protocol_process_limits_invalid');
     this.limits = { ...defaults, ...options.limits };
     for (const [key, value] of Object.entries(this.limits)) {
       const maximum = key.includes('Bytes') ? 64 * 1024 * 1024 : key === 'maxPendingWrites' ? 64 : key === 'maxLaunches' ? 10_000 : 600_000;
@@ -142,7 +147,7 @@ export class ProtocolProcessSupervisor {
       // Never a shell, never parent environment inheritance, never a user-provided spawn options object.
       const child = spawn(spec.binary, [...spec.args], { cwd: spec.cwd, env: { ...spec.env }, shell: false,
         detached: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-      owned = new PrivateProtocolProcess(child, expected, this.limits, this.pendingWork);
+      owned = new PrivateProtocolProcess(child, expected, this.limits, this.pendingWork,this.lifetimeMode);
       await bounded(owned.started(), this.limits.preflightMs, 'protocol_process_spawn_failed');
     } catch { if (owned) await owned.cleanup().catch(() => {}); throw failure('protocol_process_spawn_failed', true); }
     return owned;
@@ -167,10 +172,10 @@ class PrivateProtocolProcess implements OwnedProtocolProcess {
   private cleanupPromise?: Promise<void>;
   private startPromise: Promise<void>;
   private closePromise: Promise<void>;
-  private timer: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout>;
   private output: Transform;
   constructor(private child: ChildProcessWithoutNullStreams, permit: ProcessLaunchPermit,
-    private limits: ProcessSupervisorLimits, private pendingWork: () => boolean) {
+    private limits: ProcessSupervisorLimits, private pendingWork: () => boolean,lifetimeMode:'bounded'|'owned-session') {
     this.incarnation = permit.incarnation; this.launchId = permit.launchId;
     for (const key of ['incarnation', 'launchId', 'runtimeBirth'] as const)
       Object.defineProperty(this, key, { value: this[key], writable: false, configurable: false, enumerable: true });
@@ -211,8 +216,8 @@ class PrivateProtocolProcess implements OwnedProtocolProcess {
       try { await json.send(frame); } catch { this.stop(); throw failure('protocol_process_write_uncertain', true); }
       finally { this.pendingWrites--; }
     }, close: () => json.close() });
-    this.timer = setTimeout(() => this.stop(), limits.lifetimeMs);
-    this.timer.unref?.();
+    if(lifetimeMode==='bounded')this.timer = setTimeout(() => this.stop(), limits.lifetimeMs);
+    this.timer?.unref?.();
   }
   started(): Promise<void> { return this.startPromise; }
   diagnostics(): ProcessDiagnostics {

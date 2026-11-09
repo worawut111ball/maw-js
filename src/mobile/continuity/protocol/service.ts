@@ -15,6 +15,7 @@ import {ProtocolContinuityAdapter,protocolRoomBinding,protocolNamespace,type Pro
 import {protocolRuntimePolicy,type ProtocolRuntimeCandidate} from './entry';
 import {ProtocolRuntimeHost,type RuntimeHostOptions,type RuntimeStartReceipt} from './runtime-host';
 import type {ProtocolTurn} from './types';
+import {validateOneWayProductionPolicy,oneWayRoom,oneWayBindingMatches,oneWaySwitchDirections,type ProtocolOneWayProductionPolicy} from './production-policy';
 import type {ContinuityFeatureOptions,ContinuityCapabilities,OwnedTransportStatus,OwnedTurnRequest,OwnedTurnReceipt} from '../../features/continuity';
 
 export interface ProtocolLiveEvidence {
@@ -59,6 +60,7 @@ export interface ProtocolServiceOptions {
     resolveRoomId(workspace:string,room:string):Promise<string|null>;
     /** Absent/null/error/malformed evidence means capabilities remain off. */
     liveEvidence?():Promise<ProtocolLiveEvidence|null>;
+    productionPolicy?():Promise<ProtocolOneWayProductionPolicy|null>;
     acceptancePermit?:ProtocolAcceptanceAuthority;
   };
   maxContextBytes?:number;
@@ -116,7 +118,7 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
   if(lstatSync(root).isSymbolicLink()||!lstatSync(root).isDirectory()||realpathSync(root)!==root||(lstatSync(root).mode&0o077)!==0)fail('protocol_service_root_not_private',400);
   const host={preflight:options.host.preflight.bind(options.host),candidate:options.host.candidate.bind(options.host),
     history:options.host.history.bind(options.host),verifyContext:options.host.verifyContext.bind(options.host),
-    resolveRoomId:options.host.resolveRoomId.bind(options.host),liveEvidence:options.host.liveEvidence?.bind(options.host),acceptancePermit:options.host.acceptancePermit&&typeof options.host.acceptancePermit.advertise==='function'&&typeof options.host.acceptancePermit.authorize==='function'?{advertise:options.host.acceptancePermit.advertise.bind(options.host.acceptancePermit),authorize:options.host.acceptancePermit.authorize.bind(options.host.acceptancePermit)}:undefined};
+    productionPolicy:options.host.productionPolicy?.bind(options.host),resolveRoomId:options.host.resolveRoomId.bind(options.host),liveEvidence:options.host.liveEvidence?.bind(options.host),acceptancePermit:options.host.acceptancePermit&&typeof options.host.acceptancePermit.advertise==='function'&&typeof options.host.acceptancePermit.authorize==='function'?{advertise:options.host.acceptancePermit.advertise.bind(options.host.acceptancePermit),authorize:options.host.acceptancePermit.authorize.bind(options.host.acceptancePermit)}:undefined};
   const now=options.now??Date.now;
   const store=new ContinuityStore(join(root,'rooms.sqlite'));
   const archive=new ContinuityArchive(join(root,'archive'));
@@ -124,7 +126,7 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
   const journal=new EffectJournal(join(root,'effects.sqlite'));
   const trustedAdmit=options.runtime.admit.bind(options.runtime);
   const runtimeOptions={supervisor:options.runtime.supervisor,admit:async(request:Parameters<typeof trustedAdmit>[0])=>{
-    open();await recheckAcceptanceBoundary(request);const evidence=await trustedAdmit(request);open();await recheckAcceptanceBoundary(request);return evidence;
+    open();await recheckProductionBoundary(request);await recheckAcceptanceBoundary(request);const evidence=await trustedAdmit(request);open();await recheckAcceptanceBoundary(request);await recheckProductionBoundary(request);return evidence;
   },hooks:options.runtime.hooks,driverFactory:options.runtime.driverFactory};
   const registry=new Map<string,ProtocolRuntimeHost>();
   const candidatePins=new Map<string,ReturnType<ProtocolAdapterPorts['candidate']>>();
@@ -143,8 +145,20 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
       events.push(...rows);if(events.length>100_000)fail('history_too_large_for_checkpoint');cursor=rows.at(-1)!.seq;
     }return fail('history_too_large_for_checkpoint');
   };
+  const productionPolicies=new WeakMap<object,ProtocolOneWayProductionPolicy>();
   const capabilities=async():Promise<ProtocolServiceCapabilities>=>{
-    open();let e:ProtocolLiveEvidence|null;
+    open();
+    if(host.productionPolicy){
+      try{
+        const policy=validateOneWayProductionPolicy(await host.productionPolicy());open();
+        const models=new Map<string,ContinuityCapabilities['models'][number]>();
+        for(const row of policy.rooms)for(const p of [row.source,row.target])models.set(p.agent+':'+p.model,{agent:p.agent,id:p.model,label:p.model});
+        const c:ProtocolServiceCapabilities={ready:true,scope:'room-backend',factsSelectionAvailable:true,authorization:{purpose:'production'},
+          switchDirections:oneWaySwitchDirections(),models:[...models.values()],backends:backends.map(backend=>({backend,ready:policy.rooms.some(r=>r.room.backend===backend)}))};
+        productionPolicies.set(c,policy);return c;
+      }catch{open();return {...inactive(),switchDirections:oneWaySwitchDirections().map(d=>({...d,state:'development'}))};}
+    }
+    let e:ProtocolLiveEvidence|null;
     try{e=await host.liveEvidence?.()??null;}catch{open();e=null;}open();
     if(!e||e.source!=='trusted-live-continuity-evidence'||!['all-backends','room-backend'].includes(e.scope)
       ||!Array.isArray(e.backends)||!e.backends.length||e.backends.length>3
@@ -189,6 +203,8 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     timeoutMs,history,verifyContext:host.verifyContext,
     preflight:async(room,target,model)=>{
       current(room);const caps=await capabilities();current(room);
+      if(host.productionPolicy&&(room.active!=='codex'||target!=='claude'))return {ready:false,reason:'switch_direction_in_development'};
+      await assertProductionDirection(room,target,undefined,model);
       if(!productionAllowed(caps,room)){
         const scopes=caps.authorization?.purpose==='bounded-acceptance'?caps.authorization.permits:[];
         const prior=room.operationId?acceptanceRow('switch',room.id,room.operationId):null;
@@ -198,11 +214,13 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
         else if(!scopes.some(p=>permitMatches(p,room,profile,'switch')&&p.remaining>0))return {ready:false,reason:'bounded_acceptance_scope_mismatch'};
       }else if(model&&!caps.models.some(m=>m.agent===target&&m.id===model))return {ready:false,reason:'model_unavailable'};
       const result=await host.preflight(structuredClone(room),target,model);current(room);
+      await assertProductionDirection(room,target,undefined,model);
       if(result?.ready===true)return {ready:true};
       return {ready:false,reason:typeof result?.reason==='string'&&/^[a-z][a-z0-9_]{0,127}$/.test(result.reason)?result.reason:'protocol_preflight_unverified'};
     },
     candidate:selectCandidate,
     beforeSourceClose:async(room,target,context,candidate)=>{
+      await assertProductionDirection(room,target,candidate);
       const saved=acceptanceRow('switch',room.id,context.id);
       if(!saved){const caps=await capabilities();current(room);if(!productionAllowed(caps,room))fail('bounded_acceptance_required');return;}
       const intent=store.operation(context.id);
@@ -216,6 +234,8 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     makeAcceptanceOperation('switch',context.id,room,protocolAcceptanceProfile(candidate.binding),sha(canonical({room,target,context,existing:existing??null,model:model??null,binding:candidate.binding,session:candidate.session,launchReceipt:candidate.version===3?candidate.finalArgvHash:null})));
   const adapter:Adapter={inspect:baseAdapter.inspect.bind(baseAdapter),preflight:baseAdapter.preflight.bind(baseAdapter),checkpoint:baseAdapter.checkpoint.bind(baseAdapter),targetPolicy:baseAdapter.targetPolicy.bind(baseAdapter),launch:baseAdapter.launch.bind(baseAdapter),deliver:baseAdapter.deliver.bind(baseAdapter),
     launchWithContext:async(room,target,context,existing,model)=>{
+      await assertProductionDirection(room,target,undefined,model);
+      if(host.productionPolicy){const candidate=await selectCandidate(room,target,existing,model);await assertProductionDirection(room,target,candidate,model);}
       const caps=await capabilities();current(room);
       if(!productionAllowed(caps,room)){
         const candidate=await selectCandidate(room,target,existing,model),profile=protocolAcceptanceProfile(candidate.binding);
@@ -272,6 +292,10 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
     const mapped=await host.resolveRoomId(scope.workspace,scope.room);open();
     if(mapped!==scope.id)fail('protocol_bootstrap_scope_unmapped');
     if(store.room(scope.id)||registry.has(scope.id))fail('protocol_bootstrap_room_exists');
+    if(host.productionPolicy){
+      const caps=await capabilities();open();const policy=productionPolicies.get(caps),row=policy&&oneWayRoom(policy,scope);
+      if(!row||canonical(protocolAcceptanceProfile(candidate.binding))!==canonical(row.source))fail('production_policy_unverified');
+    }
     const key='protocol-service-bootstrap:'+sha(scope.id),step='bootstrap';
     const receipt=journal.claim({roomId:key,operationId:operationId,step,payload:{scope,binding:candidate.binding,selection:candidate.session,firstTurn:firstTurn??null}});
     if(receipt.state!=='claimed')fail('protocol_bootstrap_reconciliation_required');
@@ -337,7 +361,34 @@ export function createProtocolContinuityService(options:ProtocolServiceOptions):
   const roomScope=(room:Room)=>({id:room.id,backend:room.backend,workspace:room.workspace,room:room.room,cwd:room.cwd});
   const scopeRoomMatches=(permit:ProtocolAcceptancePermit,room:Room)=>canonical(permit.scope.room)===canonical(roomScope(room));
   const permitMatches=(permit:ProtocolAcceptancePermit,room:Room,profile:ProtocolAcceptanceProfile,kind:ProtocolAcceptanceKind)=>scopeRoomMatches(permit,room)&&canonical(permit.scope.profile)===canonical(profile)&&permit.scope.operations.includes(kind);
-  const productionAllowed=(caps:ProtocolServiceCapabilities,room:Room)=>caps.authorization?.purpose==='production'&&caps.ready&&caps.backends.some(b=>b.backend===room.backend&&b.ready);
+  const productionAllowed=(caps:ProtocolServiceCapabilities,room:Room)=>{
+    if(caps.authorization?.purpose!=='production'||!caps.ready||!caps.backends.some(b=>b.backend===room.backend&&b.ready))return false;
+    if(!host.productionPolicy)return true;
+    const policy=productionPolicies.get(caps),row=policy&&oneWayRoom(policy,room);
+    return !!row&&oneWayBindingMatches(room.active==='codex'?row.source:row.target,room.bindings[room.active]);
+  };
+  const assertProductionDirection=async(room:Room,target:AgentKind,candidate?:ProtocolRuntimeCandidate,model?:string)=>{
+    if(!host.productionPolicy)return;
+    if(room.active!=='codex'||target!=='claude')fail('switch_direction_in_development',409);
+    const caps=await capabilities();current(room);const policy=productionPolicies.get(caps),row=policy&&oneWayRoom(policy,room);
+    if(!row||!productionAllowed(caps,room)||model!==undefined&&model!==row.target.model
+      ||candidate&&canonical(protocolAcceptanceProfile(candidate.binding))!==canonical(row.target))fail('production_policy_unverified');
+  };
+  const recheckProductionBoundary=async(request:Parameters<typeof trustedAdmit>[0])=>{
+    if(!host.productionPolicy)return;
+    const caps=await capabilities(),policy=productionPolicies.get(caps),room=store.room(request.roomId);
+    const saved=room?undefined:turns().query('SELECT scope FROM protocol_owned_rooms WHERE room_id=?').get(request.roomId) as {scope:string}|null|undefined;
+    const fullScope=room??(saved?JSON.parse(saved.scope):null);
+    const row=policy&&fullScope&&oneWayRoom(policy,fullScope);
+    if(!row)fail('production_policy_unverified');
+    const actual=protocolAcceptanceProfile(request.binding);
+    if(!room){if(canonical(actual)!==canonical(row.source))fail('production_policy_unverified');return;}
+    if(!productionAllowed(caps,room))fail('production_policy_unverified');
+    const op=room.operationId?store.operation(room.operationId):null;
+    const expected=op&&request.launchOperationId===op.id?row.target:room.active==='codex'?row.source:row.target;
+    if(op&&request.launchOperationId===op.id&&(op.from.agent!=='codex'||op.target!=='claude'))fail('switch_direction_in_development');
+    if(canonical(actual)!==canonical(expected))fail('production_policy_unverified');
+  };
   const time=()=>{const value=now();if(!Number.isSafeInteger(value)||value<0)fail('acceptance_clock_unverified');return value;};
   const validPermit=(p:ProtocolAcceptancePermit):boolean=>{
     try{return !!p&&Object.keys(p).sort().join(',')==='expiresAt,maxOperations,permitId,scope,source'&&p.source==='trusted-bounded-acceptance'&&text(p.permitId)&&Number.isSafeInteger(p.expiresAt)&&p.expiresAt>time()

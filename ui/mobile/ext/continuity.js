@@ -2,7 +2,7 @@
 (function () {
   let view = null, serial = 0, modal = null;
   const labels = { 'waiting-safe-point':'รอ agent จบรอบ', checkpointed:'กำลังเตรียมบริบท', 'preparing-target':'กำลังเปิดหรือกลับเข้า session เดิม', 'delivering-context':'กำลังส่งบริบท', 'ready-awaiting-user':'พร้อม — รอคำสั่ง', blocked:'พักการสลับ', failed:'สลับไม่สำเร็จ', uncertain:'ต้องตรวจสถานะก่อนทำต่อ' };
-  const reasons = { bounded_acceptance_denied:'host ไม่อนุญาตคำขอทดสอบนี้', bounded_acceptance_expired:'permit ทดสอบหมดอายุแล้ว', bounded_acceptance_required:'ยังไม่มี permit ทดสอบจาก host', bounded_acceptance_scope_mismatch:'permit ทดสอบไม่ตรงขอบเขตห้องหรือ profile', bounded_acceptance_unavailable:'permit ทดสอบยังไม่พร้อม', acceptance_budget_exhausted:'สิทธิ์ทดสอบครบจำนวนแล้ว — อ่านผลเดิมได้', acceptance_operation_conflict:'คำขอเดิมไม่ตรง permit — ไม่ส่งซ้ำ', acceptance_turn_reconciliation_required:'ต้องตรวจผล turn เดิมก่อน — ไม่ส่งซ้ำ', staged_source_target_unverified:'ยังยืนยันสถานะ agent ต้นทางและปลายทางไม่ได้ กรุณาตรวจ operation เดิมก่อนส่งซ้ำ', facts_selection_unavailable:'Mac ยังไม่มีบริการเลือก facts ที่พร้อมใช้', facts_preview_changed:'ข้อมูลอ้างอิงเปลี่ยนแล้ว ต้องอ่าน preview และเลือกใหม่', facts_room_changed:'binding ของข้อมูลอ้างอิงเปลี่ยนแล้ว', facts_preview_expired:'preview หมดอายุ ต้องอ่านและเลือกใหม่', facts_selection_scope_mismatch:'receipt facts ไม่ตรงคำขอสลับ', room_backend_not_ready:'Backend ของห้องนี้ยังไม่พร้อมสลับ', agent_changed:'agent เดิมถูกเปลี่ยนแล้ว', context_facts_unavailable:'ยังเตรียมข้อมูลส่งต่อไม่ได้', context_goal_missing:'ยังไม่มีเป้าหมายงานสำหรับส่งต่อ', source_changed_during_checkpoint:'agent เดิมมีงานใหม่ระหว่างเตรียมข้อมูล', history_changed_during_checkpoint:'ประวัติมีข้อมูลเพิ่ม ต้องเตรียมใหม่', resume_identity_mismatch:'กลับเข้า session เดิมไม่สำเร็จ', target_changed_during_context:'agent ปลายทางถูกเปลี่ยนระหว่างรับข้อมูล', context_receipt_unverified:'ยังยืนยันว่ารับบริบทครบไม่ได้', launch_unverified_source_preserved:'ยังยืนยันการเปิดปลายทางไม่ได้ ต้องตรวจปลายทางก่อนทำต่อ', all_backends_required:'ยังรองรับไม่ครบทั้งสามระบบ', continuity_not_ready:'ยังไม่พร้อมเปิดการสลับ', model_unavailable:'โมเดลนี้ยังไม่พร้อมใช้', stale_room_revision:'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด', canceled_by_user:'ยกเลิกการสลับแล้ว' };
+  const reasons = { switch_direction_in_development:'ยังพัฒนาอยู่ — ทางกลับ Claude → Codex ยังไม่เปิดใช้งาน', production_policy_unverified:'สิทธิ์สลับทางเดียวของห้องนี้ยังไม่พร้อม กรุณาตรวจสถานะกับ Mac', bounded_acceptance_denied:'host ไม่อนุญาตคำขอทดสอบนี้', bounded_acceptance_expired:'permit ทดสอบหมดอายุแล้ว', bounded_acceptance_required:'ยังไม่มี permit ทดสอบจาก host', bounded_acceptance_scope_mismatch:'permit ทดสอบไม่ตรงขอบเขตห้องหรือ profile', bounded_acceptance_unavailable:'permit ทดสอบยังไม่พร้อม', acceptance_budget_exhausted:'สิทธิ์ทดสอบครบจำนวนแล้ว — อ่านผลเดิมได้', acceptance_operation_conflict:'คำขอเดิมไม่ตรง permit — ไม่ส่งซ้ำ', acceptance_turn_reconciliation_required:'ต้องตรวจผล turn เดิมก่อน — ไม่ส่งซ้ำ', staged_source_target_unverified:'ยังยืนยันสถานะ agent ต้นทางและปลายทางไม่ได้ กรุณาตรวจ operation เดิมก่อนส่งซ้ำ', facts_selection_unavailable:'Mac ยังไม่มีบริการเลือก facts ที่พร้อมใช้', facts_preview_changed:'ข้อมูลอ้างอิงเปลี่ยนแล้ว ต้องอ่าน preview และเลือกใหม่', facts_room_changed:'binding ของข้อมูลอ้างอิงเปลี่ยนแล้ว', facts_preview_expired:'preview หมดอายุ ต้องอ่านและเลือกใหม่', facts_selection_scope_mismatch:'receipt facts ไม่ตรงคำขอสลับ', room_backend_not_ready:'Backend ของห้องนี้ยังไม่พร้อมสลับ', agent_changed:'agent เดิมถูกเปลี่ยนแล้ว', context_facts_unavailable:'ยังเตรียมข้อมูลส่งต่อไม่ได้', context_goal_missing:'ยังไม่มีเป้าหมายงานสำหรับส่งต่อ', source_changed_during_checkpoint:'agent เดิมมีงานใหม่ระหว่างเตรียมข้อมูล', history_changed_during_checkpoint:'ประวัติมีข้อมูลเพิ่ม ต้องเตรียมใหม่', resume_identity_mismatch:'กลับเข้า session เดิมไม่สำเร็จ', target_changed_during_context:'agent ปลายทางถูกเปลี่ยนระหว่างรับข้อมูล', context_receipt_unverified:'ยังยืนยันว่ารับบริบทครบไม่ได้', launch_unverified_source_preserved:'ยังยืนยันการเปิดปลายทางไม่ได้ ต้องตรวจปลายทางก่อนทำต่อ', all_backends_required:'ยังรองรับไม่ครบทั้งสามระบบ', continuity_not_ready:'ยังไม่พร้อมเปิดการสลับ', model_unavailable:'โมเดลนี้ยังไม่พร้อมใช้', stale_room_revision:'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด', canceled_by_user:'ยกเลิกการสลับแล้ว' };
   const stale = 'สถานะห้องเปลี่ยนแล้ว กรุณาอ่านสถานะล่าสุด';
   const base = v => `/rooms/${encodeURIComponent(v.w.id)}/${encodeURIComponent(v.room.id)}/continuity`;
   const physicalStamp = (w,r) => {const b=r.protocolBinding;return JSON.stringify([w.id,r.id,r.agent??null,r.generation??null,r.claudeSessionId??null,r.transportKind??null,r.logicalRoomId??null,r.revision??null,b?[b.agent,b.nativeId,b.generation,b.model??null,b.route??null]:null]);};
@@ -45,7 +45,20 @@
     const profiles=new Set(matching.map(p=>JSON.stringify(p.scope.profile)));
     return matching.length>0&&(!profile||profiles.size===1);
   }
-  const certified=(c,room,kind='switch',profile)=>backendReady(c,room)&&authorizationAllows(c,room,kind,profile);
+  const directionAllows=(c,room,target)=>c?.switchDirections===undefined||Array.isArray(c.switchDirections)&&c.switchDirections.some(d=>d.from===room?.active&&(!target||d.to===target)&&d.state==='available');
+  const certified=(c,room,kind='switch',profile)=>backendReady(c,room)&&authorizationAllows(c,room,kind,profile)&&(kind!=='switch'||directionAllows(c,room,profile?.agent));
+  function unavailable(v){
+    const slot=document.getElementById('ext-room-actions');if(!slot||!selected(v))return;
+    slot.querySelector('[data-continuity-unavailable]')?.remove();
+    if(v.caps?.switchDirections!==undefined&&v.current?.room&&!directionAllows(v.caps,v.current.room)){
+      const n=document.createElement('span');n.dataset.continuityUnavailable='';n.setAttribute('role','status');n.textContent='ยังพัฒนาอยู่ · Claude → Codex';slot.appendChild(n);
+    }
+  }
+  function showError(v,message){
+    if(!selected(v))return;const slot=document.getElementById('ext-room-top');if(!slot)return;
+    let n=slot.querySelector('.continuity-message');if(!n){n=document.createElement('p');n.className='continuity-message';n.dataset.continuityError='';n.setAttribute('role','alert');slot.appendChild(n);}
+    n.textContent=message||'อ่านสถานะการสลับไม่ได้';
+  }
   function purposeNode(c,room,ws,alias){
     if(!c?.authorization)return null;
     const node=document.createElement('div');node.className='continuity-purpose';
@@ -62,7 +75,7 @@
     const slot=document.getElementById('ext-room-top');if(!slot)return;
     slot.querySelector(':scope > .continuity-purpose')?.remove();const node=purposeNode(c,room,v.w.id,v.room.id);if(node)slot.prepend(node);
   }
-  const capStamp=c=>JSON.stringify([models(c),c?.scope??'all-backends',c?.factsSelectionAvailable===true,c?.authorization??null,c?.ready,c?.backends,c?.roomStateAvailable]);
+  const capStamp=c=>JSON.stringify([models(c),c?.scope??'all-backends',c?.factsSelectionAvailable===true,c?.authorization??null,c?.ready,c?.backends,c?.roomStateAvailable,c?.switchDirections??null]);
   const models = c => Array.isArray(c?.models) ? c.models.filter(m => ['codex','claude'].includes(m.agent) && typeof m.id === 'string' && m.id && m.id.length<=160 && typeof m.label === 'string' && m.label) : [];
   const stamp = d => JSON.stringify([d.room.id,d.room.revision,d.room.active,d.room.operationId || null,d.room.bindings || null,d.operation || null]);
   const request = async (path,body) => {
@@ -167,7 +180,7 @@
     if(!b){b=document.createElement('button');b.className='continuity-switch-trigger';b.dataset.continuitySwitch='';b.textContent='เปลี่ยน agent / โมเดล';slot.appendChild(b);}
     b.disabled=v.busy||!v.current||!certified(v.caps,v.current?.room);
     b.title=b.disabled?'ยังไม่พร้อมสลับ — รอ capability และสถานะห้องที่ยืนยันจาก Mac':'เลือก agent และโมเดลจากข้อมูลที่ Mac รองรับ';
-    b.onclick=()=>open(v.w,v.room);
+    b.onclick=()=>open(v.w,v.room);unavailable(v);
   }
   function clear(v) {
     if(!selected(v))return;
@@ -204,6 +217,7 @@
     const op=data.operation;
     const historicalReady=op?.state==='ready-awaiting-user'&&!(op.roomId===data.room.id&&data.room.active===op.target&&data.room.revision===op.expectedRevision+1&&op.targetBinding&&switchBindingKey(data.room.bindings?.[op.target])===switchBindingKey(op.targetBinding));
     node.dataset.state=historicalReady?'historical':op?.state||'idle';
+    if(['blocked','failed','uncertain'].includes(op?.state))node.dataset.continuityError='';else delete node.dataset.continuityError;
     node.textContent=historicalReady?'operation เดิมเสร็จแล้ว — binding ปัจจุบันเปลี่ยนหรือยังไม่ยืนยัน':op?(labels[op.state]||'กำลังตรวจสถานะ')+(op.reason?' · '+(reasons[op.reason]||'ต้องตรวจสถานะ agent ก่อนทำต่อ'):''):'Agent: '+data.room.active;
     const activeBinding=data.room.bindings?.[data.room.active];
     if(op?.state==='ready-awaiting-user'&&!historicalReady&&!certified(v.caps,data.room,'text-turn',activeBinding))node.textContent='operation ส่งบริบทเสร็จแล้ว · ดูผลเดิมได้ — ยังไม่อนุญาตส่งข้อความใหม่';
@@ -280,10 +294,11 @@
         const data=await request(base(v));if(!valid())return null;
         if(data.room?.workspace!==v.w.id || data.room?.room!==v.room.id || typeof data.room.id!=='string' || !Number.isSafeInteger(data.room.revision) || data.room.revision<0 || !['codex','claude'].includes(data.room.active))throw new Error(stale);
         if(modal?.view===v && (modal.stamp!==stamp(data) || modal.models!==JSON.stringify(models(caps)) || modal.capStamp!==capStamp(caps)))closeModal();
+        document.querySelector('#ext-room-top .continuity-message')?.remove();
         v.current=data;drawPurpose(v,caps,data.room);draw(v,data);trigger(v);
         const b=document.querySelector(`[data-xk="${keyIndex}"]`);if(b){b.hidden=false;b.disabled=v.busy;}
         return data;
-      } catch { if(valid())clear(v);return null; }
+      } catch(e) { if(valid()){clear(v);if(e.status!==404)showError(v,e.message||'อ่านสถานะการสลับไม่ได้');}return null; }
     })();
     v.loading=pending;
     try{return await pending;}finally{if(v.loading===pending)v.loading=null;}
@@ -297,7 +312,7 @@
       if(!data || !certified(v.caps,v.current?.room))throw new Error('ยังไม่พร้อมสลับ agent');
       if(stamp(data)!==stamp(snapshot))throw new Error(stale);
       await action(data);
-    }catch(e){if(selected(v)){closeModal();toast(e.message);}}
+    }catch(e){if(selected(v)){closeModal();showError(v,e.message);toast(e.message);}}
     finally{busy(v,false);}
   }
   const switchBindingKey=b=>JSON.stringify([b?.agent,b?.nativeId,b?.generation,b?.model??null,b?.route??null,b?.cursor]);
@@ -328,7 +343,7 @@
     return !!r&&Object.hasOwn(labels,op?.state)&&op?.id===b.id&&op.roomId===r.logicalRoomId&&op.target===b.target&&op.model===b.model&&op.expectedRevision===b.expectedRevision&&switchBindingKey(op.from)===r.sourceKey;
   }
   function clientNode(v){
-    const client=document.createElement('div');client.className='continuity-client-status';client.setAttribute('role','status');client.textContent=v.intent.message;
+    const client=document.createElement('div');client.className='continuity-client-status';client.setAttribute('role','status');client.textContent=v.intent.message;if(['uncertain','failed'].includes(v.intent.status))client.dataset.continuityError='';
     if(unresolved(v)){const check=document.createElement('button');check.textContent='ตรวจสถานะคำขอเดิม · อ่านอย่างเดียว';check.disabled=v.busy;check.onclick=()=>inspectIntent(v);client.appendChild(check);}
     return client;
   }
@@ -366,13 +381,13 @@
     const frame={view:v,bg,stamp:stamp(data),models:JSON.stringify(models(v.caps)),capStamp:capStamp(v.caps),preview:null,previewRead:0};modal=frame;
     const alive=()=>selected(v)&&modal===frame&&bg.isConnected;
     const heading=document.createElement('h2');heading.textContent='เปลี่ยน agent / โมเดล';sheet.appendChild(heading);
-    const noteText=document.createElement('p');noteText.textContent='รับบริบทแล้วรอคำสั่ง · กลับเจ้าเดิมใช้ session เดิม · ไม่ส่ง draft หรือข้อความพักอัตโนมัติ';sheet.appendChild(noteText);
+    const noteText=document.createElement('p');noteText.textContent=v.caps.switchDirections?'เปิดใช้ Codex → Claude · ทางกลับยังพัฒนาอยู่ · เก็บ draft และข้อความพักไว้ ไม่ส่งอัตโนมัติ':'รับบริบทแล้วรอคำสั่ง · กลับเจ้าเดิมใช้ session เดิม · ไม่ส่ง draft หรือข้อความพักอัตโนมัติ';sheet.appendChild(noteText);
     const purpose=purposeNode(v.caps,data.room,v.w.id,v.room.id);if(purpose)sheet.appendChild(purpose);
     const activePermits=permits(v.caps,data.room,'switch');if(activePermits.length)frame.expiryTimer=setTimeout(()=>{if(modal===frame)closeModal();},Math.min(2147483647,Math.max(0,Math.min(...activePermits.map(p=>p.expiresAt))-Date.now())));
     const catalog=models(v.caps).filter(m=>authorizationAllows(v.caps,data.room,'switch',{agent:m.agent,model:m.id})),agents=[...new Set(catalog.map(m=>m.agent))];
     const provider=document.createElement('select');provider.dataset.continuityProvider='';provider.setAttribute('aria-label','Agent / provider');
-    for(const agent of agents){const o=document.createElement('option');o.value=agent;o.textContent=agent;provider.appendChild(o);}
-    provider.value=agents.find(a=>a!==data.room.active)||agents[0]||'';
+    for(const agent of agents){const o=document.createElement('option');o.value=agent;o.disabled=!directionAllows(v.caps,data.room,agent);o.textContent=agent+(o.disabled?' — ยังพัฒนาอยู่':'');provider.appendChild(o);}
+    provider.value=agents.find(a=>a!==data.room.active&&directionAllows(v.caps,data.room,a))||agents.find(a=>directionAllows(v.caps,data.room,a))||'';
     const select=document.createElement('select');select.dataset.continuityModel='';select.setAttribute('aria-label','โมเดล');
     const confirm=document.createElement('button');confirm.dataset.continuityConfirm='';
     const status=document.createElement('p');status.setAttribute('role','status');status.className='continuity-preview-status';
@@ -389,6 +404,7 @@
     frame.update=update;
     const fillModels=()=>{select.textContent='';for(const m of catalog.filter(m=>m.agent===provider.value)){const o=document.createElement('option');o.value=m.id;o.textContent=m.label;select.appendChild(o);}update();};
     provider.onchange=fillModels;select.onchange=update;fillModels();
+    if(v.caps.switchDirections){const n=document.createElement('p');n.dataset.continuityUnavailable='';n.textContent='Claude → Codex: ยังพัฒนาอยู่';sheet.appendChild(n);}
     if(catalog.length)sheet.append(provider,select);else{const empty=document.createElement('p');empty.textContent='ยังไม่มีข้อมูลโมเดลที่รองรับ';sheet.appendChild(empty);}
     previewButton.disabled=v.caps.factsSelectionAvailable!==true;
     if(previewButton.disabled)status.textContent='Mac ยังไม่มีบริการ preview/facts ที่พร้อมใช้ — ยังไม่ส่งคำขอสลับ';

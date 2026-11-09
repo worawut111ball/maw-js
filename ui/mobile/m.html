@@ -1747,17 +1747,18 @@ async function loadSuggestion() {
   } catch { hide(); }
 }
 function showHistoryUnavailable(scr, binding, reason) {
-  const transient = !reason || ["history_changed", "history_unavailable", "native_file_missing", "history_epoch_changed"].includes(reason);
+  const indexing = reason === "history_indexing";
+  const transient = !reason || indexing || ["history_changed", "history_unavailable", "native_file_missing", "history_epoch_changed"].includes(reason);
   const verified = transient && scr._chatBinding === binding && chatCache.get(binding)?.conversation;
   const top = scr.scrollTop;
   scr.querySelector("[data-history-transient]")?.remove();
   if (verified) {
     const note = document.createElement("div"); note.className = "sys"; note.dataset.historyTransient = "";
-    note.textContent = "กำลังเชื่อมต่อประวัติอีกครั้ง — แสดงประวัติที่ยืนยันล่าสุดของ session เดิม (ข้อมูลเก่า)";
+    note.textContent = indexing ? "กำลังเตรียมประวัติแชท — แสดงประวัติที่ยืนยันล่าสุดของ session เดิม (ข้อมูลเก่า)" : "กำลังเชื่อมต่อประวัติอีกครั้ง — แสดงประวัติที่ยืนยันล่าสุดของ session เดิม (ข้อมูลเก่า)";
     scr.appendChild(note); scr.scrollTop = top;
   } else {
     scr._sig = ""; scr._chatBinding = null;
-    scr.innerHTML = '<div class="empty">ยังอ่านประวัติแชทไม่ได้<br><button data-herdr-screen>ดูจอจริง</button></div>';
+    scr.innerHTML = '<div class="empty">' + (indexing ? 'กำลังเตรียมประวัติแชท — ระบบจะอ่านต่อให้อัตโนมัติ' : 'ยังอ่านประวัติแชทไม่ได้') + '<br><button data-herdr-screen>ดูจอจริง</button></div>';
     scr.querySelector('[data-herdr-screen]').onclick = () => { state.mode = "raw"; renderProject(); };
   }
   paintPending();

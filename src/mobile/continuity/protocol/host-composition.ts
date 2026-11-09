@@ -14,6 +14,7 @@ import type {NativeRecords} from '../native-records';
 import {factsBindingHash} from '../facts-resolver';
 import {ContinuityError,type Room,type Binding,type AgentKind,type RoomEvent,type ContextDelivery,type DeliveryReceipt} from '../types';
 import type {ContinuityFeatureOptions} from '../../features/continuity';
+import {validateOneWayProductionPolicy,oneWayRoom,type ProtocolOneWayProductionPolicy} from './production-policy';
 
 export interface ProtocolHostProfile {
   agent:AgentKind;version:2|3;model:string;route:'mind'|'direct';provider:string;endpoint:string|null;
@@ -29,7 +30,7 @@ export interface ProtocolHostScope {
   id:string;backend:Room['backend'];workspace:string;room:string;cwd:string;profiles:ProtocolHostProfile[];
 }
 export interface ProtocolHostConfig {
-  version:1;activation?:{kind:'host-owned-protocol';mode:'disabled'|'pilot'|'production'};
+  version:1;activation?:{kind:'host-owned-protocol';mode:'disabled'|'pilot'|'production';policy?:'codex-to-claude-v1'};
   modulePin?:PinnedProtocolModule;privateRoot?:string;actorId?:string;timeoutMs?:number;
   scopes?:ProtocolHostScope[];maxContextBytes?:number;
 }
@@ -56,6 +57,7 @@ export interface ProtocolHostAuthority {
   readHistory?(request:{room:Room;binding:Binding}):Promise<ProtocolHistoryAttestation>;
   verifyContext?(room:Room,binding:Binding,context:ContextDelivery,start:ProtocolBootstrapReceipt['start']):Promise<DeliveryReceipt>;
   liveEvidence?():Promise<ProtocolLiveEvidence|null>;
+  productionPolicy?():Promise<ProtocolOneWayProductionPolicy|null>;
   acceptancePermit?:ProtocolAcceptanceAuthority;
   hooks?:ProtocolHooks;
 }
@@ -93,7 +95,8 @@ export function readProtocolHostConfig(pin:{path:string;sha256:string}):Protocol
 }
 function validateConfig(c:ProtocolHostConfig):void {
   if(!keys(c,['version','activation','modulePin','privateRoot','actorId','timeoutMs','scopes','maxContextBytes'])||c.version!==1)fail('protocol_host_config_invalid');
-  if(c.activation!==undefined&&(!keys(c.activation,['kind','mode'])||c.activation.kind!=='host-owned-protocol'||!['disabled','pilot','production'].includes(c.activation.mode)))fail('protocol_host_config_invalid');
+  if(c.activation!==undefined&&(!keys(c.activation,['kind','mode','policy'])||c.activation.kind!=='host-owned-protocol'||!['disabled','pilot','production'].includes(c.activation.mode)))fail('protocol_host_config_invalid');
+  if(c.activation?.policy!==undefined&&(c.activation.policy!=='codex-to-claude-v1'||c.activation.mode!=='production'))fail('protocol_host_config_invalid');
   if(!c.activation||c.activation.mode==='disabled')return;
   if(!c.modulePin||!id(c.privateRoot)||!isAbsolute(c.privateRoot)||!id(c.actorId)||!Number.isInteger(c.timeoutMs)||c.timeoutMs!<1||c.timeoutMs!>300_000||!Array.isArray(c.scopes)||!c.scopes.length||c.scopes.length>1000)fail('protocol_host_config_invalid');
   const ids=new Set<string>(),aliases=new Set<string>();
@@ -101,7 +104,7 @@ function validateConfig(c:ProtocolHostConfig):void {
     if(!keys(s,['id','backend','workspace','room','cwd','profiles'])||![s.id,s.workspace,s.room,s.cwd].every(id)||!isAbsolute(s.cwd)||!['herdr','tmux','superset'].includes(s.backend)||ids.has(s.id)||aliases.has(canonical([s.workspace,s.room]))||!Array.isArray(s.profiles)||!s.profiles.length||s.profiles.length>32)fail('protocol_host_scope_invalid');
     ids.add(s.id);aliases.add(canonical([s.workspace,s.room]));const models=new Set<string>();
     for(const p of s.profiles){
-      if(!keys(p,['agent','version','model','route','provider','endpoint','home','effectiveToolHome','homeEnvironment','native'])||!['codex','claude'].includes(p.agent)||![2,3].includes(p.version)||p.version===3&&(p.agent!=='claude'||c.activation.mode!=='pilot')
+      if(!keys(p,['agent','version','model','route','provider','endpoint','home','effectiveToolHome','homeEnvironment','native'])||!['codex','claude'].includes(p.agent)||![2,3].includes(p.version)||p.version===3&&(p.agent!=='claude'||c.activation.mode!=='pilot'&&c.activation.policy!=='codex-to-claude-v1')
         ||![p.model,p.provider,p.home,p.effectiveToolHome].every(id)||!['mind','direct'].includes(p.route)||p.endpoint!==null&&typeof p.endpoint!=='string'||!isAbsolute(p.home)||!isAbsolute(p.effectiveToolHome)
         ||!keys(p.homeEnvironment,['state','value'])||!['absent','present'].includes(p.homeEnvironment.state)||p.homeEnvironment.state==='absent'&&Object.hasOwn(p.homeEnvironment,'value')||p.homeEnvironment.state==='present'&&p.homeEnvironment.value!==p.effectiveToolHome
         ||!keys(p.native,['binary','sha256','version','versionEvidence'])||!id(p.native.binary)||!isAbsolute(p.native.binary)||!/^[a-f0-9]{64}$/.test(p.native.sha256)||!id(p.native.version)
@@ -148,7 +151,8 @@ type LaunchRecord={scope:ProtocolHostScope;profile:ProtocolHostProfile;candidate
 export function loadProtocolHostComposition(config?:ProtocolHostConfig,authority:ProtocolHostAuthority={},mechanisms:ProtocolHostMechanisms={}):ProtocolHostComposition {
   if(config===undefined)return {kind:'disabled',featureOptions:undefined,close:async()=>{}};
   validateConfig(config);if(!config.activation||config.activation.mode==='disabled')return {kind:'disabled',featureOptions:undefined,close:async()=>{}};
-  const cfg=freeze(structuredClone(config)),ports={attestNative:authority.attestNative?.bind(authority),connection:authority.connection?.bind(authority),resumeBinding:authority.resumeBinding?.bind(authority),readHistory:authority.readHistory?.bind(authority),verifyContext:authority.verifyContext?.bind(authority),liveEvidence:authority.liveEvidence?.bind(authority),hooks:authority.hooks,acceptancePermit:authority.acceptancePermit};
+  if(config.activation?.policy==='codex-to-claude-v1'&&typeof authority.productionPolicy!=='function')fail('production_policy_unverified');
+  const cfg=freeze(structuredClone(config)),ports={productionPolicy:authority.productionPolicy?.bind(authority),attestNative:authority.attestNative?.bind(authority),connection:authority.connection?.bind(authority),resumeBinding:authority.resumeBinding?.bind(authority),readHistory:authority.readHistory?.bind(authority),verifyContext:authority.verifyContext?.bind(authority),liveEvidence:authority.liveEvidence?.bind(authority),hooks:authority.hooks,acceptancePermit:authority.acceptancePermit};
   const loader=new PinnedProtocolEntryLoader(cfg.modulePin!),records=new Map<string,Promise<LaunchRecord>>(),candidates=new WeakMap<object,LaunchRecord>();
   const scopeFor=(room:Pick<Room,'id'|'backend'|'workspace'|'room'|'cwd'>)=>{
     const s=cfg.scopes!.find(s=>s.id===room.id);if(!s||['backend','workspace','room','cwd'].some(k=>(s as any)[k]!==(room as any)[k]))fail('protocol_host_scope_unverified');return s;
@@ -170,10 +174,17 @@ export function loadProtocolHostComposition(config?:ProtocolHostConfig,authority
     })();records.set(key,building);return building;
   };
   const receipt=(r:LaunchRecord)=>r.candidate.version===3?Object.freeze({finalArgvHash:r.candidate.finalArgvHash}):undefined;
+  const verifyRelease=async(r:LaunchRecord)=>{
+    if(cfg.activation?.policy!=='codex-to-claude-v1')return;
+    const policy=validateOneWayProductionPolicy(await ports.productionPolicy!()),row=oneWayRoom(policy,r.scope);
+    if(!row||canonical(protocolAcceptanceProfile(r.candidate.binding))!==canonical(r.profile.agent==='codex'?row.source:row.target))fail('production_policy_unverified');
+  };
   const attest=async(r:LaunchRecord,phase:string,operationId:string,textHash?:string,permit?:Readonly<ProcessLaunchPermit>)=>{
     if(!ports.attestNative)fail('protocol_host_native_attestation_unavailable');
+    await verifyRelease(r);
     const expectedReceipt=receipt(r),e=await ports.attestNative(freeze({scope:structuredClone(r.scope),profile:structuredClone(r.profile),roomId:r.scope.id,launchOperationId:r.launchOperationId,operationId,phase,binding:structuredClone(r.candidate.binding),selection:structuredClone(r.candidate.session),...(expectedReceipt?{launchReceipt:expectedReceipt}:{}),...(textHash?{textHash}:{}),...(permit?{permit:{...permit}}:{})}));
     if(!e||e.source!=='trusted-native-host-attestation'||!id(e.reference)||e.roomId!==r.scope.id||e.launchOperationId!==r.launchOperationId||e.operationId!==operationId||e.externalWriter!=='absent'||canonical(e.binding)!==canonical(r.candidate.binding)||expectedReceipt&&canonical(e.launchReceipt)!==canonical(expectedReceipt)||e.checks?.nativePin!=='verified'||e.checks.effectivePolicy!=='verified'||e.checks.startup!=='reviewed'||e.checks.route!=='verified')fail('protocol_host_native_attestation_unverified');
+    await verifyRelease(r);
     return {source:'trusted-protocol-admission' as const,binding:structuredClone(r.candidate.binding),externalWriter:'absent' as const,...(expectedReceipt?{launchReceipt:expectedReceipt}:{})};
   };
   const supervisor={launch:async(candidate:unknown,permit:Readonly<ProcessLaunchPermit>):Promise<OwnedProtocolProcess>=>{
@@ -213,6 +224,7 @@ export function loadProtocolHostComposition(config?:ProtocolHostConfig,authority
       return normalizeProtocolNativeHistory(room,binding,proof.records,allEvents(room.id));},
     verifyContext:async(room,binding,context,start)=>{if(!ports.verifyContext)fail('protocol_host_context_verifier_unavailable');const result=await ports.verifyContext(structuredClone(room),structuredClone(binding),structuredClone(context),structuredClone(start));
       if(result?.state!=='acknowledged'||result.nativeId!==binding.nativeId||result.hash!==context.hash||result.throughSeq!==context.throughSeq)fail('protocol_host_context_unverified');return result;},
+    productionPolicy:cfg.activation!.policy==='codex-to-claude-v1'?ports.productionPolicy:undefined,
     liveEvidence:async()=>cfg.activation!.mode==='production'&&ports.attestNative&&ports.verifyContext?(await ports.liveEvidence?.()??null):null,
   }});
   const pending=new Map<string,Promise<void>>(),ready=new Set<string>();

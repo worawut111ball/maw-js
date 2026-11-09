@@ -69,7 +69,7 @@ Parent ID ที่ status unknown อนุญาตเฉพาะ manual requ
 | CLI | 4 process พร้อมกัน, รอคิวสูงสุด 32, stdout+stderr รวม 4 MiB, timeout ปกติ 10 วินาที (process-info 5 วินาที), kill client process เมื่อหมดเวลา; ไม่ restart server |
 | Snapshot probes | 4 worker ต่อ refresh, share in-flight; continuity 15 วินาที |
 | Screen | visible อย่างเดียว 1–1500 lines, 4 MiB; ไม่เรียก recent/recent-unwrapped อัตโนมัติ |
-| History | scan 20,000 entries/depth 8, ไฟล์ 64 MiB; เกินคืน unavailable, pagination default150/max500; epoch metadata cache128ไฟล์ |
+| History | discovery แบบ opendir สูงสุด20,000 entries/depth8; incremental work default/max16MiB ต่อ read, record8MiB, structural metadata32MiB/200,000records/items ต่อ index; cache4/active reads4; pagination default150/max500 และลดหน้าแบบต่อเนื่องตาม bytebudget |
 | Text | UTF-8 ไม่เกิน32,000 bytes, ไม่รับ NUL, prompt ไม่รับว่าง |
 | Ledger | สูงสุด10,000 records ไม่ expire unresolved/uncertain เอง เมื่อเต็ม `delivery_store_full`; ไฟล์0600/โฟลเดอร์สร้าง0700 |
 
@@ -125,3 +125,35 @@ Claude ask ใช้ `--permission-mode default` แทน manual ตาม stat
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex ทีม 1 | แก้ Claude default และบันทึก trusted loader tests |
+
+## Bounded native history reader — 9 พ.ย. 69
+
+`history.ts` ไม่โหลดไฟล์ทั้งหมดหรือเพิ่ม file-size limit เดิมเพื่อแก้อาการ `history_size_limit`. Reader สร้าง byte-range index แบบ incremental: แต่ละ request อ่านไม่เกิน16MiB ด้วย chunks64KiB; `HistoryOptions.maxBytes` เปลี่ยนความหมายเป็น **work/read budget ต่อ request** (1byte–16MiB) ไม่ใช่ขนาดไฟล์ทั้งหมด. Transcript ใหญ่กว่า64MiB จึงค่อยๆ index ได้ โดยยังไม่คืน tail/total ที่คาดเดาระหว่างตรวจ prefix
+
+เมื่อ index ยังไม่ครบหรือกำลัง revalidate จะคืน `{ok:true,kind:"none",available:false,reason:"history_indexing"}` ให้ caller poll GET ต่อ. ไม่มี background task/prompt/replay. Indexเก็บ offsets/lengths กับ structural metadata ที่ hash ข้อความแล้ว ไม่ cache raw messages; scratch สำหรับ recordที่กำลังอ่านมีขอบเขต8MiB. Indexมี hardcaps32MiB serialized metadata, 200,000records/items, cache4 และ active readers4 (ก่อน discovery/await). เป้าหมายต่างไฟล์ที่เกินactivecapและsamefileobserverคืน indexingโดยไม่ปลดbusyของowner
+
+ต้องสแกน committed prefixครบก่อนยืนยัน native metadata/globalClaudeancestry/branch และ exact total. Incomplete EOF ไม่เป็น eventจนnewlineครบ. หลัง readyแล้ว readsอ่านเฉพาะrecordsของpageกับ tool-result dependencies. Result schemaเดิม: `conversation` exactnativeUUID, `epoch`, `total` exactfiltereditemcount, `start` absoluteitemordinal และ `items[].i=start+n`; `before` เป็นexclusiveabsoluteordinal. limitdefault150/max500 เป็นจำนวนสูงสุด **ไม่รับประกันว่าครบ limit**: ถ้า bytesของpageเกินbudget จะคืนcontiguoussuffixสั้นลงจบที่beforeเดิม ไม่ข้ามrecordและไม่ปลอมindices; callerโหลดolderด้วยbefore=start. Itemเดี่ยว+dependenciesเกินbudgetคืน `history_page_size_limit` ไม่วนindexingถาวร
+
+Stable indexed snapshotต้องมี dev/ino/birthtime/size/mtime/ctime ตรงและตรวจ handle/path ก่อนคืนpage. Metadataเปลี่ยนไม่ใช่appendproof: reader rehash **prefixเดิมทั้งหมดแบบ incrementalตามbudget** ก่อนใช้ indexต่อและscanเฉพาะsuffix. Digestต่างต้องrebuildจากศูนย์/new epoch; rotation/truncateใหม่ต้องrebuild. Claude branchเปลี่ยนต้องnew epoch; unknownnonlogicalparentคืน `history_ancestry_unverified`. Older cursorที่epochไม่ตรงยังคืน `history_epoch_changed`. การตรวจtrustedfilesystemmetadataไม่ใช่cryptographiclockกับwriter; ไฟล์เปลี่ยนระหว่างอ่านคืนindexingและไม่คืนpageข้ามsnapshot
+
+Exact source/nativeID/provider/path/symlink/ambiguity guardsคงเดิมและrejectlateconflictingCodexmetadataเพิ่ม. Directoryscanใช้opendiriterator จึงหยุดก่อนโหลดentryarrayทั้งหมด. Openใช้O_RDONLY|O_NOFOLLOW|O_NONBLOCKแล้วfstatrejectnonregularfile/FIFOโดยไม่block. ไม่มีแก้ native file/DB/config หรือ import sideeffect
+
+Hard-cap reasons: `history_record_size_limit` (recordเกิน8MiB), `history_index_size_limit`, `history_page_size_limit`, `history_scan_limit`, `history_read_budget_invalid`; identity/provider/ancestry/cursorไม่ตรงยังfailclosed. อาจใช้เวลาหลายpollหรือคงindexingถ้าwriterเปลี่ยนไฟล์ต่อเนื่อง ไม่รับรองว่าประวัติทุกขนาดหรือทุกactivefileจะพร้อมภายในเวลาตายตัว
+
+Focused tests: `NODE_ENV=test MAW_TEST_MODE=1 bun test test/mobile-herdr-provider-history.test.ts test/mobile-herdr-history-bounded.test.ts` — 24pass/0fail/181expects. ใช้ temporary native-format fixtures (>64MiB/large record/prefixrewrite+append/rotation/partialtail/queue+branch/tool/page/FIFO/concurrency) ไม่มีnativeinference/server. Targeted TSC ของ reader+newtests exit0 ไม่ใช่whole-repo typecheck. Candidate local readonly กับexactinventory/agentrefอ่านactual transcriptได้5poll/latest150/older150ตามsafeprojectionในvault `CLOSE-HERDR-BACKEND-20261109.md`; **ไม่ใช่deployedAPIหรือmobilelive acceptance**. Rootถือรวมreleaseหลังreview
+
+| วันที่ | ใคร (คน/AI) | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex cmdmap/p5 | เพิ่มboundedincrementalindex/byte-rangepages/prefixintegrity/recordและglobalcaps; รักษาidentity/epoch/branch พร้อมreadonlycandidateproofและfocusedtests |
+
+### แก้ active append ตามไอ้แดง review — 9 พ.ย. 69
+
+เมื่อมี ready index แล้วและกำลัง verify prefix หาก fileKeyเดิมและขนาดโตขึ้นระหว่าง request จะคง `verify.offset`/hasher/`verify.previous` เดิม ไม่ rebuildจาก0. Prefixที่ตรวจยังมีขนาด `previous.size` เดิม; growthเป็นเพียงเงื่อนไขให้ตรวจต่อ ไม่ใช่ผลยืนยันappend. Ready indexล่าสุดยังอยู่ในpreviousจนdigestตรวจครบ ไม่ส่งpageเก่าที่ไม่มีป้ายstale ระหว่างนี้คืนhistory_indexingและUIรักษาsameverifiedhistoryเดิมตามcontract. หลังverifyผ่านจึงอ่านsuffixและคืนexactmessagesตามbudgetเดิม
+
+Same-size rewrite, shrink หรือ fileKeyเปลี่ยนไม่เข้าcontinuation; prefixdigestไม่ตรงยังrebuild/new epoch. การตรวจนี้ยังอาศัยtrustedfilesystem/append writer ไม่ใช่atomiclockหรือรับรองrewriteพร้อมappendของbytesที่อ่านไปแล้วทุกจังหวะ. Cold first-indexก่อนมีready indexคงcontractเดิม; รอบนี้แก้ starvation ระหว่างrevalidationตามreproducerใน REVIEW-AIDAENG ไม่เพิ่มscopecold indexing
+
+Testsเพิ่ม81MiBที่readyแล้ว appendก่อนอ่านทุกครั้ง15รอบ ต้องได้messagesอย่างน้อย2ครั้งและแต่ละครั้งห่างไม่เกิน8requests พร้อมsameepoch/exacttotal/text/index/budget/previousobjectretained; negative same-size rewriteระหว่างverifyต้องnew epoch. Focused26pass0fail266expectsและtargetedTSC0. ไม่rerun mobileglob/browserที่ไม่เกี่ยวในรอบquotaจำกัดนี้; ผล1842/78/10ก่อนหน้าเป็นคนละsourcecut ไม่อ้างfinalของdeltaนี้. ข้อ4 tmpdirtestแยกไว้ตามคำสั่ง
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | แก้reviewข้อ1–3: รักษาverificationprogress/readyindexระหว่างactiveappend พร้อมregression |

@@ -19,3 +19,11 @@ Host ที่ตรวจ config/authority แล้วส่ง `{mobile:{cont
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex root | ย้าย mobile API construction เข้า server instance และรับ trusted startup options โดย default ไม่เปิด protocol |
+
+## ปรับปรุง 9 พ.ย. 69 — CLOSE one-way
+
+`protocol-startup.ts` เตรียม exact scoped Codex owned room และ persist bootstrap snapshot ก่อน expose mobile options; ต้อง explicit production policy Codex→Claude, ไม่ adopt shared TUI และไม่ implicit resume. เลือก supervisor owned-session; import ไม่เปิด server.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | บันทึก production one-way implementation สำหรับ review ก่อนเปิดใช้ |

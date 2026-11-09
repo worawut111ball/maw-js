@@ -167,3 +167,11 @@ Root เป็นเจ้าของ native preflight, evidence certification,
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม durable owned text/status/inventory ผ่าน featureOptions พร้อม provenance pair, restart/ACK/race negatives |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม bounded acceptance แยก liveEvidence, scoped authority/durable atomic budget, historical-first และ last-await source-close guard |
 | 8 พ.ย. 69 | Codex ensure | ปิด P2 close หลายห้อง: ลองทุก owned runtime, sanitize failure, คง failed guards และ shutdown latch รวม awaited admission |
+
+## ปรับปรุง 9 พ.ย. 69 — CLOSE one-way
+
+`production-policy.ts` แยก trusted release policy จาก native evidence. Service ตรวจ scope/binding ก่อน bootstrap effects และตรวจซ้ำตาม boundary; reverse คืน `switch_direction_in_development`. Policy หายหรือ revoked ปฏิเสธ ไม่ fallback bounded permit.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | บันทึก production one-way implementation สำหรับ review ก่อนเปิดใช้ |

@@ -93,3 +93,11 @@ Attestation callbacks เป็น trusted host authority ไม่ใช่ก�
 |---|---|---|
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม pinned host config/owner-policy composition, concrete loader/supervisor/service และ actual Root history-reader default |
 | 8 พ.ย. 69 | Codex ensure | เพิ่ม exact native-turn normalization/order guards และแยก bounded acceptance authority พร้อม durable service budget โดยคง production gate |
+
+## ปรับปรุง 9 พ.ย. 69 — CLOSE one-way
+
+Production ทางเดียวต้อง activation policy `codex-to-claude-v1` และ trusted `productionPolicy`; ตรวจ full room scope/profile ก่อนและหลัง awaited admission. อนุญาต V3 เดิมเฉพาะ policy นี้ ไม่ downgrade pin/argv และไม่ถือ candidate เป็น native evidence.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | บันทึก production one-way implementation สำหรับ review ก่อนเปิดใช้ |

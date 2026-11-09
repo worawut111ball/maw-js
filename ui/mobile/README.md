@@ -132,3 +132,19 @@ Status/capability changes ใน session เดิมอัปเดต controls
 | 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ optional owned transport/text turn/status, ปิด TUI fallback, เก็บไฟล์/draft และแก้ facts reference 1024 พร้อม browser fixtures |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | แก้ P1 cached room protocol identity ของ header switch; เพิ่ม actual owned inventory header/stale confirm regression และทวน acceptance fixtures โดยไม่รัน native |
 | 8 พ.ย. 69 | Codex cmdmap/p5 | ต่อ bounded authorization purpose/profile/action/expiry/budget guards แยก read-only state/history และเพิ่ม actual API/composition DI browser integration |
+
+## ปรับปรุง 9 พ.ย. 69 — CLOSE one-way
+
+Capabilities `switchDirections` คุมปุ่มสลับ Codex→Claude; Claude→Codex disabled พร้อมข้อความ “ยังพัฒนาอยู่”. Error มี `data-continuity-error`; uncertain ไม่มี automatic resend และรักษา draft. Browser fixture ผ่าน 10 cases ตาม `/tmp/maw-close-p4-browser-final.log`; ยังไม่ deploy.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | บันทึก production one-way implementation สำหรับ review ก่อนเปิดใช้ |
+
+### Herdr incremental history — 9 พ.ย. 69
+
+`history_indexing` เป็นสถานะเตรียมประวัติชั่วคราว: แสดงข้อความกำลังเตรียมและ poll ต่อ; แสดงประวัติเดิมได้เฉพาะ verified binding เดิมพร้อมป้ายข้อมูลเก่า ไม่ดึง cache ของ agent/session ใหม่ และไม่ล้าง draft. Backend/pagination tests และ browserผลfinalอยู่ CLOSE review packet.
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 9 พ.ย. 69 | Codex root | รักษาประวัติ same binding ระหว่าง bounded indexing |

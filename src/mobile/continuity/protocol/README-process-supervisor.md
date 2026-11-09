@@ -45,7 +45,7 @@ EOF ขณะ child ยังอยู่ทำให้ assertRunning/send ป�
 
 ## Bounds และ failure behavior
 
-Defaults: preflight/pin 10s, lifetime 120s, write 5s, graceful close 250ms, SIGTERM 500ms, SIGKILL wait 1s; frame 8MiB, cumulative stdout 32MiB, stderr 256KiB, pending writes 4, launch records 1024. Constructor รับ finite limits ที่ตรวจช่วงแล้วเท่านั้น Pipe transform ใช้ 64KiB high-water mark จึง backpressure เมื่อ driver ยังไม่อ่าน
+Defaults: preflight/pin 10s, lifetime 120s เฉพาะ `lifetimeMode: bounded` (ค่าเริ่มต้น), write 5s, graceful close 250ms, SIGTERM 500ms, SIGKILL wait 1s; frame 8MiB, cumulative stdout 32MiB, stderr 256KiB, pending writes 4, launch records 1024. Constructor รับ finite limits ที่ตรวจช่วงแล้วเท่านั้น Pipe transform ใช้ 64KiB high-water mark จึง backpressure เมื่อ driver ยังไม่อ่าน
 
 เมื่อ stderr/output cap หรือ write/read failure เกิดขึ้น supervisor หยุด owned child ผ่าน cleanup ไม่มี raw frame/error content ใน error. Stderr drain ไม่เก็บ content เลย จึงไม่ต้องเดาว่า regex redact credential ครบหรือไม่. Preflight failure คืน sanitized code และถือ permit ใช้แล้วใน instance; late preflight resolution หลัง timeout ไม่ spawn
 
@@ -55,7 +55,8 @@ Defaults: preflight/pin 10s, lifetime 120s, write 5s, graceful close 250ms, SIGT
 - Pin hash/canonical file ตรวจจาก open file ก่อน spawn แต่ไม่มี atomic execute-from-open-file proof; root ต้องรักษา trusted native path integrity หากไฟล์ถูกแก้ได้โดยผู้โจมตีระหว่าง hash กับ spawn ต้องคง BLOCK
 - Signals ใช้ owned ChildProcess handle ไม่รับ raw PID. ไม่รับรอง descendant process tree/external TUI ทั้งเครื่อง; root trusted pending/external ownership evidence ยังจำเป็น ไม่ฆ่า process อื่นเพื่อให้ได้ proof
 - Failed spawn/kill/exit observation ไม่ปล่อย lifetime leaseเอง. ไม่มี process reconnect/adoption/TTL/user unlock
-- ไม่มี network/model/native pilot ใน verification รอบนี้ และไม่มี production wiring/default activation
+- ไม่มี network/model/native pilot ใน verification รอบนี้; `prepareOneWayServerHost` เลือก `owned-session` ผ่าน trusted constructor เท่านั้น ไม่เปิดใช้อัตโนมัติ
+- `lifetimeMode: owned-session` ไม่มี lifetime timer: session อยู่จน explicit cleanup หรือ failure/output bounds เดิม ไม่รับค่านี้จาก browser และไม่เปลี่ยน pending-work/exit/lease guards; `bounded` ยังคง timeout เดิม
 
 ## Verification
 
@@ -73,3 +74,5 @@ bun x tsc --noEmit --target ESNext --module ESNext --moduleResolution bundler --
 | วันที่ | ใคร | งาน |
 |---|---|---|
 | 8 พ.ย. 69 | Codex p4 | เพิ่ม trusted preflight private child supervisor/bounded JSONL/owned exit evidence พร้อม fixture-child tests; ประสาน p2/runtime-host โดย Herdr ไม่แก้ lease/shared files |
+
+| 9 พ.ย. 69 | Codex root/p4 | เพิ่ม owned-session สำหรับ explicit production startup; local Node fixture regression 24 pass / 143 expects ตาม `/tmp/maw-production-lifetime-p4-regression.log`; ไม่มี native/server execution |
