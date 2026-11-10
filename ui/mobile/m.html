@@ -1201,6 +1201,19 @@ function renderList(list) {
   return out.join("");
 }
 
+/** Images in a just-rendered message have no intrinsic size yet when we scroll to bottom (scrollHeight is
+ *  still short), so the real bottom lands below the viewport until they finish loading. Snap back down once
+ *  they do — only if we're still near the bottom we just set (a manual scroll up in that instant wins). */
+function settleImages(scr) {
+  const imgs = [...scr.querySelectorAll("img.upimg")].filter(img => !img.complete);
+  if (!imgs.length) return;
+  let pending = imgs.length;
+  const settle = () => {
+    if (--pending > 0 || document.getElementById("screen") !== scr) return;
+    if (scr.scrollTop + scr.clientHeight >= scr.scrollHeight - scr.clientHeight) scr.scrollTop = scr.scrollHeight;
+  };
+  imgs.forEach(img => { img.addEventListener("load", settle, { once: true }); img.addEventListener("error", settle, { once: true }); });
+}
 async function loadChat(scr, older) {
   const ws = state.ws, room = state.room, mode = state.mode, binding = chatBinding(ws, room);
   const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
@@ -1238,7 +1251,7 @@ async function loadChat(scr, older) {
   scr.querySelectorAll("details.tgroup").forEach(d => d.addEventListener("toggle", () => { const g = d.dataset.g; d.open ? state.open.add(g) : state.open.delete(g); }));
   scr.querySelectorAll("[data-x]").forEach(a => a.onclick = () => { const k = a.dataset.x; state.open.has(k) ? state.open.delete(k) : state.open.add(k); scr._sig = ""; loadChat(scr); });
   if (older) scr.scrollTop = scr.scrollHeight - oldH + oldTop;
-  else if (state.follow || atBottom || !prev) scr.scrollTop = scr.scrollHeight;
+  else if (state.follow || atBottom || !prev) { scr.scrollTop = scr.scrollHeight; settleImages(scr); }
   else { scr.scrollTop = oldTop; if (grew) showNewPill(scr); }
   return c;
 }
