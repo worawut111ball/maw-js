@@ -10,7 +10,7 @@
   let armedAt = 0, armedRoom = "";
 
   mawExt.keys.push({
-    label: "สลับเป็น…",
+    label: "สลับ Codex⇄Claude",
     show: ({ w, room }) => w?.id === "tmux" && (room?.agent === "claude" || room?.agent === "codex"),
     onClick: async ({ w, room }) => {
       const to = other(room.agent), key = w.id + "/" + room.id;
