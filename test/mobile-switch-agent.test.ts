@@ -139,4 +139,9 @@ describe("agentReady / typeWhenReady", () => {
     await typeWhenReady({ kind: "tmux", pane: "%1", label: "%1" }, "hi", 10_000, async () => screens[Math.min(i++, 2)], async (_c: any, t: string) => { typed.push(t); }, async () => {});
     expect(typed).toEqual(["hi"]); expect(i).toBe(3);
   });
+  test("typeWhenReady never types blind into a startup dialog that never clears", async () => {
+    const typed: string[] = [];
+    await typeWhenReady({ kind: "tmux", pane: "%1", label: "%1" }, "trust me", 50, async () => "hooks\n  t trust all · enter review · esc close", async (_c: any, t: string) => { typed.push(t); }, async () => new Promise(r => setTimeout(r, 5)));
+    expect(typed).toEqual([]);
+  });
 });

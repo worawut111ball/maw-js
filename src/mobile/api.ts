@@ -683,7 +683,8 @@ export function agentReady(screen: string): boolean {
 }
 
 /** Type the first message once the agent shows its input box. A fixed delay lost it when startup ran long (through
- *  Mind, MCP auth checks): 11 พ.ย. 69 a room opened through Mind sat empty. Tries anyway after `maxMs`. */
+ *  Mind, MCP auth checks): 11 พ.ย. 69 a room opened through Mind sat empty. Never types blind: if a startup dialog
+ *  (folder/hooks trust — "t trust all") is still up after `maxMs`, keys could pick an option, so we leave it to a person. */
 export async function typeWhenReady(ch: ReplyChannel, text: string, maxMs = 45_000,
   read = (c: ReplyChannel) => readScreen(c, 40), type = typeInto, wait = sleep): Promise<void> {
   const start = Date.now();
@@ -692,7 +693,6 @@ export async function typeWhenReady(ch: ReplyChannel, text: string, maxMs = 45_0
     if (agentReady(await read(ch).catch(() => ""))) { await wait(700); return type(ch, text); }
     await wait(1_000);
   }
-  return type(ch, text);
 }
 
 /** New tmux window (session "mm-<folder>", created if missing) running claude / codex / a shell in `dir`. */
