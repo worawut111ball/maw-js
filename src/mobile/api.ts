@@ -674,6 +674,27 @@ export function agentBin(agent: "claude" | "codex", dir = MIND_ENTRY_DIR): strin
   return existsSync(p) ? p : agent;
 }
 
+/** The agent in a fresh pane is ready for a message: Claude's input box (❯ + nbsp) or Codex's (› not a numbered menu),
+ *  and no startup dialog (folder trust, update) in the way. */
+export function agentReady(screen: string): boolean {
+  const plain = screen.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+  if (/trust (the files|this folder)|Do you trust|Update available/i.test(plain)) return false;
+  return /^❯ /m.test(plain) || /^› (?!\d+\. )/m.test(plain);
+}
+
+/** Type the first message once the agent shows its input box. A fixed delay lost it when startup ran long (through
+ *  Mind, MCP auth checks): 11 พ.ย. 69 a room opened through Mind sat empty. Tries anyway after `maxMs`. */
+export async function typeWhenReady(ch: ReplyChannel, text: string, maxMs = 45_000,
+  read = (c: ReplyChannel) => readScreen(c, 40), type = typeInto, wait = sleep): Promise<void> {
+  const start = Date.now();
+  await wait(1_500);
+  while (Date.now() - start < maxMs) {
+    if (agentReady(await read(ch).catch(() => ""))) { await wait(700); return type(ch, text); }
+    await wait(1_000);
+  }
+  return type(ch, text);
+}
+
 /** New tmux window (session "mm-<folder>", created if missing) running claude / codex / a shell in `dir`. */
 export async function openTmuxRoom(dir: string, agent: string, prompt?: string, run = (args: string[]) => execFileSync("tmux", args, { encoding: "utf-8", timeout: 5_000 }), bin: (a: "claude" | "codex") => string = agentBin) {
   const session = "mm-" + (dir.split("/").pop() || "home").replace(/[^\w-]/g, "-").slice(0, 30);
@@ -683,7 +704,7 @@ export async function openTmuxRoom(dir: string, agent: string, prompt?: string, 
     ? run(["new-window", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "-c", dir, ...cmd])
     : run(["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", session, "-c", dir, ...cmd])).trim();
   if (!/^%\d+$/.test(pane)) throw new Error("tmux ไม่คืน pane id");
-  if (prompt && cmd.length) setTimeout(async () => { try { await typeInto({ kind: "tmux", pane, label: pane }, prompt); } catch { /* window closed */ } }, 4_000);
+  if (prompt && cmd.length) void typeWhenReady({ kind: "tmux", pane, label: pane }, prompt).catch(() => { /* window closed */ });
   panesCache.at = 0;
   return { session, pane };
 }

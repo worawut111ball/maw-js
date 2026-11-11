@@ -12,7 +12,7 @@
 // รองรับเฉพาะห้อง tmux (ห้อง Superset/Herdr ยังไม่ทำ)
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
-import { agentBin, claudeTranscript, listTmuxPanes, readLiveRooms, readScreen, roomChannel, typeInto, type ChatItem, type TmuxPane } from "./ctx";
+import { agentBin, typeWhenReady, claudeTranscript, listTmuxPanes, readLiveRooms, readScreen, roomChannel, typeInto, type ChatItem, type TmuxPane } from "./ctx";
 
 const TMUX = existsSync("/opt/homebrew/bin/tmux") ? "/opt/homebrew/bin/tmux" : "tmux";
 const AGENTS = ["claude", "codex"] as const;
@@ -61,12 +61,13 @@ export function findExisting(all: TmuxPane[], from: TmuxPane, to: Agent): TmuxPa
 
 interface Deps {
   panes?: typeof listTmuxPanes; run?: Runner; type?: typeof typeInto; screen?: typeof readScreen;
-  liveRooms?: typeof readLiveRooms; transcript?: typeof claudeTranscript; delayMs?: number; bin?: typeof agentBin;
+  liveRooms?: typeof readLiveRooms; transcript?: typeof claudeTranscript; delayMs?: number; bin?: typeof agentBin; whenReady?: (ch: { kind: "tmux"; pane: string; label: string }, text: string) => Promise<void>;
 }
 
 export function mount(app: any, deps: Deps = {}): void {
   const panes = deps.panes ?? listTmuxPanes, run = deps.run ?? realRun, type = deps.type ?? typeInto, screen = deps.screen ?? readScreen;
-  const liveRooms = deps.liveRooms ?? readLiveRooms, transcript = deps.transcript ?? claudeTranscript, delayMs = deps.delayMs ?? 4_000, bin = deps.bin ?? agentBin;
+  const liveRooms = deps.liveRooms ?? readLiveRooms, transcript = deps.transcript ?? claudeTranscript, bin = deps.bin ?? agentBin,
+    whenReady = deps.whenReady ?? ((ch, text) => typeWhenReady(ch, text, 45_000, c => screen(c, 40), type));
 
   /** บริบทของห้องต้นทาง: ประวัติแชทถ้ามี (Claude ที่มี live room ผูก pane นี้) ไม่งั้นจอ */
   async function contextOf(pane: TmuxPane): Promise<{ body: string; kind: "chat" | "screen" | "none" }> {
@@ -106,9 +107,9 @@ export function mount(app: any, deps: Deps = {}): void {
 
     if (ctx.kind !== "none") {
       const prompt = buildHandoffPrompt({ agent: NAME[pane.agent as Agent] ?? "agent", label: pane.session }, ctx.body, ctx.kind, !!existing);
-      const send = () => type({ kind: "tmux", pane: target, label: target }, prompt).catch(() => { /* หน้าต่างอาจถูกปิดไปก่อนพิมพ์ทัน */ });
-      if (existing) await send();            // ตัวเดิมพร้อมอยู่แล้ว ส่งเลย
-      else setTimeout(send, delayMs);        // ตัวใหม่ต้องรอเปิดเสร็จก่อน
+      const ch2 = { kind: "tmux" as const, pane: target, label: target };
+      if (existing) await type(ch2, prompt).catch(() => { /* หน้าต่างอาจถูกปิดไปแล้ว */ });   // ตัวเดิมพร้อมอยู่แล้ว ส่งเลย
+      else void whenReady(ch2, prompt).catch(() => { /* หน้าต่างอาจถูกปิดไปก่อนพิมพ์ทัน */ });   // ตัวใหม่: รอกล่องพิมพ์พร้อมก่อน
     }
     return { ok: true, workspace: "tmux", room: target, session: pane.session, agent: to, reused: !!existing, context: ctx.kind };
   });

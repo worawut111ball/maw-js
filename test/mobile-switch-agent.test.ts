@@ -57,12 +57,14 @@ describe("switch-agent pack — pure functions", () => {
 describe("switch-agent pack — route", () => {
   const codex: TmuxPane = { id: "%1", session: "team1-oracle", window: "0", cwd: "/Users/ball/oracle", agent: "codex" };
   const claudeOld: TmuxPane = { id: "%7", session: "team1-oracle", window: "1", cwd: "/Users/ball/oracle", agent: "claude" };
-  const base = { liveRooms: () => new Map(), transcript: () => null, delayMs: 0, bin: (a: string) => a };
+  const base = { liveRooms: () => new Map(), transcript: () => null, bin: (a: string) => a };
+  // new windows type via whenReady (waits for the input box) — tests type straight away through the test's own `type`
+  const mountT = (app: any, d: any) => mount(app, { ...base, ...d, whenReady: (ch: any, t: string) => (d.type ?? (async () => {}))(ch, t) });
 
   test("first switch: new window in the same session, screen context typed after the delay", async () => {
     const runs: string[][] = [], typed: any[] = [];
     const app = new Elysia();
-    mount(app, { ...base, panes: () => [codex], run: a => { runs.push(a); return "%9\n"; }, type: async (ch, t) => { typed.push({ ch, t }); }, screen: async () => "\x1b[1mจอเดิม\x1b[0m" });
+    mountT(app, { panes: () => [codex], run: a => { runs.push(a); return "%9\n"; }, type: async (ch, t) => { typed.push({ ch, t }); }, screen: async () => "\x1b[1mจอเดิม\x1b[0m" });
     const res: any = await request(app, URL, { to: "claude" }).then((r: Response) => r.json());
     expect(res).toEqual({ ok: true, workspace: "tmux", room: "%9", session: "team1-oracle", agent: "claude", reused: false, context: "screen" });
     expect(runs[0].at(-1)).toBe("claude");
@@ -76,7 +78,7 @@ describe("switch-agent pack — route", () => {
   test("switching back reuses the agent already open in this session — no new window, returning summary", async () => {
     const runs: string[][] = [], typed: any[] = [];
     const app = new Elysia();
-    mount(app, { ...base, panes: () => [codex, claudeOld], run: a => { runs.push(a); return "%9\n"; }, type: async (ch, t) => { typed.push({ ch, t }); }, screen: async () => "x" });
+    mountT(app, { panes: () => [codex, claudeOld], run: a => { runs.push(a); return "%9\n"; }, type: async (ch, t) => { typed.push({ ch, t }); }, screen: async () => "x" });
     const res: any = await request(app, URL, { to: "claude" }).then((r: Response) => r.json());
     expect(res.room).toBe("%7");
     expect(res.reused).toBe(true);
@@ -89,7 +91,7 @@ describe("switch-agent pack — route", () => {
     const typed: string[] = [];
     const app = new Elysia();
     const fromClaude: TmuxPane = { ...codex, agent: "claude" };
-    mount(app, { ...base, panes: () => [fromClaude], run: () => "%9\n", type: async (_ch, t) => { typed.push(t); }, screen: async () => "จอ",
+    mountT(app, { panes: () => [fromClaude], run: () => "%9\n", type: async (_ch, t) => { typed.push(t); }, screen: async () => "จอ",
       liveRooms: () => new Map([["sess", { pid: 1, sessionId: "sess", status: null, name: null, channel: { kind: "tmux", pane: "%1", label: "%1" } }]]) as any,
       transcript: () => [{ i: 0, role: "user", ts: null, text: "แก้บั๊ก X" }, { i: 1, role: "assistant", ts: null, text: "แก้แล้วที่ไฟล์ Y" }] });
     const res: any = await request(app, URL, { to: "codex" }).then((r: Response) => r.json());
@@ -101,7 +103,7 @@ describe("switch-agent pack — route", () => {
   });
 
   test("rejects bad target, non-tmux room, same agent; 404 when gone; 502 on tmux failure", async () => {
-    const mk = (d: any = {}) => { const app = new Elysia(); mount(app, { ...base, panes: () => [codex], screen: async () => "", ...d }); return app; };
+    const mk = (d: any = {}) => { const app = new Elysia(); mountT(app, { panes: () => [codex], screen: async () => "", ...d }); return app; };
     expect((await request(mk(), URL, { to: "gemini" })).status).toBe(400);
     expect((await request(mk(), "/rooms/not-a-uuid/nope/switch-agent", { to: "claude" })).status).toBe(400);
     expect((await request(mk(), URL, { to: "codex" })).status).toBe(400);
@@ -112,11 +114,28 @@ describe("switch-agent pack — route", () => {
   test("still opens the room when no context can be read — nothing typed", async () => {
     const typed: any[] = [];
     const app = new Elysia();
-    mount(app, { ...base, panes: () => [codex], run: () => "%9\n", screen: async () => { throw new Error("gone"); }, type: async (_c, t) => { typed.push(t); } });
+    mountT(app, { panes: () => [codex], run: () => "%9\n", screen: async () => { throw new Error("gone"); }, type: async (_c, t) => { typed.push(t); } });
     const res: any = await request(app, URL, { to: "claude" }).then((r: Response) => r.json());
     expect(res.ok).toBe(true);
     expect(res.context).toBe("none");
     await new Promise(r => setTimeout(r, 5));
     expect(typed).toHaveLength(0);
+  });
+});
+
+describe("agentReady / typeWhenReady", () => {
+  const { agentReady, typeWhenReady } = require("../src/mobile/api");
+  test("ready = Claude input box (❯+nbsp) or Codex prompt; not a trust/update menu", () => {
+    expect(agentReady("header\n❯ \n───")).toBe(true);
+    expect(agentReady("› Ask Codex to do anything")).toBe(true);
+    expect(agentReady("Do you trust the files in this folder?\n❯ 1. Yes, proceed")).toBe(false);
+    expect(agentReady("✨ Update available!\n› 1. Update now")).toBe(false);
+    expect(agentReady("› 1. Yes")).toBe(false);
+    expect(agentReady("loading…")).toBe(false);
+  });
+  test("typeWhenReady waits for the box, then types once", async () => {
+    const screens = ["loading", "Do you trust the files", "❯ "]; let i = 0; const typed: string[] = [];
+    await typeWhenReady({ kind: "tmux", pane: "%1", label: "%1" }, "hi", 10_000, async () => screens[Math.min(i++, 2)], async (_c: any, t: string) => { typed.push(t); }, async () => {});
+    expect(typed).toEqual(["hi"]); expect(i).toBe(3);
   });
 });
