@@ -12,7 +12,7 @@
 // รองรับเฉพาะห้อง tmux (ห้อง Superset/Herdr ยังไม่ทำ)
 import { execFileSync } from "child_process";
 import { existsSync } from "fs";
-import { claudeTranscript, listTmuxPanes, readLiveRooms, readScreen, roomChannel, typeInto, type ChatItem, type TmuxPane } from "./ctx";
+import { agentBin, claudeTranscript, listTmuxPanes, readLiveRooms, readScreen, roomChannel, typeInto, type ChatItem, type TmuxPane } from "./ctx";
 
 const TMUX = existsSync("/opt/homebrew/bin/tmux") ? "/opt/homebrew/bin/tmux" : "tmux";
 const AGENTS = ["claude", "codex"] as const;
@@ -47,8 +47,8 @@ type Runner = (args: string[]) => string;
 const realRun: Runner = args => execFileSync(TMUX, args, { encoding: "utf-8", timeout: 5_000 });
 
 /** หน้าต่างใหม่ใน tmux session เดิม (ไม่สร้าง session ใหม่ ต่างจาก openTmuxRoom ใน api.ts ที่สร้าง session ชื่อ "mm-<โฟลเดอร์>") */
-export function openWindowInSameSession(session: string, dir: string, agent: Agent, run: Runner = realRun): string {
-  const pane = run(["new-window", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "-c", dir, agent]).trim();
+export function openWindowInSameSession(session: string, dir: string, command: string, run: Runner = realRun): string {
+  const pane = run(["new-window", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "-c", dir, command]).trim();
   if (!/^%\d+$/.test(pane)) throw new Error("tmux ไม่คืน pane id");
   return pane;
 }
@@ -61,12 +61,12 @@ export function findExisting(all: TmuxPane[], from: TmuxPane, to: Agent): TmuxPa
 
 interface Deps {
   panes?: typeof listTmuxPanes; run?: Runner; type?: typeof typeInto; screen?: typeof readScreen;
-  liveRooms?: typeof readLiveRooms; transcript?: typeof claudeTranscript; delayMs?: number;
+  liveRooms?: typeof readLiveRooms; transcript?: typeof claudeTranscript; delayMs?: number; bin?: typeof agentBin;
 }
 
 export function mount(app: any, deps: Deps = {}): void {
   const panes = deps.panes ?? listTmuxPanes, run = deps.run ?? realRun, type = deps.type ?? typeInto, screen = deps.screen ?? readScreen;
-  const liveRooms = deps.liveRooms ?? readLiveRooms, transcript = deps.transcript ?? claudeTranscript, delayMs = deps.delayMs ?? 4_000;
+  const liveRooms = deps.liveRooms ?? readLiveRooms, transcript = deps.transcript ?? claudeTranscript, delayMs = deps.delayMs ?? 4_000, bin = deps.bin ?? agentBin;
 
   /** บริบทของห้องต้นทาง: ประวัติแชทถ้ามี (Claude ที่มี live room ผูก pane นี้) ไม่งั้นจอ */
   async function contextOf(pane: TmuxPane): Promise<{ body: string; kind: "chat" | "screen" | "none" }> {
@@ -100,7 +100,7 @@ export function mount(app: any, deps: Deps = {}): void {
     let target: string;
     if (existing) target = existing.id;
     else {
-      try { target = openWindowInSameSession(pane.session, pane.cwd, to, run); }
+      try { target = openWindowInSameSession(pane.session, pane.cwd, bin(to), run); }   // ผ่าน Mind ถ้าติดตั้ง mind-entry
       catch { set.status = 502; return { ok: false, error: "เปิดห้องใหม่ไม่สำเร็จ" }; }
     }
 

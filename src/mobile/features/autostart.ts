@@ -8,7 +8,7 @@ import { execFileSync } from "child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { allowedDir, listTmuxPanes } from "../api";
+import { agentBin, allowedDir, listTmuxPanes } from "../api";
 
 export type Agent = "claude" | "codex" | "shell";
 export interface AutoRoom { session: string; dir: string; agent: Agent; skipPermissions: boolean }
@@ -32,12 +32,13 @@ function save(list: AutoRoom[], file = FILE) { writeFileSync(file, JSON.stringif
 /** Shell command tmux runs in the new session: continue the last chat in that folder, else start fresh.
  *  When the agent quits (e.g. "No, exit" on the trust prompt Claude shows for ~ on every start) the room drops to a
  *  login shell instead of closing — the tmux session, and the room on the phone, stay. */
-export function commandFor(r: AutoRoom): string | null {
+export function commandFor(r: AutoRoom, bin: (a: "claude" | "codex") => string = agentBin): string | null {
   if (r.agent === "shell") return null;
   const keep = `; echo "[agent ended — type claude / codex to start again]"; exec "\${SHELL:-/bin/zsh}" -l`;
-  if (r.agent === "codex") return `codex resume --last || codex${keep}`;
-  const f = r.skipPermissions ? " --dangerously-skip-permissions" : "";
-  return `claude --continue${f} || claude${f}${keep}`;
+  const q = (s: string) => s.includes("/") ? `'${s.replace(/'/g, `'\\''`)}'` : s;   // shim path (through Mind) or plain name
+  if (r.agent === "codex") { const c = q(bin("codex")); return `${c} resume --last || ${c}${keep}`; }
+  const f = r.skipPermissions ? " --dangerously-skip-permissions" : "", c = q(bin("claude"));
+  return `${c} --continue${f} || ${c}${f}${keep}`;
 }
 
 type Tmux = (args: string[]) => string;

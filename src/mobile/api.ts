@@ -665,10 +665,19 @@ export function cloneUrlOk(url: unknown): string | null {
 }
 export const repoNameFromUrl = (u: string) => (u.replace(/\/+$/, "").split(/[\/:]/).pop() || "repo").replace(/\.git$/, "");
 
+/** claude / codex the way a terminal runs them: through Mind via the mind-entry shim (~/.artron/entry/bin, 11 พ.ย. 69 —
+ *  ψ/incubate/Artron-Innovative-Co-Ltd/artron-cli/PLAN-mind-entry-machine-wide-20261111.md) when it is installed, else the
+ *  plain name. tmux / launchd PATH has no shim dir, so rooms get the full path. Uninstall the shim → rooms go direct again. */
+export const MIND_ENTRY_DIR = join(homedir(), ".artron", "entry", "bin");
+export function agentBin(agent: "claude" | "codex", dir = MIND_ENTRY_DIR): string {
+  const p = join(dir, agent);
+  return existsSync(p) ? p : agent;
+}
+
 /** New tmux window (session "mm-<folder>", created if missing) running claude / codex / a shell in `dir`. */
-export async function openTmuxRoom(dir: string, agent: string, prompt?: string, run = (args: string[]) => execFileSync("tmux", args, { encoding: "utf-8", timeout: 5_000 })) {
+export async function openTmuxRoom(dir: string, agent: string, prompt?: string, run = (args: string[]) => execFileSync("tmux", args, { encoding: "utf-8", timeout: 5_000 }), bin: (a: "claude" | "codex") => string = agentBin) {
   const session = "mm-" + (dir.split("/").pop() || "home").replace(/[^\w-]/g, "-").slice(0, 30);
-  const cmd = agent === "claude" ? ["claude"] : agent === "codex" ? ["codex"] : [];
+  const cmd = agent === "claude" ? [bin("claude")] : agent === "codex" ? [bin("codex")] : [];
   let exists = true; try { run(["has-session", "-t", "=" + session]); } catch { exists = false; }
   const pane = (exists
     ? run(["new-window", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "-c", dir, ...cmd])

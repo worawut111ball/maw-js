@@ -57,7 +57,7 @@ describe("switch-agent pack — pure functions", () => {
 describe("switch-agent pack — route", () => {
   const codex: TmuxPane = { id: "%1", session: "team1-oracle", window: "0", cwd: "/Users/ball/oracle", agent: "codex" };
   const claudeOld: TmuxPane = { id: "%7", session: "team1-oracle", window: "1", cwd: "/Users/ball/oracle", agent: "claude" };
-  const base = { liveRooms: () => new Map(), transcript: () => null, delayMs: 0 };
+  const base = { liveRooms: () => new Map(), transcript: () => null, delayMs: 0, bin: (a: string) => a };
 
   test("first switch: new window in the same session, screen context typed after the delay", async () => {
     const runs: string[][] = [], typed: any[] = [];

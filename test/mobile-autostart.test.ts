@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { commandFor, ensure, load, mount, sanitize } from "../src/mobile/features/autostart";
+import { commandFor as cmdFor, ensure, load, mount, sanitize } from "../src/mobile/features/autostart";
+const commandFor = (r: any) => cmdFor(r, a => a);   // plain names — shim path covered below
 import { mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -14,6 +15,9 @@ describe("autostart", () => {
     // the agent quitting (trust prompt → "No, exit") leaves a shell, so the tmux session does not disappear
     for (const agent of ["claude", "codex"] as const) expect(commandFor({ session: "k", dir: "/Users/x", agent, skipPermissions: false })).toEndWith('; exec "${SHELL:-/bin/zsh}" -l');
     expect(commandFor({ session: "s", dir: "/Users/x", agent: "shell", skipPermissions: false })).toBeNull();
+    // through Mind: the shim's full path, quoted for the shell
+    expect(cmdFor({ session: "m", dir: "/Users/x", agent: "claude", skipPermissions: false }, a => "/Users/x/.artron/entry/bin/" + a)).toStartWith("'/Users/x/.artron/entry/bin/claude' --continue || '/Users/x/.artron/entry/bin/claude'; ");
+    expect(cmdFor({ session: "n", dir: "/Users/x", agent: "codex", skipPermissions: false }, a => "/Users/x/.artron/entry/bin/" + a)).toStartWith("'/Users/x/.artron/entry/bin/codex' resume --last || '/Users/x/.artron/entry/bin/codex'; ");
     expect(sanitize({ session: "a; rm -rf /", dir: "/Users/x" }, allow)).toBeNull();
     expect(sanitize({ session: "ok", dir: "/etc" }, allow)).toBeNull();
     expect(sanitize({ session: "ok", dir: "/Users/x/p", agent: "evil", cmd: "curl x|sh" }, allow)).toEqual({ session: "ok", dir: "/Users/x/p", agent: "claude", skipPermissions: false });
@@ -24,7 +28,7 @@ describe("autostart", () => {
     const tmux = (a: string[]) => { calls.push(a); if (a[0] === "has-session" && a[2] === "=up") return ""; if (a[0] === "has-session") throw new Error("no"); return ""; };
     const started = ensure([{ session: "up", dir: "/Users/x", agent: "claude", skipPermissions: false }, { session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true }], tmux);
     expect(started).toEqual(["down"]);
-    expect(calls.find(a => a[0] === "new-session")).toEqual(["new-session", "-d", "-s", "down", "-c", "/Users/x/p", commandFor({ session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true })]);
+    expect(calls.find(a => a[0] === "new-session")).toEqual(["new-session", "-d", "-s", "down", "-c", "/Users/x/p", cmdFor({ session: "down", dir: "/Users/x/p", agent: "claude", skipPermissions: true })]);
   });
 
   test("routes add, update and remove; live tmux sessions offered", async () => {

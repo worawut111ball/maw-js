@@ -684,11 +684,20 @@ describe("open local repos / folders from the phone", () => {
   test("openTmuxRoom: new session when missing, new window when it exists; agent command only from allow-list", async () => {
     const calls: string[][] = [];
     const run = (args: string[]) => { calls.push(args); if (args[0] === "has-session") throw new Error("no"); return "%42\n"; };
-    expect(await openTmuxRoom("/Users/x/work/erp", "codex", undefined, run)).toEqual({ session: "mm-erp", pane: "%42" });
+    expect(await openTmuxRoom("/Users/x/work/erp", "codex", undefined, run, a => a)).toEqual({ session: "mm-erp", pane: "%42" });
     expect(calls[1]).toEqual(["new-session", "-d", "-P", "-F", "#{pane_id}", "-s", "mm-erp", "-c", "/Users/x/work/erp", "codex"]);
     const c2: string[][] = [];
     await openTmuxRoom("/Users/x/work/erp", "shell; rm -rf /", undefined, (a: string[]) => { c2.push(a); return "%43"; });
     expect(c2[1]).toEqual(["new-window", "-P", "-F", "#{pane_id}", "-t", "=mm-erp:", "-c", "/Users/x/work/erp"]);
+  });
+
+  test("agentBin: Mind shim full path when installed (tmux PATH has no shim dir), plain name otherwise", () => {
+    const { agentBin } = require("../src/mobile/api");
+    const { mkdtempSync, writeFileSync } = require("fs"), { tmpdir } = require("os"), { join } = require("path");
+    const dir = mkdtempSync(join(tmpdir(), "mind-entry-"));
+    writeFileSync(join(dir, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+    expect(agentBin("claude", dir)).toBe(join(dir, "claude"));
+    expect(agentBin("codex", dir)).toBe("codex");
   });
 });
 
