@@ -675,11 +675,11 @@ export function agentBin(agent: "claude" | "codex", dir = MIND_ENTRY_DIR): strin
 }
 
 /** The agent in a fresh pane is ready for a message: Claude's input box (❯ + nbsp) or Codex's (› not a numbered menu),
- *  and no startup dialog (folder trust, update) in the way. */
+ *  and no numbered startup menu (folder trust, "Update now / Skip") waiting for a choice — a notice box is fine. */
 export function agentReady(screen: string): boolean {
   const plain = screen.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
-  if (/trust (the files|this folder)|Do you trust|Update available/i.test(plain)) return false;
-  return /^❯ /m.test(plain) || /^› (?!\d+\. )/m.test(plain);
+  if (/^\s*[❯›] \d+\. /m.test(plain)) return false;
+  return /^❯\u00a0/m.test(plain) || /^› \S/m.test(plain);
 }
 
 /** Type the first message once the agent shows its input box. A fixed delay lost it when startup ran long (through

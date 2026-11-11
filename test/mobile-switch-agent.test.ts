@@ -131,6 +131,7 @@ describe("agentReady / typeWhenReady", () => {
     expect(agentReady("Do you trust the files in this folder?\n❯ 1. Yes, proceed")).toBe(false);
     expect(agentReady("✨ Update available!\n› 1. Update now")).toBe(false);
     expect(agentReady("› 1. Yes")).toBe(false);
+    expect(agentReady("│ ✨ Update available! 0.164 -> 0.167 │\n│ See full release notes │\n› Ask Codex to do anything")).toBe(true);   // notice, not a menu
     expect(agentReady("loading…")).toBe(false);
   });
   test("typeWhenReady waits for the box, then types once", async () => {
