@@ -180,6 +180,15 @@ describe("routes", () => {
 
   test("claude-switch rooms: GET says switchable + GPT list; GPT model only there and only listed ones", async () => {
     const sw = setup([pane(BYPASS)]);
+    const { mkdtempSync: mk, writeFileSync: wf, readFileSync: rf } = require("fs");
+    const sf = join(mk(join(tmpdir(), "cs-")), "settings.json"); wf(sf, JSON.stringify({ theme: "dark" }));
+    const sw2 = (() => { const calls: string[] = []; const app = new Elysia({ prefix: "/mobile" });
+      mount(app, { roomChannel: (_w: string, r: string) => ({ kind: "tmux", pane: r, label: r }) as any, readScreen: async () => pane(BYPASS),
+        pressKey: async () => {}, typeInto: async (_c: any, t: string) => { calls.push(t); wf(sf, JSON.stringify({ theme: "dark", model: "gpt-6-astra" })); },
+        wait: async () => {}, switchable: () => true, gptModels: () => ["gpt-6-astra"], settingsFile: sf });
+      return app; })();
+    expect((await sw2.handle(new Request("http://local/mobile/rooms/tmux/%257/model", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-6-astra" }) }))).status).toBe(200);
+    expect(JSON.parse(rf(sf, "utf-8"))).toEqual({ theme: "dark" });   // Claude Code's saved default put back
     expect(await (await sw.req("/rooms/tmux/%257/mode")).json()).toMatchObject({ switchable: true, gptModels: ["gpt-6-astra", "gpt-6.1-sol"] });
     expect(await (await sw.req("/rooms/tmux/%250/mode")).json()).toMatchObject({ switchable: false, gptModels: [] });
     expect((await sw.req("/rooms/tmux/%257/model", { model: "gpt-6-astra" })).status).toBe(200);

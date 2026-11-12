@@ -9,7 +9,7 @@ import { continuityWriteFailure, createContinuityWriteAttempt, type ContinuityWr
 // "⏵⏵ bypass permissions on · 1 shell". The other indicators come from Claude Code's mode table
 // (symbol ⏸ for plan, ⏵⏵ otherwise; "<symbol> <indicator> on"); default ("manual mode") draws no indicator.
 import { execFileSync } from "child_process";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { readScreen, typeInto, pressKey, roomChannel, type ReplyChannel } from "./ctx";
@@ -118,8 +118,27 @@ export function gptModels(file = join(homedir(), ".codex", "models_cache.json"))
   } catch { return []; }
 }
 
+/** Claude Code's `/model` also saves the pick as the default for every new session (~/.claude/settings.json "model").
+ *  A switch room flipping to gpt-… must not make plain `claude` (Mind / direct — no GPT there) start on GPT: put the
+ *  previous default back once the command has landed. */
+export const CLAUDE_SETTINGS = join(homedir(), ".claude", "settings.json");
+export function readDefaultModel(file = CLAUDE_SETTINGS): { ok: boolean; model?: string } {
+  try { const d = JSON.parse(readFileSync(file, "utf-8")); return { ok: true, model: typeof d.model === "string" ? d.model : undefined }; }
+  catch { return { ok: false }; }
+}
+export function restoreDefaultModel(prev: { ok: boolean; model?: string }, file = CLAUDE_SETTINGS): void {
+  if (!prev.ok) return;
+  try {
+    const d = JSON.parse(readFileSync(file, "utf-8"));
+    if (d.model === prev.model) return;
+    if (prev.model === undefined) delete d.model; else d.model = prev.model;
+    writeFileSync(file, JSON.stringify(d, null, 2) + "\n");
+  } catch { /* settings unreadable — leave it */ }
+}
+
 export interface ModesDeps {
   writeGuard?: ContinuityWriteGuard;
+  settingsFile?: string;
   switchable?: (ch: ReplyChannel) => boolean;
   gptModels?: () => string[];
   readScreen: (ch: ReplyChannel, lines: number) => Promise<string>;
@@ -191,7 +210,9 @@ export function mount(app: any, overrides: Partial<ModesDeps> = {}): void {
     if (gpt && !(deps.switchable?.(ch) && (deps.gptModels?.() ?? []).includes(model))) { set.status = 400; return { ok: false, error: "ห้องนี้สลับเป็น GPT ไม่ได้ — เปิดห้องแบบ Claude ⇄ GPT ก่อน" }; }
     if (isCodex(body?.agent)) { set.status = 400; return { ok: false, error: "เปลี่ยน model ได้เฉพาะห้อง Claude" }; }
     if (await busy(ch)) { set.status = 409; return { ok: false, error: "Claude กำลังทำงานอยู่ — รอให้เสร็จก่อนค่อยเปลี่ยน model" }; }
+    const sw = !!deps.switchable?.(ch), prev = sw ? readDefaultModel(deps.settingsFile) : { ok: false };
     await guardedType(ch, `/model ${model}`);
+    if (sw) { await deps.wait(1_500); restoreDefaultModel(prev, deps.settingsFile); }
     return { ok: true, model };
     } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   });
