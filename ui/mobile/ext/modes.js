@@ -97,6 +97,7 @@
     bg.innerHTML = `<div class="sheet mm-sheet"><h2>⚙ โหมด & model</h2>
       <div class="mm-sub">${esc(m.label)} · ${esc(shortModel(d) || "ไม่ทราบ model")}${d?.effort ? ` · effort ${esc(d.effort)}` : ""}</div>
       <h3>MODEL</h3><div class="mm-grid">${MODELS.map(([a, l]) => `<button data-model="${esc(a)}" class="${modelOn(a) ? "on" : ""}">${esc(l)}</button>`).join("")}</div>
+      ${d?.switchable && d.gptModels?.length ? `<h3>GPT · คุยต่อในแชทเดิม</h3><div class="mm-grid">${d.gptModels.map(g => `<button data-model="${esc(g)}" class="${curModel === g ? "on" : ""}">${esc(g.replace(/^gpt-/, "GPT "))}</button>`).join("")}</div>` : ""}
       <h3>EFFORT</h3><div class="mm-grid">${EFFORTS.map(e => `<button data-eff="${e}" class="${d?.effort === e ? "on" : ""}">${e}</button>`).join("")}</div>
       <div class="mm-note">บาง model ไม่รองรับ xhigh / max — Claude จะแจ้งบนจอเอง</div>
       <h3>บทสนทนา</h3><div class="mm-acts">

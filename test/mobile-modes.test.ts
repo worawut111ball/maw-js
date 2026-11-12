@@ -124,6 +124,8 @@ describe("routes", () => {
       typeInto: async (_ch, t) => { calls.push("type:" + t); },
       wait: async () => {},
       statusDir,
+      switchable: ch => ch.kind === "tmux" && ch.pane === "%7",   // %7 = a claude-switch room
+      gptModels: () => ["gpt-6-astra", "gpt-6.1-sol"],
     };
     const app = new Elysia({ prefix: "/mobile" });
     mount(app, deps);
@@ -174,5 +176,33 @@ describe("routes", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("กำลังทำงาน");
     expect(busy.calls).toEqual([]);
+  });
+
+  test("claude-switch rooms: GET says switchable + GPT list; GPT model only there and only listed ones", async () => {
+    const sw = setup([pane(BYPASS)]);
+    expect(await (await sw.req("/rooms/tmux/%257/mode")).json()).toMatchObject({ switchable: true, gptModels: ["gpt-6-astra", "gpt-6.1-sol"] });
+    expect(await (await sw.req("/rooms/tmux/%250/mode")).json()).toMatchObject({ switchable: false, gptModels: [] });
+    expect((await sw.req("/rooms/tmux/%257/model", { model: "gpt-6-astra" })).status).toBe(200);
+    expect((await sw.req("/rooms/tmux/%250/model", { model: "gpt-6-astra" })).status).toBe(400);   // plain Claude room
+    expect((await sw.req("/rooms/tmux/%257/model", { model: "gpt-9-made-up" })).status).toBe(400);  // not offered by the login
+    expect(sw.calls).toEqual(["type:/model gpt-6-astra"]);
+  });
+});
+
+describe("paneSwitchable / gptModels", () => {
+  const { paneSwitchable, gptModels } = require("../src/mobile/features/modes");
+  test("finds the proxy env anywhere in the pane's process tree; Mind URL is not a switch room", () => {
+    const tmux = () => "100\n";
+    const tree = " 100 1\n 200 100\n 300 200\n";
+    const env = (url: string) => (a: string[]) => a[0] === "-A" ? tree : a.at(-1) === "300" ? `claude.exe A=1 ANTHROPIC_BASE_URL=${url} B=2` : "zsh";
+    expect(paneSwitchable("%1", tmux, env("http://127.0.0.1:18765"))).toBe(true);
+    expect(paneSwitchable("%1", tmux, env("https://mind.example/api/anthropic"))).toBe(false);
+    expect(paneSwitchable("%1", () => { throw new Error("no tmux"); }, env("x"))).toBe(false);
+  });
+  test("gptModels: listed gpt-* slugs only", () => {
+    const { mkdtempSync, writeFileSync } = require("fs"), { tmpdir } = require("os"), { join } = require("path");
+    const f = join(mkdtempSync(join(tmpdir(), "gm-")), "m.json");
+    writeFileSync(f, JSON.stringify({ models: [{ slug: "gpt-6-astra", visibility: "list" }, { slug: "gpt-reserve", visibility: "hide" }, { slug: "codex-auto-review", visibility: "list" }, { slug: "gpt-x; rm", visibility: "list" }] }));
+    expect(gptModels(f)).toEqual(["gpt-6-astra"]);
   });
 });

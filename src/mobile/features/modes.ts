@@ -8,6 +8,7 @@ import { continuityWriteFailure, createContinuityWriteAttempt, type ContinuityWr
 // Footer formats verified on real Claude Code 2.1.281 panes (tmux %0/%2 + Superset): "⏵⏵ bypass permissions on (shift+tab to cycle)",
 // "⏵⏵ bypass permissions on · 1 shell". The other indicators come from Claude Code's mode table
 // (symbol ⏸ for plan, ⏵⏵ otherwise; "<symbol> <indicator> on"); default ("manual mode") draws no indicator.
+import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -87,8 +88,40 @@ export function readModelInfo(sid: string | undefined | null, dir = join(homedir
   } catch { return none; }
 }
 
+/** claude-switch rooms (12 พ.ย. 69): Claude Code talking through the local claude-codex proxy, so `/model gpt-…` keeps
+ *  the same chat. Known by the agent process env (ANTHROPIC_BASE_URL → 127.0.0.1:18765), not by the room title.
+ *  Plan: ψ/incubate/Soul-Brews-Studio/maw-js/plans/PLAN-same-chat-model-switch-20261112.md */
+export const SWITCH_PROXY = /^ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:\d+\/?$/m;
+export const GPT_MODEL = /^gpt-[a-z0-9][a-z0-9.\-]{0,40}$/;
+const ps = (args: string[]) => execFileSync("/bin/ps", args, { encoding: "utf-8", timeout: 3_000 });
+/** Is the pane's process tree running Claude Code through the switch proxy? */
+export function paneSwitchable(pane: string, run = (a: string[]) => execFileSync("tmux", a, { encoding: "utf-8", timeout: 3_000 }), psRun = ps): boolean {
+  try {
+    const root = +run(["display", "-p", "-t", pane, "#{pane_pid}"]).trim();
+    if (!root) return false;
+    const kids = new Map<number, number[]>();
+    for (const l of psRun(["-A", "-o", "pid=,ppid="]).split("\n")) { const [a, b] = l.trim().split(/\s+/).map(Number); if (a && b) kids.set(b, [...(kids.get(b) ?? []), a]); }
+    const todo = [root], seen = new Set<number>();
+    while (todo.length && seen.size < 64) {
+      const p = todo.pop()!; if (seen.has(p)) continue; seen.add(p);
+      try { if (SWITCH_PROXY.test(psRun(["eww", "-o", "command=", "-p", String(p)]).replace(/ /g, "\n"))) return true; } catch { /* gone */ }
+      todo.push(...(kids.get(p) ?? []));
+    }
+  } catch { /* no tmux / pane gone */ }
+  return false;
+}
+/** GPT models the ChatGPT login offers (Codex CLI's own cache), listed ones only. */
+export function gptModels(file = join(homedir(), ".codex", "models_cache.json")): string[] {
+  try {
+    const d = JSON.parse(readFileSync(file, "utf-8"));
+    return (d.models ?? []).filter((m: any) => m?.visibility === "list" && GPT_MODEL.test(String(m.slug))).map((m: any) => String(m.slug)).slice(0, 12);
+  } catch { return []; }
+}
+
 export interface ModesDeps {
   writeGuard?: ContinuityWriteGuard;
+  switchable?: (ch: ReplyChannel) => boolean;
+  gptModels?: () => string[];
   readScreen: (ch: ReplyChannel, lines: number) => Promise<string>;
   pressKey: (ch: ReplyChannel, label: string) => Promise<void>;
   typeInto: (ch: ReplyChannel, text: string) => Promise<void>;
@@ -96,7 +129,8 @@ export interface ModesDeps {
   statusDir?: string;
   wait: (ms: number) => Promise<void>;
 }
-const defaults: ModesDeps = { readScreen, pressKey, typeInto, roomChannel, wait: ms => new Promise(r => setTimeout(r, ms)) };
+const defaults: ModesDeps = { readScreen, pressKey, typeInto, roomChannel, wait: ms => new Promise(r => setTimeout(r, ms)),
+  switchable: ch => ch.kind === "tmux" && paneSwitchable(ch.pane), gptModels: () => gptModels() };
 
 const isCodex = (agent: unknown) => typeof agent === "string" && agent !== "" && agent !== "claude";
 
@@ -117,7 +151,9 @@ export function mount(app: any, overrides: Partial<ModesDeps> = {}): void {
     const info = readModelInfo(query?.sid, deps.statusDir);
     if (isCodex(query?.agent)) return { ok: true, mode: "unknown", ...info };
     const raw = await screen(ch);
-    return { ok: true, mode: parseMode(raw), ...info, effort: info.effort ?? parseEffortText(raw) };
+    const switchable = !!deps.switchable?.(ch);
+    return { ok: true, mode: parseMode(raw), ...info, effort: info.effort ?? parseEffortText(raw),
+      switchable, gptModels: switchable ? deps.gptModels?.() ?? [] : [] };
   });
 
   app.post("/rooms/:ws/:room/mode/cycle", async ({ params, query, body, set }: any) => {
@@ -147,9 +183,12 @@ export function mount(app: any, overrides: Partial<ModesDeps> = {}): void {
     try {
       await attempt.check();
     const model = String(body?.model ?? "");
-    if (!(MODEL_ALIASES as readonly string[]).includes(model)) { set.status = 400; return { ok: false, error: "ไม่รู้จัก model นี้" }; }
+    const gpt = GPT_MODEL.test(model);
+    if (!gpt && !(MODEL_ALIASES as readonly string[]).includes(model)) { set.status = 400; return { ok: false, error: "ไม่รู้จัก model นี้" }; }
     const ch = chan(params, set);
     if (!ch) return { ok: false, error: "ไม่พบห้องนี้" };
+    // GPT only in a claude-switch room, and only a model the ChatGPT login lists
+    if (gpt && !(deps.switchable?.(ch) && (deps.gptModels?.() ?? []).includes(model))) { set.status = 400; return { ok: false, error: "ห้องนี้สลับเป็น GPT ไม่ได้ — เปิดห้องแบบ Claude ⇄ GPT ก่อน" }; }
     if (isCodex(body?.agent)) { set.status = 400; return { ok: false, error: "เปลี่ยน model ได้เฉพาะห้อง Claude" }; }
     if (await busy(ch)) { set.status = 409; return { ok: false, error: "Claude กำลังทำงานอยู่ — รอให้เสร็จก่อนค่อยเปลี่ยน model" }; }
     await guardedType(ch, `/model ${model}`);

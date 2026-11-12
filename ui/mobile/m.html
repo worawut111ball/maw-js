@@ -2531,7 +2531,7 @@ function openProjectSheet() {
       <div class="op-acts">
         <button data-a="pin">📌 ${x.pinned ? "เปิดโปรเจคที่ปักไว้" : "ปักไว้ในแอป"}<small>ขึ้นเป็นโปรเจคในหน้าแรก มีแท็บ 📁 ไฟล์ · ⎇ Git</small></button>
         <div style="padding:10px;border-radius:12px;background:var(--card2)"><b>▶ เปิดห้องใหม่ที่นี่ (tmux)</b>
-          <div class="op-agents" style="margin-top:8px"><button data-ag="claude" class="on">✳ Claude</button><button data-ag="codex">Codex</button><button data-ag="shell">⌨ Terminal</button></div>
+          <div class="op-agents" style="margin-top:8px"><button data-ag="claude" class="on">✳ Claude</button><button data-ag="claude-switch">✳ Claude ⇄ GPT</button><button data-ag="codex">Codex</button><button data-ag="shell">⌨ Terminal</button></div>
           <textarea id="opp" rows="2" placeholder="สั่งงานแรก (ไม่ใส่ก็ได้)" style="margin-top:8px"></textarea>
           <button data-a="room" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;background:var(--accent);color:#031022;font-weight:700">▶ เปิดห้อง</button></div>
         ${x.git !== false ? `<button data-a="ss">＋ เพิ่มเข้า Superset<small>superset projects create --import · ใช้ workspace/branch แยกของ Superset ได้</small></button>` : ""}
@@ -2638,7 +2638,7 @@ async function openSkillSheet(w, room, msg) {
 async function openNewRoom(w) {
   const local = String(w.id).startsWith("dir:");
   if (!local && !state.presets.length) { try { state.presets = (await api("/agent-presets")).presets; } catch {} }
-  const opts = local ? [{ id: "claude", label: ICON.claude || "✳ Claude" }, { id: "codex", label: ICON.codex || "Codex" }, { id: "shell", label: "⌨ Terminal เปล่า" }]
+  const opts = local ? [{ id: "claude", label: ICON.claude || "✳ Claude" }, { id: "claude-switch", label: "✳ Claude ⇄ GPT" }, { id: "codex", label: ICON.codex || "Codex" }, { id: "shell", label: "⌨ Terminal เปล่า" }]
     : [...state.presets.map(p => ({ id: p.id, label: ICON[p.id] || p.label })), { id: "shell", label: "⌨ Terminal เปล่า" }];
   let pick = "claude";
   const bg = document.createElement("div"); bg.className = "sheet-bg";
