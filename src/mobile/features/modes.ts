@@ -212,7 +212,11 @@ export function mount(app: any, overrides: Partial<ModesDeps> = {}): void {
     if (await busy(ch)) { set.status = 409; return { ok: false, error: "Claude กำลังทำงานอยู่ — รอให้เสร็จก่อนค่อยเปลี่ยน model" }; }
     const sw = !!deps.switchable?.(ch), prev = sw ? readDefaultModel(deps.settingsFile) : { ok: false };
     await guardedType(ch, `/model ${model}`);
-    if (sw) { await deps.wait(1_500); restoreDefaultModel(prev, deps.settingsFile); }
+    if (sw && prev.ok) {
+      // Claude Code writes settings a moment after the command — wait for that write (≤ 8 s), then put the old default back
+      for (let i = 0; i < 16; i++) { await deps.wait(500); const now = readDefaultModel(deps.settingsFile); if (now.ok && now.model !== prev.model) break; }
+      restoreDefaultModel(prev, deps.settingsFile);
+    }
     return { ok: true, model };
     } catch(error) { const failure=attempt.failure(error,set);if(failure)return failure;throw error; }
   });
