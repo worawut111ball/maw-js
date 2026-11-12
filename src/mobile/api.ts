@@ -665,8 +665,7 @@ export function cloneUrlOk(url: unknown): string | null {
 }
 export const repoNameFromUrl = (u: string) => (u.replace(/\/+$/, "").split(/[\/:]/).pop() || "repo").replace(/\.git$/, "");
 
-/** claude / codex the way a terminal runs them: through Mind via the mind-entry shim (~/.artron/entry/bin, 11 พ.ย. 69 —
- *  ψ/incubate/Artron-Innovative-Co-Ltd/artron-cli/PLAN-mind-entry-machine-wide-20261111.md) when it is installed, else the
+/** claude / codex the way a terminal runs them: through Mind via the mind-entry shim (~/.artron/entry/bin, 11 พ.ย. 69) when it is installed, else the
  *  plain name. tmux / launchd PATH has no shim dir, so rooms get the full path. Uninstall the shim → rooms go direct again. */
 export const MIND_ENTRY_DIR = join(homedir(), ".artron", "entry", "bin");
 export function agentBin(agent: "claude" | "codex" | "claude-switch", dir = MIND_ENTRY_DIR): string {

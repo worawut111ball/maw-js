@@ -55,8 +55,8 @@ describe("switch-agent pack — pure functions", () => {
 });
 
 describe("switch-agent pack — route", () => {
-  const codex: TmuxPane = { id: "%1", session: "team1-oracle", window: "0", cwd: "/Users/ball/oracle", agent: "codex" };
-  const claudeOld: TmuxPane = { id: "%7", session: "team1-oracle", window: "1", cwd: "/Users/ball/oracle", agent: "claude" };
+  const codex: TmuxPane = { id: "%1", session: "team1-oracle", window: "0", cwd: "/Users/x/project", agent: "codex" };
+  const claudeOld: TmuxPane = { id: "%7", session: "team1-oracle", window: "1", cwd: "/Users/x/project", agent: "claude" };
   const base = { liveRooms: () => new Map(), transcript: () => null, bin: (a: string) => a };
   // new windows type via whenReady (waits for the input box) — tests type straight away through the test's own `type`
   const mountT = (app: any, d: any) => mount(app, { ...base, ...d, whenReady: (ch: any, t: string) => (d.type ?? (async () => {}))(ch, t) });

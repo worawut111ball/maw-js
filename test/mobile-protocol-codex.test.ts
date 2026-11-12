@@ -95,7 +95,8 @@ describe('Exact-turn approvals and default denial',()=>{
 });
 
 // Portable fixtures are above. If the team's actual generated schema artifact exists, validate their shape independently.
-const schemaRoot='/Users/ball/oracle/ψ/incubate/Artron-Innovative-Co-Ltd/artron-cli/checks/protocol-entry-20261108/codex-schema';
+// Optional: point MAW_CODEX_SCHEMA_ROOT at a `codex app-server generate-json-schema` output dir to run these.
+const schemaRoot=process.env.MAW_CODEX_SCHEMA_ROOT||'/nonexistent/codex-schema';
 function schemaCheck(value:any,s:any,root:any):boolean{
  if(s===true)return true;if(s===false)return false;if(s.$ref)return schemaCheck(value,root.definitions[s.$ref.split('/').at(-1)],root);
  if(s.enum&&!s.enum.some((x:any)=>JSON.stringify(x)===JSON.stringify(value)))return false;

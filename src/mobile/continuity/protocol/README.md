@@ -31,7 +31,7 @@ V2/V3 แยก `homeEnvironment` absent/present แล้ว การไม่
 
 Root รัน 8 พ.ย. 69 ได้ 62 pass / 0 fail / 174 expects ผ่าน local DI/SQLite fixtures และ pinned schema artifacts ไม่ใช่ native inference หรือการใช้ปุ่มผ่าน browser
 
-แผนและหลักฐานร่วม: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/FINISH-PLAN.md`; contract ทีม2อยู่ `~/oracle/ψ/incubate/Artron-Innovative-Co-Ltd/artron-cli/PROTOCOL-ENTRY-API.md`
+แผนและหลักฐานร่วม: `~/oracle/ψ/incubate/Soul-Brews-Studio/maw-js/plans/cross-provider-handoff/FINISH-PLAN.md`; contract ฝั่ง CLI อยู่ใน vault ส่วนตัว (ไม่อยู่ใน repo นี้)
 
 ## ประวัติ
 
