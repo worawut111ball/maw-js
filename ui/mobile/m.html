@@ -1000,7 +1000,13 @@ function renderProject() {
     // Android may kill the page while the camera / gallery is open → bring back what was typed and attached
     restoreDraft(dkey, msg, drawAtt).finally(() => { drawAtt.ready = true; if (state.files.length) saveDraftFiles(dkey, state.files); });
     msg.addEventListener("maw-redraw-att", () => drawAtt());
-    msg.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } };
+    // Enter = send on keyboard+mouse screens (Shift+Enter = new line) · touch keyboards keep Enter = new line · Ctrl/Cmd+Enter sends everywhere
+    // isComposing/229 = Thai/IME still composing → never send mid-word
+    const enterSends = matchMedia("(hover: hover) and (pointer: fine)").matches;
+    msg.onkeydown = e => {
+      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      if (e.ctrlKey || e.metaKey || (enterSends && !e.shiftKey && !e.altKey)) { e.preventDefault(); doSend(); }
+    };
     send.onclick = doSend;
     async function doSend() {
       const raw = msg.value, text = raw.trim(), files = [...state.files]; if (!text && !files.length) return;
