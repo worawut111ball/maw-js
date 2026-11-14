@@ -16,6 +16,12 @@
   .mi-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .mi-chip { padding: 5px 11px; border-radius: 999px; background: var(--card2); color: var(--dim); font: 600 12.5px var(--font); }
   .mi-chip.on { background: var(--accent); color: #031022; }
+  .mi-wr { flex: none; padding: 5px 12px; border-radius: 999px; background: var(--accent); color: #031022; font-weight: 700; font-size: 13px; }
+  .mi-form { display: grid; gap: 10px; margin-top: 8px; }
+  .mi-form label { display: grid; gap: 4px; font-size: 13px; color: var(--sub); }
+  .mi-form select, .mi-form input, .mi-form textarea { padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 16px/1.35 var(--font); outline: none; }
+  .mi-form textarea { min-height: 160px; resize: vertical; }
+  .mi-form .go { padding: 12px; border-radius: 12px; background: var(--accent); color: #031022; font-weight: 800; } .mi-form .go:disabled { opacity: .4; }
   .mi-bar .rf { margin-left: auto; width: 34px; height: 30px; border-radius: 9px; background: var(--card2); color: var(--dim); }
   .mi-list { display: grid; grid-template-columns: minmax(0, 1fr); background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
   .mi-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; width: 100%; padding: 10px 12px; text-align: left; color: var(--text); border-bottom: 1px solid var(--line); }
@@ -92,21 +98,22 @@
     const d = S.mail;
     if (!d) return `<div class="mi-empty">${S.mailErr ? esc(S.mailErr) : "กำลังโหลด Mail Box…"}</div>`;
     const flt = S.filter || (d.mail.some(mine) ? "me" : "all");
-    const list = flt === "me" ? d.mail.filter(mine) : d.mail, nMe = d.mail.filter(mine).length;
+    const sent = d.mail.filter(m => m.sentByMe);
+    const list = flt === "me" ? d.mail.filter(mine) : flt === "sent" ? sent : d.mail, nMe = d.mail.filter(mine).length;
     const armedMode = S.armed?.k?.startsWith("mode:") ? S.armed.k.slice(5) : "";
     const note = armedMode ? `แตะ "${MODES.find(m => m[0] === armedMode)[1]}" อีกครั้งเพื่อเปลี่ยน${armedMode !== "manual" ? " · จดหมายที่รอคุณอยู่จะถูกส่งให้ agent ตอบทันที" : ""}`
       : (MODES.find(m => m[0] === d.mode) || MODES[0])[2] + (d.mode !== "manual" ? " (เรื่องเดียวกันตอบเองไม่เกิน 8 รอบ)" : "");
     return `<div class="mi-x" style="margin-top:4px">การตอบจดหมายของ agent</div>
       <div class="mi-seg sm">${MODES.map(([k, l]) => `<button class="${d.mode === k ? "on" : ""} ${k} ${armedMode === k ? "armed" : ""}" data-mode="${k}" ${S.busy ? "disabled" : ""}>${l}</button>`).join("")}</div>
       <div class="mi-x ${armedMode ? "warn" : ""}">${esc(note)}</div>
-      <div class="mi-bar"><button class="mi-chip ${flt === "me" ? "on" : ""}" data-flt="me">รอฉัน ${nMe}</button><button class="mi-chip ${flt === "all" ? "on" : ""}" data-flt="all">ทั้งหมด ${d.total}</button>
+      <div class="mi-bar"><button class="mi-chip ${flt === "me" ? "on" : ""}" data-flt="me">รอฉัน ${nMe}</button><button class="mi-chip ${flt === "sent" ? "on" : ""}" data-flt="sent">ส่งแล้ว ${sent.length}</button><button class="mi-chip ${flt === "all" ? "on" : ""}" data-flt="all">ทั้งหมด ${d.total}</button><button class="mi-wr" data-compose>✉️ เขียน</button>
         <button class="rf" data-rf>${S.loading.has("mail") ? "…" : "↻"}</button></div>
       ${S.mailErr ? `<div class="mi-x warn">${esc(S.mailErr)}</div>` : ""}
       ${list.length ? `<div class="mi-list">${list.slice(0, S.shown).map(m => `<button class="mi-row ${m.needsMe ? "me" : ""}" data-mail="${esc(m.id)}">
           <span class="mi-r1"><span class="mi-pill ${esc(m.status)}">${esc(m.statusText)}</span><span class="t">${ago(m.ts)}</span></span>
           <span class="mi-sub">${esc(m.subject)}</span><span class="mi-ft">${esc(m.from)} → ${esc(m.to)}</span></button>`).join("")}
         ${list.length > S.shown ? `<button class="mi-more" data-more>แสดงเพิ่ม (${list.length - S.shown})</button>` : ""}</div>`
-        : `<div class="mi-empty">${flt === "me" ? "ไม่มีจดหมายรอคุณ 🎉" : "ยังไม่มีจดหมาย"}</div>`}`;
+        : `<div class="mi-empty">${flt === "me" ? "ไม่มีจดหมายรอคุณ 🎉" : flt === "sent" ? "ยังไม่ได้ส่งจดหมาย · แตะ ✉️ เขียน" : "ยังไม่มีจดหมาย"}</div>`}`;
   }
 
   function chatsHtml() {
@@ -205,11 +212,51 @@
     paint();
   }
 
+  // ── compose: send as MY agent (Mind /api/mail/send) · the recipient's owner still approves before their agent answers ──
+  async function openCompose() {
+    const bg = document.createElement("div"); bg.className = "sheet-bg";
+    bg.innerHTML = `<div class="sheet mi-sheet" style="position:relative"><div class="mi-empty">กำลังโหลดรายชื่อ…</div></div>`;
+    document.body.appendChild(bg);
+    const close = () => { disarm(); bg.remove(); };
+    bg.addEventListener("click", e => { if (e.target === bg) close(); });
+    const sheet = bg.querySelector(".sheet");
+    let r;
+    try { r = await api("/mind/mail/recipients"); }
+    catch (e) { sheet.innerHTML = `<button class="cl" data-cl>✕</button><div class="mi-empty">${esc(e.message)}</div>`; sheet.querySelector("[data-cl]").onclick = close; return; }
+    const f = { to: "", subject: "", body: "" };
+    const paint = () => {
+      if (!bg.isConnected) return;
+      const ok = f.to && f.body.trim(), k = "send:compose";
+      sheet.innerHTML = `<button class="cl" data-cl aria-label="ปิด">✕</button><h2>✉️ เขียนจดหมาย</h2>
+        <div class="mi-x">ส่งในนาม <b>${esc(r.from || "agent ของคุณ")}</b> · เจ้าของผู้รับต้องอนุมัติก่อน agent ของเขาจะตอบ</div>
+        <div class="mi-form">
+          <label>ถึง<select data-f="to"><option value="">— เลือกผู้รับ —</option>${r.recipients.map(x => `<option value="${esc(x.agent)}" ${f.to === x.agent ? "selected" : ""}>${esc(x.agent)} · ${esc(x.name)}</option>`).join("")}</select></label>
+          <label>หัวข้อ<input data-f="subject" maxlength="120" value="${esc(f.subject)}" placeholder="หัวข้อสั้นๆ"></label>
+          <label>เนื้อความ<textarea data-f="body" maxlength="20000" placeholder="ถามหรือแจ้งให้ชัดเจน">${esc(f.body)}</textarea></label>
+          <button class="go ${isArmed(k) ? "armed" : ""}" data-go ${ok && !S.busy ? "" : "disabled"}>${isArmed(k) ? "แตะอีกครั้งเพื่อส่ง" : "ส่ง"}</button>
+        </div>`;
+      sheet.querySelector("[data-cl]").onclick = close;
+      sheet.querySelectorAll("[data-f]").forEach(el => el.oninput = el.onchange = () => { f[el.dataset.f] = el.value; const b = sheet.querySelector("[data-go]"); b.disabled = !(f.to && f.body.trim()) || S.busy; });
+      sheet.querySelector("[data-go]").onclick = send;
+    };
+    async function send() {
+      const k = "send:compose";
+      if (S.busy || !f.to || !f.body.trim()) return;
+      if (!isArmed(k)) return arm(k, paint);
+      disarm(); S.busy = true; paint();
+      try { await api("/mind/mail/send", { method: "POST", body: JSON.stringify(f) }); toast(`ส่งถึง ${f.to} แล้ว · รอเจ้าของผู้รับอนุมัติ`); close(); S.filter = "sent"; }
+      catch (e) { toast("ส่งไม่ได้: " + e.message); }
+      finally { S.busy = false; if (bg.isConnected) paint(); loadMail(true); }
+    }
+    paint();
+  }
+
   // ── taps ──
   root.addEventListener("click", async e => {
     const t = e.target.closest("button"); if (!t) return;
     if (t.dataset.tab) { S.tab = t.dataset.tab; disarm(); clearTimeout(S.pollT); root.innerHTML = ""; draw(); if (S.tab === "chat") { if (!S.chats || Date.now() - S.chatsAt > 20_000) loadChats(false); if (S.open) loadChat(true); } return; }
     if (t.dataset.flt) { S.filter = t.dataset.flt; S.shown = 40; return draw(); }
+    if (t.hasAttribute("data-compose")) return openCompose();
     if (t.hasAttribute("data-more")) { S.shown += 40; return draw(); }
     if (t.hasAttribute("data-rf")) return loadMail(true);
     if (t.hasAttribute("data-rfc")) return loadChats(true);

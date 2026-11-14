@@ -173,6 +173,35 @@ describe("routes", () => {
   });
 });
 
+describe("compose (send as my agent)", () => {
+test("sentByMe marks mail I sent; received mail is not", () => {
+  expect(normMail(MAIL({ from: "ball-agent", fromOwner: "ball@x.co", to: "ohm-agent", toOwner: "ohm@x.co" }), "ball@x.co").sentByMe).toBe(true);
+  expect(normMail(MAIL(), "ball@x.co").sentByMe).toBe(false);
+});
+test("recipients: only safe agent ids, names clipped; static route not swallowed by /mail/:id", async () => {
+  const { d } = fake({ "GET /api/mail/recipients": () => ({ json: { from: "ball-agent", recipients: [{ agent: "ohm-agent", name: "ohm" }, { agent: "bad agent!", name: "x" }, { name: "no-agent" }] } }) });
+  const r = await req(app(d), "/mind/mail/recipients");
+  expect(r.status).toBe(200);
+  expect(r.json).toEqual({ ok: true, from: "ball-agent", recipients: [{ agent: "ohm-agent", name: "ohm" }] });
+});
+test("send validates first, then posts Mind's exact body and refreshes the list", async () => {
+  let n = 0;
+  const { d, calls } = fake({
+    "POST /api/mail/send": () => ({ json: { ok: true, id: "m1", status: "pending" } }),
+    "GET /api/mail": () => { n++; return { json: { mail: [], pending: 0, mode: "manual" } }; },
+    "GET /api/me": () => ({ json: ME }),
+  });
+  const a = app(d);
+  expect((await req(a, "/mind/mail/send", { to: "", body: "x" })).status).toBe(400);
+  expect((await req(a, "/mind/mail/send", { to: "ohm-agent", body: "  " })).status).toBe(400);
+  expect((await req(a, "/mind/mail/send", { to: "ohm-agent", subject: "x".repeat(121), body: "y" })).status).toBe(400);
+  expect(calls.filter(c => c.url.includes("/api/mail/send"))).toHaveLength(0);
+  const r = await req(a, "/mind/mail/send", { to: "ohm-agent", subject: " ถาม D-001 ", body: " พร้อมเมื่อไหร่ " });
+  expect(r.json).toEqual({ ok: true, id: "m1", status: "pending" });
+  expect(calls.find(c => c.url.endsWith("/api/mail/send"))!.body).toEqual({ to: "ohm-agent", subject: "ถาม D-001", body: "พร้อมเมื่อไหร่" });
+});
+});
+
 describe("watcher", () => {
   test("first pass only remembers; each new waiting mail pushes once", async () => {
     let mail = [MAIL({ id: "old", status: "pending", ts: 1 }), MAIL({ id: "done" })];

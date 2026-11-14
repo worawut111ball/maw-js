@@ -4,6 +4,8 @@
 // GET  /mind/me                 → {email, agent, usedToday, dailyTokenLimit}
 // GET  /mind/mail[?fresh=1]     → newest first, body clipped to a preview · {pending, waiting, mode}
 // GET  /mind/mail/:id           → one mail with the full body + thread links
+// GET  /mind/mail/recipients    → {from, recipients:[{agent,name}]} — who I can write to (Mind agents)
+// POST /mind/mail/send {to,subject,body} → send as MY agent (Mind /api/mail/send · recipient's owner gatekeeps)
 // POST /mind/mail/mode {mode}   → manual | semi | auto (Mind hands waiting mail to the agent when leaving manual)
 // POST /mind/mail/:id/act {op}  → approve | reject (pending, sent to me) · retry (failed, sent to me) — Mind's /api/mail/act {id, op}
 // GET  /mind/chats · GET /mind/chats/:id[?fresh=1] · POST /mind/chats/:id/send {text} (returns at once, phone polls) · POST /mind/chats
@@ -100,7 +102,7 @@ export const normMe = (r: any): Me => ({
 export type MailOp = typeof OPS[number];
 export interface MailRow {
   id: string; ts: number; status: string; statusText: string; from: string; fromOwner: string; to: string; toOwner: string;
-  subject: string; preview: string; held: string; toMe: boolean; needsMe: boolean; actions: MailOp[]; inReplyTo: string | null;
+  subject: string; preview: string; held: string; toMe: boolean; sentByMe: boolean; needsMe: boolean; actions: MailOp[]; inReplyTo: string | null;
 }
 /** "รอฉัน" = waiting on MY decision: pending + addressed to me (the agent-held [HOLD] mail in semi mode is pending too). */
 export const needsMe = (m: any, email: string) => m?.status === "pending" && !!email && m?.toOwner === email;
@@ -123,7 +125,7 @@ export function normMail(m: any, email: string): MailRow {
     id: String(m?.id ?? ""), ts: Number(m?.ts) || 0, status: String(m?.status ?? ""), statusText: mailStatusText(m, email),
     from: String(m?.from ?? ""), fromOwner: String(m?.fromOwner ?? ""), to: String(m?.to ?? ""), toOwner: String(m?.toOwner ?? ""),
     subject: clip(String(m?.subject ?? "").trim() || "(ไม่มีหัวข้อ)", 200), preview: clip(body.replace(/\s+/g, " ").trim(), PREVIEW),
-    held: typeof m?.held === "string" ? clip(m.held, 500) : "", toMe: !!email && m?.toOwner === email, needsMe: needsMe(m, email),
+    held: typeof m?.held === "string" ? clip(m.held, 500) : "", toMe: !!email && m?.toOwner === email, sentByMe: !!email && m?.fromOwner === email, needsMe: needsMe(m, email),
     actions: mailActions(m, email), inReplyTo: typeof m?.inReplyTo === "string" ? m.inReplyTo : null,
   };
 }
@@ -218,6 +220,22 @@ export function mount(app: any, d: MindDeps = deps): void {
 
   app.get("/mind/me", wrap(async () => ({ ok: true, ...(await getMe(d)) })));
   app.get("/mind/mail", wrap(async ({ query }) => ({ ok: true, ...(await getMail(query?.fresh === "1", d)).list })));
+  app.get("/mind/mail/recipients", wrap(async () => {
+    const r = await cached("/api/mail/recipients", false, d, 300_000);
+    const recipients = (Array.isArray(r?.recipients) ? r.recipients : [])
+      .filter((x: any) => typeof x?.agent === "string" && ID_RE.test(x.agent))
+      .map((x: any) => ({ agent: x.agent, name: clip(String(x.name ?? x.agent), 60) }));
+    return { ok: true, from: String(r?.from ?? ""), recipients };
+  }));
+  app.post("/mind/mail/send", wrap(async ({ body, set }) => {
+    const to = String(body?.to ?? "").trim(), subject = String(body?.subject ?? "").trim(), text = String(body?.body ?? "").trim();
+    if (!ID_RE.test(to)) return bad(set, "เลือกผู้รับก่อน");
+    if (!text) return bad(set, "ต้องมีเนื้อความ");
+    if (subject.length > 120 || text.length > 20000) return bad(set, "หัวข้อ ≤ 120 ตัว · เนื้อความ ≤ 20,000 ตัว");
+    const r = await mindApi("/api/mail/send", { method: "POST", body: { to, subject, body: text } }, d);
+    forget("/api/mail");
+    return { ok: true, id: String(r?.id ?? ""), status: String(r?.status ?? "") };
+  }));
   app.get("/mind/mail/:id", wrap(async ({ params, set }) => {
     if (!ID_RE.test(params.id)) return bad(set, "id ไม่ถูกต้อง");
     let { raw, list } = await getMail(false, d), m = mailDetail(raw, params.id, list.email);
