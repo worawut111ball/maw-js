@@ -48,9 +48,11 @@ describe("normalize", () => {
     expect(needsMe(MAIL({ status: "pending", held: "ต้องตัดสินใจ" }), e)).toBe(true);
     expect(needsMe(MAIL({ status: "pending", toOwner: "hp@x.co" }), e)).toBe(false);   // waiting on the other owner
     expect(needsMe(MAIL({ status: "failed" }), e)).toBe(false);
-    expect(mailActions(MAIL({ status: "pending" }), e)).toEqual(["approve", "reject"]);
-    expect(mailActions(MAIL({ status: "failed" }), e)).toEqual(["retry"]);
+    expect(mailActions(MAIL({ status: "pending" }), e)).toEqual(["approve", "reject", "close"]);
+    expect(mailActions(MAIL({ status: "failed" }), e)).toEqual(["retry", "close"]);
     expect(mailActions(MAIL({ status: "replied" }), e)).toEqual([]);
+  expect(mailStatusText(MAIL({ status: "replied", closed: true }), e)).toBe("✅ ปิดเรื่องแล้ว (ตอบทางอื่น)");
+  expect(mailStatusText(MAIL({ status: "replied" }), e)).toBe("✅ ตอบแล้ว");
     expect(mailActions(MAIL({ status: "pending", toOwner: "hp@x.co" }), e)).toEqual([]);
     expect(mailStatusText(MAIL({ status: "pending", held: "x" }), e)).toBe("⏸️ รอคุณตัดสินใจ");
     expect(mailStatusText(MAIL({ status: "pending", toOwner: "hp@x.co" }), e)).toBe("📨 รอปลายทางอนุมัติ");
@@ -139,7 +141,7 @@ describe("routes", () => {
     const f = fake(routes()), a = app(f.d);
     const l = await req(a, "/mind/mail");
     expect(l.json).toMatchObject({ ok: true, total: 2, pending: 1, waiting: 1, mode: "manual", email: "ball@x.co" });
-    expect(l.json.mail[0]).toMatchObject({ id: "pend0000000000001", needsMe: true, actions: ["approve", "reject"] });
+    expect(l.json.mail[0]).toMatchObject({ id: "pend0000000000001", needsMe: true, actions: ["approve", "reject", "close"] });
     await req(a, "/mind/mail");
     expect(f.calls.filter(c => c.url.endsWith("/api/mail")).length).toBe(1);
     f.tick(21_000); await req(a, "/mind/mail");

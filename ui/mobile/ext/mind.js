@@ -72,7 +72,7 @@
     open: null, chat: null, chatErr: "", sending: false, graceUntil: 0, pollT: 0, loading: new Set() };
   const root = document.createElement("div"); root.className = "mi-page";
   const MODES = [["manual", "แมนนวล", "ทุกฉบับรอคุณอนุมัติก่อน agent ตอบ"], ["semi", "กึ่งออโต้", "agent ตอบเอง · เรื่องที่ต้องให้คุณตัดสินใจจะค้างไว้ใน \"รอฉัน\""], ["auto", "ออโต้", "agent ตอบทุกฉบับเอง แล้วสรุปให้คุณในแชท 📬 Mailbox บน Mind"]];
-  const OPS = { approve: ["✓ อนุมัติให้ agent ตอบ", "ok"], reject: ["✕ ปฏิเสธ", "no"], retry: ["↻ ให้ agent ตอบใหม่", "ok"] };
+  const OPS = { approve: ["✓ อนุมัติให้ agent ตอบ", "ok"], reject: ["✕ ปฏิเสธ", "no"], retry: ["↻ ให้ agent ตอบใหม่", "ok"], close: ["✓ ปิดเรื่อง (ตอบทางอื่นแล้ว)", ""] };
   const ago = t => { const m = Math.max(0, (Date.now() - t) / 60000); return m < 1 ? "เมื่อกี้" : m < 60 ? `${Math.round(m)} นาที` : m < 1440 ? `${Math.round(m / 60)} ชม.` : `${Math.round(m / 1440)} วัน`; };
   const MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const when = t => { const d = new Date(t); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
@@ -194,7 +194,7 @@
         ${m.held && m.status === "pending" ? `<div class="mi-held">⏸️ agent ค้างไว้ให้คุณตัดสินใจ: ${esc(m.held)}</div>` : ""}
         <div class="mi-body">${esc(m.body) || "(ไม่มีเนื้อหา)"}</div>
         ${m.actions.length ? `<div class="mi-acts">${m.actions.map(op => { const k = `act:${m.id}:${op}`; return `<button class="${OPS[op][1]} ${isArmed(k) ? "armed" : ""}" data-op="${op}" ${S.busy ? "disabled" : ""}>${isArmed(k) ? "แตะอีกครั้งเพื่อยืนยัน" : OPS[op][0]}</button>`; }).join("")}</div>
-          <div class="mi-x">${m.actions.includes("retry") ? "คุณอนุมัติไปแล้วแต่ agent ตอบไม่สำเร็จ — แตะเพื่อส่งให้ตอบอีกครั้ง" : "อนุมัติแล้ว agent ของคุณจะร่างคำตอบส่งกลับให้เจ้าของผู้ส่ง"}</div>` : ""}
+          <div class="mi-x">${m.actions.includes("retry") ? "คุณอนุมัติไปแล้วแต่ agent ตอบไม่สำเร็จ — แตะเพื่อส่งให้ตอบอีกครั้ง" : "อนุมัติแล้ว agent ของคุณจะร่างคำตอบส่งกลับให้เจ้าของผู้ส่ง"} · ปิดเรื่อง = ตอบไปทางอื่นแล้ว ไม่เรียก agent (ไม่ใช้ token)</div>` : ""}
         ${m.parent || m.replies.length ? `<div class="mi-thr">${m.parent ? `<button data-go="${esc(m.parent.id)}">↩ ตอบจดหมาย: ${esc(m.parent.subject)}</button>` : ""}${m.replies.map(r => `<button data-go="${esc(r.id)}">↪ ${esc(r.subject)} · ${esc(r.status)}</button>`).join("")}</div>` : ""}`;
       sheet.querySelector("[data-cl]").onclick = close;
       sheet.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { close(); openMail(b.dataset.go); });
@@ -205,7 +205,7 @@
       if (S.busy) return;
       if (!isArmed(k)) return arm(k, paint);
       disarm(); S.busy = true; paint();
-      try { await api(`/mind/mail/${encodeURIComponent(m.id)}/act`, { method: "POST", body: JSON.stringify({ op }) }); toast(op === "approve" ? "อนุมัติแล้ว · agent กำลังตอบ" : op === "reject" ? "ปฏิเสธแล้ว" : "ส่งให้ agent ตอบใหม่แล้ว"); close(); }
+      try { await api(`/mind/mail/${encodeURIComponent(m.id)}/act`, { method: "POST", body: JSON.stringify({ op }) }); toast(op === "approve" ? "อนุมัติแล้ว · agent กำลังตอบ" : op === "reject" ? "ปฏิเสธแล้ว" : op === "close" ? "ปิดเรื่องแล้ว" : "ส่งให้ agent ตอบใหม่แล้ว"); close(); }
       catch (e) { toast(e.message); }
       finally { S.busy = false; if (bg.isConnected) paint(); loadMail(true); }
     }

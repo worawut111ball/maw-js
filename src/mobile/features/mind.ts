@@ -7,7 +7,7 @@
 // GET  /mind/mail/recipients    → {from, recipients:[{agent,name}]} — who I can write to (Mind agents)
 // POST /mind/mail/send {to,subject,body} → send as MY agent (Mind /api/mail/send · recipient's owner gatekeeps)
 // POST /mind/mail/mode {mode}   → manual | semi | auto (Mind hands waiting mail to the agent when leaving manual)
-// POST /mind/mail/:id/act {op}  → approve | reject (pending, sent to me) · retry (failed, sent to me) — Mind's /api/mail/act {id, op}
+// POST /mind/mail/:id/act {op}  → approve | reject (pending, sent to me) · retry (failed, sent to me) · close (pending/failed: answered elsewhere, no agent run = 0 tokens) — Mind's /api/mail/act {id, op}
 // GET  /mind/chats · GET /mind/chats/:id[?fresh=1] · POST /mind/chats/:id/send {text} (returns at once, phone polls) · POST /mind/chats
 // Background (real server only): every 2 min, new mail waiting for me → one push "📬 Mind · จดหมายใหม่". First pass only remembers.
 import { readFileSync } from "fs";
@@ -20,7 +20,7 @@ const PREVIEW = 160, BODY_MAX = 20_000, MSG_MAX = 12_000, MSGS_SHOWN = 60, TEXT_
 const UA = "maw-mobile/1 (artron-cli compatible)";
 export const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const MODES = ["manual", "semi", "auto"] as const;
-export const OPS = ["approve", "reject", "retry"] as const;
+export const OPS = ["approve", "reject", "retry", "close"] as const;
 
 export interface MindConfig { baseUrl: string; token: string }
 function readConfig(): MindConfig | null {
@@ -109,13 +109,14 @@ export const needsMe = (m: any, email: string) => m?.status === "pending" && !!e
 /** What Mind's /api/mail/act accepts for this mail from me (same rule as Mind's web Mail Box). */
 export function mailActions(m: any, email: string): MailOp[] {
   if (!email || m?.toOwner !== email) return [];
-  if (m.status === "pending") return ["approve", "reject"];
-  if (m.status === "failed") return ["retry"];
+  if (m.status === "pending") return ["approve", "reject", "close"];
+  if (m.status === "failed") return ["retry", "close"];
   return [];
 }
 /** Thai status label, same words as Mind's web Mail Box. */
 export function mailStatusText(m: any, email: string): string {
   const s = String(m?.status ?? "");
+  if (s === "replied" && m.closed) return "✅ ปิดเรื่องแล้ว (ตอบทางอื่น)";
   if (s === "pending") return m.held && m.toOwner === email ? "⏸️ รอคุณตัดสินใจ" : m.toOwner === email ? "📩 รอคุณอนุมัติ" : "📨 รอปลายทางอนุมัติ";
   return ({ approved: "⏳ agent กำลังตอบ", replied: "✅ ตอบแล้ว", rejected: "🚫 ปฏิเสธ", failed: "⚠️ ตอบไม่สำเร็จ" } as Record<string, string>)[s] ?? s;
 }
@@ -252,7 +253,7 @@ export function mount(app: any, d: MindDeps = deps): void {
   app.post("/mind/mail/:id/act", wrap(async ({ params, body, set }) => {
     const op = String(body?.op ?? "");
     if (!ID_RE.test(params.id)) return bad(set, "id ไม่ถูกต้อง");
-    if (!(OPS as readonly string[]).includes(op)) return bad(set, "op ต้องเป็น approve / reject / retry");
+    if (!(OPS as readonly string[]).includes(op)) return bad(set, "op ต้องเป็น approve / reject / retry / close");
     await mindApi("/api/mail/act", { method: "POST", body: { id: params.id, op } }, d);
     forget("/api/mail");
     return { ok: true, id: params.id, op };
