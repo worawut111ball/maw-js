@@ -17,3 +17,9 @@
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 8 พ.ย. 69 | Codex root | เพิ่ม read-only host inventory seam สำหรับ scoped API integration |
+
+## แชท Codex ที่ fork มา — 19 พ.ย. 69
+
+| วันที่ | ใคร | แก้อะไร |
+|---|---|---|
+| 19 พ.ย. 69 | หล่อรอง (Claude Code) · พี่ Ball สั่ง | ห้อง Codex ที่ `codex fork` มา (Codex 0.170 เขียน rollout ใหม่มีแค่ `forked_from_id`) แสดงแชทของ thread ต้นทางก่อนจุด fork + เส้นคั่น "แชทต่อจาก thread เดิม" (`codexTranscript` ใน `api.ts` · หา rollout ต้นทางใน sessions root เดียวกัน · ย้อนได้ 5 ชั้น) · เทสต์ `test/mobile-codex-fork.test.ts` |

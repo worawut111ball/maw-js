@@ -1104,8 +1104,59 @@ export function codexFileFor(terminalId: string): string | null {
   return codexFiles.map.get(terminalId) ?? null;
 }
 
+/** session_meta payload (first line of a rollout). */
+function rolloutMeta(file: string): any {
+  try {
+    const fd = openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(64 * 1024);
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      const e = JSON.parse(buf.subarray(0, n).toString("utf-8").split("\n")[0]);
+      return e?.type === "session_meta" ? { ...e.payload, timestamp: e.payload?.timestamp ?? e.timestamp } : null;
+    } finally { closeSync(fd); }
+  } catch { return null; }
+}
+
+const rolloutById = new Map<string, string | null>();
+/** Rollout file of a thread id — Codex names it rollout-<time>-<id>.jsonl under <sessions>/YYYY/MM/DD;
+ *  <sessions> = the same root the forked file lives in (falls back to ~/.codex/sessions). */
+function rolloutFor(id: string, near: string): string | null {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const root = /\/\d{4}\/\d{2}\/\d{2}\/[^/]+$/.test(near) ? resolve(near, "..", "..", "..", "..") : join(homedir(), ".codex", "sessions");
+  const key = root + "|" + id;
+  if (rolloutById.has(key)) return rolloutById.get(key)!;
+  let f: string | null = null;
+  try {
+    f = execFileSync("find", [root, "-name", `rollout-*-${id}.jsonl`], { encoding: "utf-8", timeout: 5000 })
+      .split("\n").find(Boolean) ?? null;
+  } catch { /* not found */ }
+  rolloutById.set(key, f);
+  return f;
+}
+
+/** Codex 0.170 `fork` starts a new rollout that holds only session_meta + forked_from_id — the old turns stay in the parent
+ *  file. Show them too: parent's items written before this thread started, then a divider (19 พ.ย. 69 · พี่ Ball สั่ง). */
+function codexForkPrefix(file: string, depth: number): ChatItem[] {
+  const meta = rolloutMeta(file);
+  const parentFile = meta?.forked_from_id && depth < 5 ? rolloutFor(String(meta.forked_from_id), file) : null;
+  if (!parentFile || parentFile === file) return [];
+  const since = meta.timestamp ? Date.parse(meta.timestamp) : NaN;
+  const before = codexTranscriptAt(parentFile, depth + 1).filter(x => !x.ts || !(since <= Date.parse(x.ts)));
+  if (!before.length) return [];
+  return [...before, { i: before.length, role: "system", ts: meta.timestamp ?? null, text: "— แชทต่อจาก thread เดิม (codex fork) —" } as ChatItem];
+}
+
+function codexTranscriptAt(file: string, depth: number): ChatItem[] {
+  const own = readIncremental(file, parseCodexLines);
+  const prefix = codexForkPrefix(file, depth);
+  if (!prefix.length) return own;
+  const all = [...prefix, ...own.map((x, k) => ({ ...x, i: prefix.length + k }))];
+  if ((own as any).dropped) (all as any).dropped = (own as any).dropped;
+  return all;
+}
+
 export function codexTranscript(file: string): ChatItem[] {
-  return readIncremental(file, parseCodexLines);
+  return codexTranscriptAt(file, 0);
 }
 
 
