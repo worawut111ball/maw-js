@@ -2,6 +2,8 @@
 // Server: GET /mind/mail · /mind/mail/:id · POST /mind/mail/mode · /mind/mail/:id/act · GET /mind/chats · /mind/chats/:id
 //         POST /mind/chats/:id/send · POST /mind/chats  (src/mobile/features/mind.ts — the Mind token stays on the Mac)
 // Every write is a user tap: mode change + mail actions need a second tap. Mail bodies are plain text (links not clickable).
+// 📤 ส่งให้ห้อง agent: pick a maw room (GET /projects · ranked by ext/mind-route.js) → the mail is typed into it as a chat
+//   (POST /rooms/:ws/:room/send) · optionally closes the card in Mind (op close = 0 Mind tokens). Last room per sender is remembered.
 (() => {
   if (!window.mawExt) return;
   const css = `
@@ -65,6 +67,11 @@
   @keyframes mi-dots { 0% { content: "."; } 50% { content: ".."; } 100% { content: "..."; } }
   .mi-comp { position: sticky; bottom: 0; display: flex; gap: 6px; align-items: flex-end; padding: 8px 0 4px; background: var(--bg); }
   .mi-comp textarea { flex: 1; min-width: 0; min-height: 44px; max-height: 140px; resize: none; padding: 11px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 16px/1.35 var(--font); outline: none; }
+  .mi-rt { display: grid; gap: 6px; margin-top: 8px; } .mi-rt h3 { margin: 6px 0 0; font: 700 12.5px var(--font); color: var(--dim); }
+  .mi-rt button.r { display: grid; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line); color: var(--text); min-width: 0; }
+  .mi-rt button.r.sug { border-color: #22c55e77; } .mi-rt button.r.armed { background: #f59e0b; color: #1a1003; border-color: #f59e0b; }
+  .mi-rt .t { font: 600 14px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mi-rt .s { font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; }
+  .mi-rt button.r.armed .s { color: #1a1003; } .mi-rt label { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--dim); padding: 4px 2px; }
   .mi-comp button { flex: none; width: 50px; height: 44px; border-radius: 13px; background: var(--accent); color: #031022; font-size: 19px; font-weight: 800; } .mi-comp button:disabled { opacity: .35; }`;
   if (!document.getElementById("mi-style")) { const s = document.createElement("style"); s.id = "mi-style"; s.textContent = css; document.head.appendChild(s); }
 
@@ -195,11 +202,68 @@
         <div class="mi-body">${esc(m.body) || "(ไม่มีเนื้อหา)"}</div>
         ${m.actions.length ? `<div class="mi-acts">${m.actions.map(op => { const k = `act:${m.id}:${op}`; return `<button class="${OPS[op][1]} ${isArmed(k) ? "armed" : ""}" data-op="${op}" ${S.busy ? "disabled" : ""}>${isArmed(k) ? "แตะอีกครั้งเพื่อยืนยัน" : OPS[op][0]}</button>`; }).join("")}</div>
           <div class="mi-x">${m.actions.includes("retry") ? "คุณอนุมัติไปแล้วแต่ agent ตอบไม่สำเร็จ — แตะเพื่อส่งให้ตอบอีกครั้ง" : "อนุมัติแล้ว agent ของคุณจะร่างคำตอบส่งกลับให้เจ้าของผู้ส่ง"} · ปิดเรื่อง = ตอบไปทางอื่นแล้ว ไม่เรียก agent (ไม่ใช้ token)</div>` : ""}
+        <div class="mi-acts"><button data-fwd ${S.busy ? "disabled" : ""}>📤 ส่งให้ห้อง agent ทำ</button></div>
         ${m.parent || m.replies.length ? `<div class="mi-thr">${m.parent ? `<button data-go="${esc(m.parent.id)}">↩ ตอบจดหมาย: ${esc(m.parent.subject)}</button>` : ""}${m.replies.map(r => `<button data-go="${esc(r.id)}">↪ ${esc(r.subject)} · ${esc(r.status)}</button>`).join("")}</div>` : ""}`;
       sheet.querySelector("[data-cl]").onclick = close;
       sheet.querySelectorAll("[data-go]").forEach(b => b.onclick = () => { close(); openMail(b.dataset.go); });
       sheet.querySelectorAll("[data-op]").forEach(b => b.onclick = () => act(b.dataset.op));
+      sheet.querySelector("[data-fwd]")?.addEventListener("click", () => openForward());
     };
+    // ── 📤 forward to a maw room ──
+    let fwd = null;   // { rooms, sug, err, closeToo }
+    const R = () => mawExt.mindRoute;
+    const MEM = "maw-mind-route";
+    const memGet = () => { try { return JSON.parse(localStorage.getItem(MEM) || "{}") || {}; } catch { return {}; } };
+    const memSet = (from, ws, room) => { try { const o = memGet(); o[String(from || "").toLowerCase()] = { ws, room }; localStorage.setItem(MEM, JSON.stringify(o)); } catch {} };
+    async function openForward() {
+      if (!R()) return toast("ส่วนเลือกห้องยังไม่โหลด — รีเฟรชหน้า");
+      fwd = { rooms: null, sug: 0, err: "", closeToo: m.actions.includes("close") }; paintFwd();
+      try {
+        const rooms = R().rankRooms((await api("/projects")).projects, m, memGet());
+        fwd = { ...fwd, rooms, sug: R().suggestedCount(rooms) };
+      } catch (e) { fwd.err = e.message; }
+      paintFwd();
+    }
+    function paintFwd() {
+      if (!bg.isConnected || !fwd) return;
+      const row = (r, i, sug) => { const k = `fwd:${m.id}:${i}`;
+        return `<button class="r ${sug ? "sug" : ""} ${isArmed(k) ? "armed" : ""}" data-pick="${i}" ${S.busy ? "disabled" : ""}>
+          <span class="t">${isArmed(k) ? "แตะอีกครั้งเพื่อส่ง →" : ""} ${esc(r.title)}</span>
+          <span class="s">${esc(r.project)} · ${esc(r.agent)} · ${esc(r.status || "?")}${r.why.length ? " · " + esc(r.why.join(" · ")) : ""}</span></button>`; };
+      const list = fwd.rooms;
+      sheet.innerHTML = `<button class="cl" data-cl aria-label="ปิด">✕</button><h2>ส่งให้ห้องไหนทำ?</h2>
+        <div class="mi-meta"><span>${esc(m.subject)}</span><span>ส่งเป็นแชทเข้าห้องที่เลือก · ห้องนั้นเริ่มทำทันที</span></div>
+        <div class="mi-rt">
+          ${!list ? `<div class="mi-empty">${fwd.err ? esc(fwd.err) : "กำลังโหลดรายชื่อห้อง…"}</div>`
+            : !list.length ? `<div class="mi-empty">ไม่มีห้อง Claude/Codex ที่เปิดอยู่</div>`
+            : `${fwd.sug ? `<h3>✨ แนะนำ</h3>${list.slice(0, fwd.sug).map((r, i) => row(r, i, true)).join("")}` : ""}
+               <h3>${fwd.sug ? "ห้องอื่น" : "เลือกห้อง"}</h3>${list.slice(fwd.sug).map((r, j) => row(r, j + fwd.sug, false)).join("")}`}
+          ${m.actions.includes("close") ? `<label><input type="checkbox" data-ct ${fwd.closeToo ? "checked" : ""}> ส่งแล้วปิดการ์ดนี้ใน Mind ด้วย (ไม่เรียก agent ของ Mind · ไม่ใช้ token)</label>` : ""}
+          <button data-back class="no" style="padding:10px;border-radius:12px">← กลับไปที่จดหมาย</button>
+        </div>`;
+      sheet.querySelector("[data-cl]").onclick = close;
+      sheet.querySelector("[data-back]").onclick = () => { disarm(); fwd = null; paint(); };
+      sheet.querySelector("[data-ct]")?.addEventListener("change", e => { fwd.closeToo = e.target.checked; });
+      sheet.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => pick(+b.dataset.pick));
+    }
+    async function pick(i) {
+      const r = fwd?.rooms?.[i]; if (!r || S.busy) return;
+      const k = `fwd:${m.id}:${i}`;
+      if (!isArmed(k)) return arm(k, paintFwd);
+      disarm(); S.busy = true; paintFwd();
+      try {
+        const body = { text: R().forwardText(m), id: requestId(), ...(isHerdr(r.ws) ? { generation: r.generation } : {}) };
+        await api(`/rooms/${encodeURIComponent(r.ws)}/${encodeURIComponent(r.room)}/send`, { method: "POST", body: JSON.stringify(body) });
+        memSet(m.from, r.ws, r.room);
+        let closed = false;
+        if (fwd.closeToo && m.actions.includes("close")) {
+          try { await api(`/mind/mail/${encodeURIComponent(m.id)}/act`, { method: "POST", body: JSON.stringify({ op: "close", note: `ส่งให้ห้อง ${r.project} · ${r.title}` }) }); closed = true; }
+          catch (e) { toast(`ส่งเข้าห้องแล้ว แต่ปิดการ์ดไม่สำเร็จ: ${e.message}`); }
+        }
+        toast(`📤 ส่งให้ ${r.title} แล้ว${closed ? " · ปิดการ์ดแล้ว" : ""}`); close();
+      } catch (e) { toast(e.message); }
+      finally { S.busy = false; if (bg.isConnected) paintFwd(); loadMail(true); }
+    }
     async function act(op) {
       const k = `act:${m.id}:${op}`;
       if (S.busy) return;

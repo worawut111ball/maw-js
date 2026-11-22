@@ -48,6 +48,7 @@ src/mobile/
 | retro | เมนู "สรุปงาน": สั่ง /rrr หรือ /mind-rrr · แมนนวล / กึ่งออโต้ / ออโต้ | `/retro*` |
 | prs | เมนู "PR": PR เปิดทุก repo · AI ตรวจ (skill `/review-pr-check` อ่านอย่างเดียว) · merge โดยคนกดเท่านั้น | `/prs*` |
 | mind | เมนู "Mind": Mail Box + Mind Chat ของ Artron Mind (token อยู่บน Mac เท่านั้น) | `/mind/*` |
+| mind-route | ตัวช่วยของ mind: "📤 ส่งให้ห้อง agent ทำ" ในแผ่นจดหมาย — เรียงห้อง Claude/Codex จาก `/projects` (ห้องที่เคยส่งเรื่องจากผู้ส่งคนนี้ · ชื่อโปรเจกต์/ห้องที่จดหมายพูดถึง · ห้องที่ตื่นอยู่) แนะนำสูงสุด 3 ห้อง → แตะ 2 ครั้งส่งเนื้อจดหมายเป็นแชทเข้าห้อง (`/rooms/:ws/:room/send`) · ติ๊กปิดการ์ดใน Mind ได้ (op close + note · 0 token) · จำห้องล่าสุดต่อผู้ส่งใน localStorage `maw-mind-route` · ฟังก์ชันล้วน เทสต์ `test/mobile-mind-route.test.ts` | `/projects` · `/rooms/:ws/:room/send` · `/mind/mail/:id/act` |
 | vault | เมนู "📦 คลังไฟล์": ฝากรูป/ไฟล์ต้นฉบับ (ไม่ย่อ) จากมือถือเครื่องไหนก็ได้ ≤4 GB/ไฟล์ · สตรีมลงดิสก์ · ปฏิเสธเมื่อ Mac เหลือ <5 GB · รูปย่อ (sips / pdftoppm / ffmpeg) · โหลด ≤5 ไฟล์ทีละไฟล์ · มากกว่านั้นเป็น zip · "บันทึก/แชร์" (share sheet → คลังภาพ iPhone) · ลิงก์โหลดเซ็นชื่ออายุ 15 นาที (ไม่ต้องแนบ token) · ลบ = ย้ายไป `.trash` 30 วัน · ข้อมูลอยู่ `~/.maw/vault/` | `GET /vault` · `POST /vault/upload` · `/vault/thumb/:id` · `POST /vault/link` · `GET /vault/dl/:id` · `POST /vault/zip` · `POST /vault/delete` |
 | docs | เมนู "📄 เอกสาร": เอกสาร ISO (โฟลเดอร์ `WP05 …`) ทุก repo · อ่านทีละหน้า (Mac แปลง Word/Excel/PDF → ภาพด้วย LibreOffice + pdftoppm, cache ใน `~/.maw/docs-cache`) · ไล่ `[TBD]` · ส่งคำตอบเข้าห้อง Claude · ✏️ ปากกาขีดทับหน้า + โน้ต → รายการรอส่ง → ส่งทีเดียวเข้าห้อง (ข้อความบรรทัดเดียว + path ภาพ) → เทียบก่อน/หลังกับรุ่นใหม่ (`~/.maw/docs-marks*`) · รุ่นเก่า (`_V1.0` เมื่อมี `_V1.1`) พับไว้ ไม่นับ TBD · อ่านอย่างเดียว | `GET /docs` · `POST /docs/render` · `GET /docs/page` · `/docs/marks*` · `GET /docs/mark-img` |
 
@@ -117,6 +118,7 @@ Read-only current/progress/events/exact operation/turn receipt แยกจา�
 | 23 ต.ค. 69 | ไอ้แดง (Claude Code) | สร้าง README — สรุปโครง pack ทั้งหมด, deploy, ข้อมูลใน ~/.maw, กติกา (ประวัติละเอียดอยู่ใน PLAN-maw-mobile.md) |
 | 30 ต.ค. 69 | ไอ้แดง (Claude Code) | เพิ่ม pack docs (เมนูเอกสาร ISO) · ห้อง Superset "ยังไม่เปิด" + wake · autostart เหลือ shell เมื่อ agent ปิด |
 | 8 พ.ย. 69 | Codex ทีม1 | เพิ่ม awaited composer gate, durable held intent และเอกสารขอบเขตที่ยังไม่เปิด production |
+| 22 พ.ย. 69 | ไอ้แดง (Claude Code) · พี่ Ball สั่ง | Mind Mail: ปุ่ม "📤 ส่งให้ห้อง agent ทำ" + ห้องแนะนำ (`ext/mind-route.js` ใหม่ · `ext/mind.js` · close รับ `note`) |
 
 
 ## Herdr chat stability — 8 พ.ย. 69

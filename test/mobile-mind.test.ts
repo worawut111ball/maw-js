@@ -161,6 +161,13 @@ describe("routes", () => {
     expect(f.calls[0]).toMatchObject({ method: "POST", body: { id: "pend0000000000001", op: "approve" } });
     expect((await req(a, "/mind/mail/mode", { mode: "semi" })).json).toEqual({ ok: true, mode: "semi", delivered: 2 });
     expect(f.calls[1]).toMatchObject({ method: "POST", body: { mode: "semi" } });
+    // close carries an optional note (≤300, trimmed) · other ops never forward it
+    await req(a, "/mind/mail/pend0000000000001/act", { op: "close", note: `  ส่งให้ห้อง x ${"y".repeat(400)}` });
+    expect(f.calls[2].body.op).toBe("close");
+    expect(f.calls[2].body.note.startsWith("ส่งให้ห้อง x")).toBe(true);
+    expect(f.calls[2].body.note.length).toBe(300);
+    await req(a, "/mind/mail/pend0000000000001/act", { op: "approve", note: "x" });
+    expect(f.calls[3].body).toEqual({ id: "pend0000000000001", op: "approve" });
   });
 
   test("chat send returns at once; new chat; text validated", async () => {

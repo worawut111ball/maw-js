@@ -7,7 +7,7 @@
 // GET  /mind/mail/recipients    → {from, recipients:[{agent,name}]} — who I can write to (Mind agents)
 // POST /mind/mail/send {to,subject,body} → send as MY agent (Mind /api/mail/send · recipient's owner gatekeeps)
 // POST /mind/mail/mode {mode}   → manual | semi | auto (Mind hands waiting mail to the agent when leaving manual)
-// POST /mind/mail/:id/act {op}  → approve | reject (pending, sent to me) · retry (failed, sent to me) · close (pending/failed: answered elsewhere, no agent run = 0 tokens) — Mind's /api/mail/act {id, op}
+// POST /mind/mail/:id/act {op}  → approve | reject (pending, sent to me) · retry (failed, sent to me) · close [note ≤300] (pending/failed: answered elsewhere, no agent run = 0 tokens) — Mind's /api/mail/act {id, op, note}
 // GET  /mind/chats · GET /mind/chats/:id[?fresh=1] · POST /mind/chats/:id/send {text} (returns at once, phone polls) · POST /mind/chats
 // Background (real server only): every 2 min, new mail waiting for me → one push "📬 Mind · จดหมายใหม่". First pass only remembers.
 import { readFileSync } from "fs";
@@ -254,7 +254,8 @@ export function mount(app: any, d: MindDeps = deps): void {
     const op = String(body?.op ?? "");
     if (!ID_RE.test(params.id)) return bad(set, "id ไม่ถูกต้อง");
     if (!(OPS as readonly string[]).includes(op)) return bad(set, "op ต้องเป็น approve / reject / retry / close");
-    await mindApi("/api/mail/act", { method: "POST", body: { id: params.id, op } }, d);
+    const note = op === "close" && typeof body?.note === "string" ? body.note.trim().slice(0, 300) : "";
+    await mindApi("/api/mail/act", { method: "POST", body: { id: params.id, op, ...(note ? { note } : {}) } }, d);
     forget("/api/mail");
     return { ok: true, id: params.id, op };
   }));
