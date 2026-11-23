@@ -421,7 +421,7 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   await pressUntilSent(ch, text, () => pressKey(ch, "enter"));
 }
 
-const ETAG_PATH = /^\/mobile\/(projects|system|rooms\/[^/]+\/[^/]+\/chat)$/;
+const ETAG_PATH = /^\/mobile\/(projects|system|rooms\/[^/]+\/[^/]+\/(chat|suggestion|mode|prompt))$/;
 /** JSON GET on a polled path → ETag + Cache-Control: no-cache; the same ETag in If-None-Match → 304 with no body. */
 export function etagJson(request: Request, response: unknown, set: { status?: number | string; headers: Record<string, any> }): Response | undefined {
   if (request.method !== "GET" || !response || typeof response !== "object" || response instanceof Response) return;

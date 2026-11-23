@@ -20,6 +20,8 @@ describe("etagJson — polled GETs answer 304 when unchanged", () => {
   });
   test("chat path yes · other paths, errors and no-store routes untouched", () => {
     expect(etagJson(req("/mobile/rooms/w/r/chat?limit=30&lite=1"), { ok: true }, set())).toBeInstanceOf(Response);
+    for (const e of ["suggestion", "mode", "prompt"]) expect(etagJson(req(`/mobile/rooms/tmux/%2535/${e}`), { ok: true }, set())).toBeInstanceOf(Response);
+    expect(etagJson(req("/mobile/rooms/w/r/send"), { ok: true }, set())).toBeUndefined();
     expect(etagJson(req("/mobile/prs"), { ok: true }, set())).toBeUndefined();
     expect(etagJson(req("/mobile/projects"), { ok: false }, { status: 503, headers: {} })).toBeUndefined();
     expect(etagJson(req("/mobile/projects"), { ok: true }, { headers: { "cache-control": "no-store" } })).toBeUndefined();
