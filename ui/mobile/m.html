@@ -35,8 +35,8 @@
   header.chd .cb { min-width: 40px; padding: 0; background: none; color: var(--text); position: relative; }
   header.chd #ext-room-actions { max-width: 30%; }
   .chd-t { flex: 1; min-width: 0; text-align: center; background: none; color: var(--text); padding: 2px 4px; display: grid; gap: 1px; }
-  .chd-t b { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chd-t .sub { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chd-t b { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chd-t .sub { display: block; font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chd-t #room-status { display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
   /* สถานะเครื่องบนหัวจอคลีน: เหลือแค่ไอคอนแมว (แตะแล้วเปิดแผงเหมือนเดิม) */
   header.chd .rc { padding: 0 6px; min-width: 0; } header.chd .rc > :not(.cat-box):not(.rc-trav) { display: none; }
@@ -60,12 +60,12 @@
   .drw-p.open .drw-ph .chev, .drw-p.found .drw-ph .chev { transform: rotate(90deg); }
   .drw-ph { background: var(--card2); border-radius: 14px; }
   .drw-p.open .drw-ph, .drw-p.found .drw-ph { border-radius: 14px 14px 0 0; }
-  .drw-ph .pn { flex: 1; min-width: 0; font: 700 16px var(--font); color: #fff; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drw-ph .pn { flex: 1; min-width: 0; font: 700 13.5px var(--font); color: #fff; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .drw-ph .s { flex: none; font-size: 11.5px; color: var(--dim); }
   .drw-ph .s.w, .drw-ph .s.k { color: var(--text); }
   .drw-pr { display: none; padding: 0 6px 6px; } .drw-p.open .drw-pr, .drw-p.found .drw-pr { display: grid; gap: 1px; }
   .drw-pr { padding-top: 4px !important; }
-  .drw-p .drw-r { padding: 8px 10px 8px 16px; font-size: 13.5px; color: #aab0c6; }
+  .drw-p .drw-r { padding: 6px 10px 6px 16px; font-size: 11.5px; color: #aab0c6; }
   .drw-p .drw-r .a, .drw-p .drw-r .br { font-size: 10.5px; opacity: .8; }
   .drw-p .drw-r.on { color: #fff; font-weight: 600; }
   .drw-p .drw-r.on { background: var(--card2); }
@@ -88,15 +88,17 @@
   #app:has(> .uiclean) .composer #mic { grid-column: 3; grid-row: 2; border-radius: 50% !important; border-color: transparent; background: var(--card2); }
   #app:has(> .uiclean) .composer .send { grid-column: 4; grid-row: 2; width: 42px !important; height: 42px !important; border-radius: 50% !important; }
   /* ขั้น 3: ข้อความ AI ไม่มีกรอบ · ข้อความเราเป็นฟองเทา · ขั้นตอน agent เป็นบรรทัดบาง (บรรทัด .who ที่มีตัวหมุนตอนทำงานคงไว้) */
-  #app:has(> .uiclean) .msg.ai .bubble { background: none; border: 0; border-radius: 0; padding: 2px 4px; font-size: 14.5px; line-height: 1.65; }
+  #app:has(> .uiclean) .msg.ai .bubble { background: none; border: 0; border-radius: 0; padding: 2px 4px; font-size: 12.5px; line-height: 1.6; }
   #app:has(> .uiclean) .msg.ai .who { margin: 0 4px 2px; }
-  #app:has(> .uiclean) .msg.me .bubble { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 20px 20px 6px 20px; padding: 9px 14px; font-size: 14.5px; font-weight: 500; box-shadow: 0 4px 14px #2563eb33; }
+  #app:has(> .uiclean) .msg.me .bubble { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 20px 20px 6px 20px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; box-shadow: 0 4px 14px #2563eb33; }
   #app:has(> .uiclean) .msg.me:not(.queued):not(.canceled):not(.pend) > .who { display: none; }
   #app:has(> .uiclean) .msg { margin: 18px 0 4px; }
   #app:has(> .uiclean) details.tool { margin: 1px 0 1px 2px; }
   #app:has(> .uiclean) details.tool > summary { background: none; border: 0; padding: 5px 4px; gap: 8px; color: var(--dim); }
   #app:has(> .uiclean) details.tool[open] > summary { background: var(--card); border-radius: 10px 10px 0 0; }
-  #app:has(> .uiclean) details.tool .tn { font: 600 12.5px var(--mono); }
+  #app:has(> .uiclean) details.tool .tn { font: 600 10.5px var(--mono); }
+  #app:has(> .uiclean) details.tool > summary, #app:has(> .uiclean) details.tgroup > summary { font-size: 11px; padding-top: 2px; padding-bottom: 2px; }
+  #app:has(> .uiclean) details.tool .tsum { font-size: 10.5px; }
   #app:has(> .uiclean) details.tool.agent > summary { background: none; color: #c4b5fd; }
   #app:has(> .uiclean) details.tgroup { margin: 2px 0 2px 2px; }
   #app:has(> .uiclean) details.tgroup.prev > summary { justify-content: flex-start; gap: 8px; }
