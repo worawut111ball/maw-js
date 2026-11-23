@@ -1033,6 +1033,19 @@ export function parseCodexLines(st: ParseState, lines: string[]): void {
     let e: any; try { e = JSON.parse(line); } catch { continue; }
     const p = e.payload ?? {}, ts = e.timestamp ?? null;
     if (e.type === "event_msg" && p.type === "turn_aborted") { push({ role: "system", ts, text: "⏹ หยุดงานกลางคัน" }); continue; }
+    // Codex auto-compact: the model first writes a context summary as an ordinary assistant message ("## Active task …"),
+    // then a `compacted` record whose message embeds that same summary. It is the model's note to itself, not a reply →
+    // turn that bubble into one small system line (matched by text, so a real answer is never hidden).
+    if (e.type === "compacted") {
+      const note = String(p.message ?? "");
+      for (let k = st.items.length - 1; k >= Math.max(0, st.items.length - 6); k--) {
+        const it = st.items[k];
+        if (it.role === "user") break;
+        const head = it.role === "assistant" ? String(it.text ?? "").trim().slice(0, 200) : "";
+        if (head && note.includes(head)) { it.role = "system"; it.text = "🗜 Codex ย่อบทสนทนา — สรุปบริบทเก็บไว้ ไม่แสดงในแชท"; break; }
+      }
+      continue;
+    }
     if (e.type !== "response_item") continue;
     if (p.type === "message") {
       const text = (p.content ?? []).map((c: any) => c.text ?? "").join("\n");

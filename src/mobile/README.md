@@ -23,3 +23,4 @@
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 19 พ.ย. 69 | หล่อรอง (Claude Code) · พี่ Ball สั่ง | ห้อง Codex ที่ `codex fork` มา (Codex 0.170 เขียน rollout ใหม่มีแค่ `forked_from_id`) แสดงแชทของ thread ต้นทางก่อนจุด fork + เส้นคั่น "แชทต่อจาก thread เดิม" (`codexTranscript` ใน `api.ts` · หา rollout ต้นทางใน sessions root เดียวกัน · ย้อนได้ 5 ชั้น) · เทสต์ `test/mobile-codex-fork.test.ts` |
+| 23 พ.ย. 69 | ไอ้แดง (Claude Code) · พี่ Ball สั่ง | แชท Codex: สรุปบริบทตอน auto-compact (ข้อความ assistant "## Active task …" ก่อนบรรทัด `compacted`) ไม่โชว์เป็นคำตอบแล้ว → บรรทัดระบบ "🗜 Codex ย่อบทสนทนา" (`parseCodexLines` จับคู่ข้อความกับ `compacted.message` · เทสต์ `test/mobile-codex-compact.test.ts`) |
