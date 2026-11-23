@@ -29,6 +29,71 @@
   .app { display: flex; flex-direction: column; height: 100%; padding-top: env(safe-area-inset-top); }
   header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
   #ext-room-actions { flex: none; max-width: 44%; }
+  /* หน้าตาแบบคลีน — หัวจอห้อง + ลิ้นชัก (แถบเดิมซ่อน แต่ยังอยู่ให้ refreshTabs อ่าน) */
+  #app:has(> .uiclean) > .seg, #app:has(> .uiclean) > .wsbar, #app:has(> .uiclean) > .tabs, #app:has(> .uiclean) > .roomhead { display: none !important; }
+  header.chd { gap: 2px; padding: 6px 6px 6px 4px; border-bottom: 0; }
+  header.chd .cb { min-width: 40px; padding: 0; background: none; color: var(--text); position: relative; }
+  header.chd #ext-room-actions { max-width: 30%; }
+  .chd-t { flex: 1; min-width: 0; text-align: center; background: none; color: var(--text); padding: 2px 4px; display: grid; gap: 1px; }
+  .chd-t b { font-size: 16px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chd-t .sub { display: block; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chd-t #room-status { display: inline-flex; gap: 4px; align-items: center; vertical-align: middle; }
+  /* สถานะเครื่องบนหัวจอคลีน: เหลือแค่ไอคอนแมว (แตะแล้วเปิดแผงเหมือนเดิม) */
+  header.chd .rc { padding: 0 6px; min-width: 0; } header.chd .rc > :not(.cat-box):not(.rc-trav) { display: none; }
+  .cbd { position: absolute; top: 3px; right: 2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; background: #22d3ee; color: #031016; font: 800 10.5px/17px var(--font); font-style: normal; text-align: center; }
+  .drw-bg { position: fixed; inset: 0; z-index: 60; background: #0000; transition: background .2s; }
+  .drw-bg.in { background: #0009; }
+  .drw { position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 380px); background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 calc(env(safe-area-inset-bottom, 0px) + 8px); transform: translateX(-100%); transition: transform .22s ease; }
+  .drw-bg.in .drw { transform: none; }
+  .drw-s { margin: 4px 14px 8px; height: 42px; border-radius: 13px; background: var(--card); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--dim); }
+  .drw-s input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: 16px var(--font); }
+  .drw-nav { display: grid; gap: 1px; padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
+  .drw-nav button { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 11px; background: none; color: var(--text); font: 15px var(--font); text-align: left; position: relative; }
+  .drw-nav .cbd { position: static; margin-left: auto; }
+  .drw-l { flex: 1; overflow-y: auto; padding: 6px 8px; display: grid; gap: 1px; align-content: start; }
+  .drw-h { font-size: 12px; color: var(--dim); padding: 12px 10px 4px; letter-spacing: .03em; }
+  .drw-r { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 11px; background: none; color: var(--text); font: 14.5px var(--font); text-align: left; min-width: 0; }
+  .drw-r.on { background: var(--card2); }
+  .drw-r .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drw-r .br, .drw-r .a { flex: none; font: 11.5px var(--mono); color: var(--dim); }
+  /* ขั้น 2: ช่องพิมพ์การ์ดมน + แผ่น "+" (แถวปุ่มลัดเดิมซ่อน แต่ยังอยู่ให้แผ่นกดแทน) */
+  #app:has(> .uiclean) > .keys { display: none !important; }
+  #app:has(> .uiclean) .composer { display: grid !important; grid-template-columns: auto 1fr auto auto; gap: 8px 6px !important; margin: 4px 10px calc(8px + env(safe-area-inset-bottom)); padding: 10px 8px 8px 10px !important; border: 1px solid var(--line); border-radius: 24px; background: var(--card); }
+  #app:has(> .uiclean) .composer textarea { grid-column: 1 / -1; grid-row: 1; background: none !important; border: 0 !important; padding: 4px 6px !important; font-size: 16px; min-height: 34px; outline: none; }
+  #app:has(> .uiclean) .composer #clip, #app:has(> .uiclean) .composer #cam { display: none !important; }
+  #app:has(> .uiclean) .composer .cplus { grid-column: 1; grid-row: 2; border-radius: 50% !important; color: var(--text); background: var(--card2); border-color: transparent; }
+  #app:has(> .uiclean) .composer #mic { grid-column: 3; grid-row: 2; border-radius: 50% !important; border-color: transparent; background: var(--card2); }
+  #app:has(> .uiclean) .composer .send { grid-column: 4; grid-row: 2; width: 42px !important; height: 42px !important; border-radius: 50% !important; }
+  /* ขั้น 3: ข้อความ AI ไม่มีกรอบ · ข้อความเราเป็นฟองเทา · ขั้นตอน agent เป็นบรรทัดบาง (บรรทัด .who ที่มีตัวหมุนตอนทำงานคงไว้) */
+  #app:has(> .uiclean) .msg.ai .bubble { background: none; border: 0; border-radius: 0; padding: 2px 4px; font-size: 15.5px; line-height: 1.72; }
+  #app:has(> .uiclean) .msg.ai .who { margin: 0 4px 2px; }
+  #app:has(> .uiclean) .msg.me .bubble { background: var(--card2); color: var(--text); border-radius: 20px; padding: 10px 16px; font-size: 15px; }
+  #app:has(> .uiclean) .msg.me:not(.queued):not(.canceled):not(.pend) > .who { display: none; }
+  #app:has(> .uiclean) .msg { margin: 18px 0 4px; }
+  #app:has(> .uiclean) details.tool { margin: 1px 0 1px 2px; }
+  #app:has(> .uiclean) details.tool > summary { background: none; border: 0; padding: 5px 4px; gap: 8px; color: var(--dim); }
+  #app:has(> .uiclean) details.tool[open] > summary { background: var(--card); border-radius: 10px 10px 0 0; }
+  #app:has(> .uiclean) details.tool .tn { font: 600 12.5px var(--mono); }
+  #app:has(> .uiclean) details.tool.agent > summary { background: none; color: #c4b5fd; }
+  #app:has(> .uiclean) details.tgroup { margin: 2px 0 2px 2px; }
+  #app:has(> .uiclean) details.tgroup > summary { background: none !important; border: 0 !important; padding: 5px 4px; color: var(--dim); }
+  #app:has(> .uiclean) details.tgroup.err > summary .gsum::after { content: ""; }
+  .macts { display: flex; gap: 14px; margin: 4px 4px 0; } .macts button { background: none; color: var(--dim); padding: 4px; border-radius: 8px; opacity: .7; } .macts button:active { opacity: 1; color: var(--text); }
+  .pls-bg { position: fixed; inset: 0; z-index: 60; background: #0000; transition: background .2s; }
+  .pls-bg.in { background: #0008; }
+  .pls { position: absolute; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); border-radius: 22px 22px 0 0; padding: 8px 14px calc(14px + env(safe-area-inset-bottom)); display: grid; gap: 10px; transform: translateY(100%); transition: transform .22s ease; max-height: 75vh; overflow-y: auto; }
+  .pls-bg.in .pls { transform: none; }
+  .pls-g { width: 38px; height: 4px; border-radius: 99px; background: var(--line); margin: 2px auto 4px; }
+  .pls-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pls-t { display: grid; justify-items: center; gap: 4px; padding: 12px 4px; border-radius: 14px; background: var(--card2); color: var(--dim); font: 13px var(--font); }
+  .pls-t span { font-size: 21px; color: var(--text); }
+  .pls-h { font-size: 12px; color: var(--dim); } .pls-h span { opacity: .7; }
+  .pls-x, .pls-k { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pls-x button { height: 38px; padding: 0 12px; border-radius: 11px; background: var(--card2); color: var(--text); font: 600 13.5px var(--font); }
+  .pls-x button.sk { background: #d977571f; color: #f0a17f; }
+  .pls-k button { min-width: 46px; height: 42px; padding: 0 12px; border-radius: 11px; background: var(--card2); color: var(--text); font: 600 14px var(--mono); }
+  .pls-k button.warn { color: #fca5a5; } .pls-k button.hit { background: var(--accent); color: #031022; }
+  .drw-ui { margin: 6px 14px 0; padding: 10px; border-radius: 11px; background: var(--card); color: var(--dim); font: 13px var(--font); }
   .continuity-switch-trigger { border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; font-size: 12px; white-space: normal; line-height: 1.3; }
   .continuity-switch-trigger:disabled { opacity: .55; cursor: default; }
   .continuity-status { flex-basis: 100%; color: var(--dim); font-size: 12px; padding: 6px 0; }
@@ -767,6 +832,111 @@ function projCard(p) {
 }
 
 // ── project: workspace chips + room tabs + room ──
+// ── หน้าตาแบบคลีน (23 พ.ย. 69): หัวจอห้องแถวเดียว + ลิ้นชัก ☰ แทนแถบ branch / แท็บห้อง / seg / roomhead ──
+// แถบเดิมยังถูกวาดแต่ซ่อนด้วย CSS (#app:has(> .uiclean)) เพราะ refreshTabs() อ่าน #tabs อยู่ · สลับกลับหน้าตาเก่าได้ในลิ้นชัก (localStorage maw-ui)
+const uiClean = () => store.get("maw-ui") !== "classic";
+const SVG = {
+  menu: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h11M4 17h16"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1 2h6l1-2h5"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5l4 4L8 20H4v-4z"/></svg>',
+  term: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+};
+const mindBadge = () => { try { return mawExt.pages.find(pg => pg.key === "mind")?.summary()?.badge || ""; } catch { return ""; } };
+function cleanHeader(p, room) {
+  const b = mindBadge();
+  return `<i class="uiclean" hidden></i><header class="chd">
+    <button class="iconbtn cb" data-drawer aria-label="เมนูห้อง">${SVG.menu}</button>
+    <button class="chd-t" data-drawer aria-label="เลือกห้อง"><b>${esc(room?.title || p.name)}</b>
+      <span class="sub">${room ? `<span id="room-status">${dot(room.status)}${ST[room.status]}</span>${room.agent ? ` · ${esc(room.agent)}` : ""} · ` : ""}${esc(p.name)}</span></button>
+    ${rcHtml()}${room ? `<div id="ext-room-actions"></div>` : ""}
+    ${room ? `<button class="iconbtn cb" data-mtoggle aria-label="${state.mode === "chat" ? "ดูจอ" : "ดูแชท"}">${state.mode === "chat" ? SVG.term : SVG.chat}</button>` : ""}
+    <button class="iconbtn cb" data-mind aria-label="Mind Mail">${SVG.mail}${b ? `<i class="cbd">${esc(b)}</i>` : ""}</button>
+    <button class="iconbtn cb" data-newroom aria-label="เปิดห้องใหม่">${SVG.pen}</button></header>`;
+}
+function wireCleanHeader(p, w, room) {
+  $app.querySelectorAll("[data-drawer]").forEach(b => b.onclick = () => openDrawer());
+  $app.querySelector("[data-mtoggle]")?.addEventListener("click", () => { state.mode = state.mode === "chat" ? "raw" : "chat"; state.follow = true; renderProject(); });
+  $app.querySelector("[data-mind]")?.addEventListener("click", () => { history.pushState({ v: "pg" }, ""); renderPage("mind"); });
+  $app.querySelector("[data-newroom]")?.addEventListener("click", () => document.getElementById("add")?.click());
+}
+function goRoom(name, ws, room) {
+  const p = state.projects.find(x => x.name === name); if (!p) return;
+  if (state.project !== name) state.repo = "";
+  state.project = name; state.ws = ws; state.room = room; state.pview = "rooms";
+  state.follow = true; state.chat = null; state.queued = []; state.open = new Set();
+  renderProject();
+}
+function openDrawer() {
+  document.querySelector(".drw-bg")?.remove();
+  const cur = state.projects.find(x => x.name === state.project);
+  const bg = document.createElement("div"); bg.className = "drw-bg";
+  const all = state.projects.flatMap(p => p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))));
+  const live = all.filter(x => ["working", "waiting"].includes(x.r.status));
+  const liveIds = new Set(live.map(x => x.w.id + "/" + x.r.id));
+  const rank = { waiting: 0, working: 1, done: 2, idle: 3, unknown: 4, asleep: 5, ended: 6 };
+  const row = ({ p, w, r }) => `<button class="drw-r ${p.name === state.project && w.id === state.ws && r.id === state.room ? "on" : ""}" data-go="${esc(p.name)}" data-gw="${esc(w.id)}" data-gr="${esc(r.id)}" data-q="${esc((r.title + " " + p.name + " " + (w.branch || "") + " " + (r.agent || "")).toLowerCase())}">
+      ${dot(r.status)}<span class="t">${esc(r.title)}</span>${p.workspaces.length > 1 ? `<span class="br">${esc(w.branch || w.name)}</span>` : ""}<span class="a">${esc(r.agent || "")}</span></button>`;
+  const group = (p) => { const rs = p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))).filter(x => !liveIds.has(x.w.id + "/" + x.r.id)).sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9));
+    return rs.length ? `<div class="drw-h" data-grp>${esc(p.name)}</div>${rs.map(row).join("")}` : ""; };
+  const tabs = cur && cur.source !== "tmux" && cur.source !== "herdr" ? [["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => cur.source === "superset" || t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : [];
+  const b = mindBadge();
+  bg.innerHTML = `<div class="drw" role="dialog" aria-label="ห้องทั้งหมด">
+    <label class="drw-s">${SVG.search}<input type="search" placeholder="ค้นห้อง / โปรเจกต์" autocomplete="off"></label>
+    <div class="drw-nav">
+      <button data-home>🏠 หน้าแรก</button>
+      <button data-dmind>📬 Mind Mail${b ? `<i class="cbd">${esc(b)}</i>` : ""}</button>
+      ${tabs.map(([k, l]) => `<button data-pv2="${esc(k)}">${esc(l)} · ${esc(cur.name)}</button>`).join("")}
+    </div>
+    <div class="drw-l">
+      ${live.length ? `<div class="drw-h">กำลังทำ · รอคุณ</div>${live.sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9)).map(row).join("")}` : ""}
+      ${cur ? group(cur) : ""}${state.projects.filter(p => p !== cur).map(group).join("")}
+    </div>
+    <button class="drw-ui" data-classic>หน้าตาเก่า (แถบแท็บห้อง)</button></div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.addEventListener("click", e => { if (e.target === bg) close(); });
+  bg.querySelectorAll("[data-go]").forEach(x => x.onclick = () => { close(); goRoom(x.dataset.go, x.dataset.gw, x.dataset.gr); });
+  bg.querySelector("[data-home]").onclick = () => { close(); state.project = null; renderHome(); };
+  bg.querySelector("[data-dmind]").onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage("mind"); };
+  bg.querySelectorAll("[data-pv2]").forEach(x => x.onclick = () => { close(); state.pview = x.dataset.pv2; renderProject(); });
+  bg.querySelector("[data-classic]").onclick = () => { close(); store.set("maw-ui", "classic"); toast("กลับหน้าตาเก่าแล้ว · แตะ ☰ บนหัวจอห้องเพื่อใช้แบบคลีนอีกครั้ง"); renderProject(); };
+  const inp = bg.querySelector("input");
+  inp.oninput = () => { const q = inp.value.trim().toLowerCase();
+    bg.querySelectorAll(".drw-r").forEach(x => { x.hidden = !!q && !x.dataset.q.includes(q); });
+    bg.querySelectorAll(".drw-h").forEach(h => { let n = h.nextElementSibling, any = false; while (n && n.classList.contains("drw-r")) { if (!n.hidden) any = true; n = n.nextElementSibling; } h.hidden = !any; }); };
+  requestAnimationFrame(() => bg.classList.add("in"));
+}
+// ขั้น 3: ปุ่มคัดลอกใต้ข้อความ AI (หน้าตาคลีน) — คัดลอกตัวหนังสือที่เห็นใน bubble
+document.addEventListener("click", async e => {
+  const b = e.target.closest?.("[data-cpy]"); if (!b) return;
+  const t = b.closest(".msg")?.querySelector(".bubble")?.innerText || "";
+  try { await navigator.clipboard.writeText(t); toast("คัดลอกแล้ว"); } catch { toast("คัดลอกไม่ได้ในเบราว์เซอร์นี้"); }
+});
+// แผ่น "+" (ขั้น 2): รวมแนบไฟล์ · ถ่ายรูป · สกิล · ปุ่มของ ext · ปุ่มลัด — แตะแล้ว "กดแทน" ปุ่มเดิมที่ซ่อนอยู่ (handler เดิมทำงานครบ ไม่ต้องเขียนซ้ำ)
+function openPlusSheet() {
+  document.querySelector(".pls-bg")?.remove();
+  const keys = [...$app.querySelectorAll(".keys button")];
+  const tile = (sel, icon, label) => $app.querySelector(sel) ? `<button class="pls-t" data-px="${esc(sel)}"><span>${icon}</span>${esc(label)}</button>` : "";
+  const xk = keys.filter(b => b.dataset.xk !== undefined);
+  const qk = keys.filter(b => b.dataset.k !== undefined);
+  const bg = document.createElement("div"); bg.className = "pls-bg";
+  bg.innerHTML = `<div class="pls" role="dialog" aria-label="เพิ่ม"><div class="pls-g"></div>
+    <div class="pls-tiles">${tile("#clip", "📎", "แนบไฟล์")}${tile("#cam", "📷", "ถ่ายรูป")}${tile("#skbtn", "／", "สกิล")}</div>
+    ${xk.length ? `<div class="pls-h">คำสั่งห้องนี้</div><div class="pls-x">${xk.map(b => `<button data-pxk="${esc(b.dataset.xk)}" class="${esc(b.className)}">${esc(b.textContent)}</button>`).join("")}</div>` : ""}
+    <div class="pls-h">ปุ่มลัด <span>(แผ่นนี้ไม่ปิด กดต่อกันได้)</span></div>
+    <div class="pls-k">${qk.map(b => `<button data-pk="${esc(b.dataset.k)}" class="${b.classList.contains("warn") ? "warn" : ""}">${esc(b.textContent)}</button>`).join("")}</div></div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.addEventListener("click", e => { if (e.target === bg) close(); });
+  bg.querySelectorAll("[data-px]").forEach(x => x.onclick = () => { close(); $app.querySelector(x.dataset.px)?.click(); });
+  bg.querySelectorAll("[data-pxk]").forEach(x => x.onclick = () => { close(); $app.querySelector(`.keys [data-xk="${CSS.escape(x.dataset.pxk)}"]`)?.click(); });
+  bg.querySelectorAll("[data-pk]").forEach(x => x.onclick = () => { $app.querySelector(`.keys [data-k="${CSS.escape(x.dataset.pk)}"]`)?.click(); x.classList.add("hit"); setTimeout(() => x.classList.remove("hit"), 180); });
+  requestAnimationFrame(() => bg.classList.add("in"));
+}
 function openProject(name, ws, room) {
   const p = state.projects.find(x => x.name === name); if (!p) return renderHome();
   state.project = name;
@@ -813,8 +983,8 @@ function renderProject() {
     return state.pview === "files" ? renderFiles(w) : renderGit(w);
   }
   $app.dataset.view = ""; $app.innerHTML = `${""}
-    <header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(p.name)}</h1>${rcHtml()}
-      ${room ? `<span id="room-status" class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span><div id="ext-room-actions"></div>` : ""}</header>
+    ${uiClean() ? cleanHeader(p, room) : `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><button class="iconbtn" data-toclean aria-label="หน้าตาแบบคลีน">☰</button><h1>${esc(p.name)}</h1>${rcHtml()}
+      ${room ? `<span id="room-status" class="row" style="flex:none;font-size:12.5px;color:var(--dim)">${dot(room.status)}${ST[room.status]}</span><div id="ext-room-actions"></div>` : ""}</header>`}
     ${seg}
     ${p.workspaces.length > 1 ? `<div class="wsbar">${p.workspaces.map(x => `<button class="chip ${x.id === w.id ? "on" : ""}" data-ws="${esc(x.id)}">${esc(x.branch || x.name)}</button>`).join("")}</div>` : ""}
     <div class="tabs" id="tabs">${(w?.rooms || []).map(r => `<button class="tab ${r.id === state.room ? "on" : ""}" data-r="${esc(r.id)}">${dot(r.status)}<span class="t">${esc(r.title)}</span></button>`).join("")}
@@ -836,13 +1006,15 @@ function renderProject() {
       <div class="sugg" id="sugg" hidden></div>
       <div class="att" id="att"></div>
       <div class="recbar" id="recbar" hidden><span class="rt"></span><button class="rdrop" aria-label="ทิ้งช่วงนี้">✕ ทิ้งช่วงนี้</button><button class="rstop" aria-label="หยุดและส่ง">■ หยุด·ส่ง</button></div>
-      <div class="composer"><button class="clip" id="clip" aria-label="แนบไฟล์"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button><button class="clip" id="cam" aria-label="ถ่ายรูป"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg></button><button class="clip" id="mic" aria-label="กดค้างเพื่ออัดเสียง · แตะเพื่อแนบไฟล์เสียง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden><input type="file" id="audIn" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm,.aac,.opus" multiple hidden>
-        <textarea id="msg" rows="1" placeholder="พิมพ์ในห้องนี้…"></textarea><button class="send" id="send" disabled aria-label="ส่ง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button></div>` : ""}`
+      <div class="composer">${uiClean() ? `<button class="clip cplus" id="cplus" aria-label="เพิ่ม: แนบไฟล์ · สกิล · ปุ่มลัด">${SVG.plus}</button>` : ""}<button class="clip" id="clip" aria-label="แนบไฟล์"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button><button class="clip" id="cam" aria-label="ถ่ายรูป"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg></button><button class="clip" id="mic" aria-label="กดค้างเพื่ออัดเสียง · แตะเพื่อแนบไฟล์เสียง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden><input type="file" id="audIn" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm,.aac,.opus" multiple hidden>
+        <textarea id="msg" rows="1" placeholder="${uiClean() ? `บอกงานที่ให้ ${esc(ICON[room.agent]?.replace(/^\P{L}+/u, "") || room.agent || "agent")} ทำ` : "พิมพ์ในห้องนี้…"}"></textarea><button class="send" id="send" disabled aria-label="ส่ง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button></div>` : ""}`
     : `<div class="empty">ยังไม่มีห้อง — กด + เพื่อเปิดห้องใหม่</div>`}`;
-  document.getElementById("back").onclick = () => history.back();
+  document.getElementById("back")?.addEventListener("click", () => history.back());
   $app.querySelectorAll("[data-ws]").forEach(b => b.onclick = () => { state.ws = b.dataset.ws; const ww = p.workspaces.find(x => x.id === state.ws); state.room = ww?.rooms[0]?.id; renderProject(); });
   $app.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { state.room = b.dataset.r; state.follow = true; state.chat = null; state.queued = []; state.open = new Set(); renderProject(); });
   const add = document.getElementById("add"); if (add) add.onclick = () => p.source === "herdr" ? window.mawHerdrCreate?.(w) : p.source === "tmux" ? openProjectSheet() : openNewRoom(w);
+  if (uiClean()) { wireCleanHeader(p, w, room); document.getElementById("cplus")?.addEventListener("click", openPlusSheet); }
+  else $app.querySelector("[data-toclean]")?.addEventListener("click", () => { store.del("maw-ui"); renderProject(); });
   $app.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { state.pview = b.dataset.pv; renderProject(); });
   $app.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { state.mode = b.dataset.m; state.follow = true; renderProject(); });
   keepScroll(document.getElementById("tabs"), "tabs:" + p.name + "/" + (w?.id || ""), ".tab.on");
@@ -1177,7 +1349,7 @@ function renderItem(m) {
     const pics = (m.images || []).map(u => `<img class="upimg" src="${esc(u)}" loading="lazy" data-zoom="${esc(u)}">`).join("");
     return `<div class="msg me ${m.queued ? "queued" : ""} ${m.canceled ? "canceled" : ""}"><div class="who">${m.canceled ? "✕ ยกเลิกแล้ว · ลบจากคอม ไม่ได้ส่ง" : m.queued ? "⏳ รอส่ง · Claude จะอ่านเมื่อทำงานรอบนี้เสร็จ" : "คุณ"} · ${hhmm(m.ts)}</div><div class="bubble">${pics ? `<div class="pics">${pics}</div>` : ""}${body}${long ? `<br><a class="more" data-x="u${m.i}">${state.open.has("u" + m.i) ? "ย่อ" : "ดูทั้งหมด"}</a>` : ""}</div></div>`;
   }
-  if (m.role === "assistant") return `<div class="msg ai ${esc(agentKind())}"><div class="who">${esc(agentName()).replace(/^(\S+)\s/, '<span class="gl">$1</span> ')} · ${hhmm(m.ts)}</div><div class="bubble">${md(m.text)}</div></div>`;
+  if (m.role === "assistant") return `<div class="msg ai ${esc(agentKind())}"><div class="who">${esc(agentName()).replace(/^(\S+)\s/, '<span class="gl">$1</span> ')} · ${hhmm(m.ts)}</div><div class="bubble">${md(m.text)}</div>${uiClean() ? `<div class="macts"><button data-cpy aria-label="คัดลอกข้อความ">${SVG.copy}</button></div>` : ""}</div>`;
   if (m.role === "system") return `<div class="sys">${esc(m.text)} · ${hhmm(m.ts)}</div>`;
   const t = m.tool, agent = m.role === "agent";
   const st = t.bg === "running" ? `<span class="bgrun">กำลังทำงานเบื้องหลัง</span>` : t.output == null ? "⏳" : t.error ? "✗" : "✓";
