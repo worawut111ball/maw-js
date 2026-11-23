@@ -27,3 +27,4 @@ Host ที่ตรวจ config/authority แล้วส่ง `{mobile:{cont
 | วันที่ | ใคร | แก้อะไร |
 |---|---|---|
 | 9 พ.ย. 69 | Codex root | บันทึก production one-way implementation สำหรับ review ก่อนเปิดใช้ |
+| 23 พ.ย. 69 | ไอ้แดง (Claude Code) · พี่ Ball สั่ง | `server.ts` ใส่ ETag (`hono/etag`) ให้ไฟล์แอปมือถือ `/m.html` `/sw.js` `/manifest.json` `/m-ext/*` → ไฟล์ไม่เปลี่ยนตอบ 304 ไม่มีเนื้อหา (ประหยัดเน็ตตอนเปิดแอป) |

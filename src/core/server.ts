@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { serveStatic } from "hono/bun";
+import { etag } from "hono/etag";
 import { api } from "../api";
 import { createMobileApi } from "../mobile/api";
 
@@ -72,6 +73,8 @@ if (existsSync(MAW_UI_DIR)) {
     const p = new URL(c.req.url).pathname;
     if (p === "/m.html" || p === "/sw.js" || p === "/manifest.json" || p.startsWith("/m-ext/")) c.header("Cache-Control", "no-cache");
   });
+  // revalidate ≠ re-download: an unchanged m.html (~80 KB gz) / pack answers 304 with no body
+  for (const p of ["/m.html", "/sw.js", "/manifest.json", "/m-ext/*"]) views.use(p, etag());
   views.use("/*", serveStatic({ root: MAW_UI_DIR }));
 } else {
   // The Door — minimal landing page when no packed maw-ui is installed.

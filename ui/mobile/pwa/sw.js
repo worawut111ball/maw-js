@@ -15,7 +15,8 @@ self.addEventListener("fetch", e => {
   const key = url.origin + url.pathname;
   e.respondWith((async () => {
     try {
-      const res = await fetch(e.request, { cache: "no-store" });
+      // no-cache = always ask the Mac, but with If-None-Match → an unchanged file comes back as a tiny 304 (server ETag)
+      const res = await fetch(e.request, { cache: "no-cache" });
       // 502–504 = Tailscale up but maw down → the kept copy is better than an error page
       if (res.status >= 502 && res.status <= 504) throw new Error("gateway");
       if (res.ok) { const box = await caches.open(SHELL); await box.put(key, res.clone()); }

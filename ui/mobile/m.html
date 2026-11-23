@@ -331,7 +331,7 @@
   .tile .k { font-size: 11px; color: var(--dim); white-space: nowrap; } .tile .v { font: 600 14px var(--font); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar { height: 5px; border-radius: 99px; background: #ffffff12; overflow: hidden; margin-top: 3px; } .bar > i { display: block; height: 100%; border-radius: 99px; }
   .lim { display: grid; grid-template-columns: 64px 1fr 1fr; gap: 10px; align-items: center; font-size: 12.5px; }
-  .lim .who2 { font-weight: 700; } .lim .who2.claude { color: #f0a17f; } .lim .who2.codex { color: #6ee7b7; }
+  .lim .who2.mind { color: #a78bfa; } .lim .who2 { font-weight: 700; } .lim .who2.claude { color: #f0a17f; } .lim .who2.codex { color: #6ee7b7; }
   .lim .cell { min-width: 0; } .lim .cell .t { display: flex; justify-content: space-between; gap: 4px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; } .lim .cell .t b { color: var(--text); }
   .lim .cell .t span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .rc-trav { display: inline-flex; align-items: center; gap: 2px; font: 600 11px var(--mono); color: #67e8f9; margin-right: 2px; }
@@ -1559,10 +1559,13 @@ function settleImages(scr) {
   };
   imgs.forEach(img => { img.addEventListener("load", settle, { once: true }); img.addEventListener("error", settle, { once: true }); });
 }
-async function loadChat(scr, older) {
+async function loadChat(scr, older, full) {
   const ws = state.ws, room = state.room, mode = state.mode, binding = chatBinding(ws, room);
   const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
-  const q = (older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : "?limit=150") + (isHerdr(ws) ? "" : "&lite=1");
+  // ประหยัดเน็ต: ห้องที่มีข้อความในเครื่องแล้ว poll ขอแค่ 30 ข้อความท้าย (ที่เปลี่ยนจริงอยู่ท้ายแชท) แทน 150 ทุก 2.5 วินาที
+  const have = !older && !full && !isHerdr(ws) && state.chat?.binding === binding ? state.chat : null;
+  const q = (older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : `?limit=${have ? 30 : 150}`) + (isHerdr(ws) ? "" : "&lite=1");
+  const tailBefore = have ? have.total : 0;
   const request = {}; scr._chatRequest = request;
   const c = await api(base + q).catch(e => { if (scr._chatRequest !== request) return { kind: "stale" }; throw e; });
   // the reply of a room we already left must not land in the room on screen now
@@ -1579,6 +1582,8 @@ async function loadChat(scr, older) {
   chatCache.set(binding, state.chat);
   scr._chatBinding = binding;
   const ch = state.chat;
+  // tail poll left a gap (more than 30 new messages since last time) or a new conversation → take the full page once
+  if (have && (c.epoch !== have.epoch || c.conversation !== have.conversation || c.start > tailBefore)) return loadChat(scr, false, true);
   for (const it of c.items) {
     // lite poll: a tool step opened earlier was fetched in full — keep it while its state (running / done) is the same
     const had = ch.items.get(it.i);
@@ -2464,7 +2469,9 @@ function sysHtml() {
       ${tile("RAM", m.ram ? `${m.ram.usedGB}/${m.ram.totalGB}G` : "—", m.ram?.pct)}
       ${tile("ดิสก์ว่าง", m.disk ? `${m.disk.freeGB} GB` : "—", m.disk?.pct)}</div>
     ${heatHtml(m)}
-    ${lim("✳ Claude", "claude", s.limits?.claude)}${lim("Codex", "codex", s.limits?.codex)}
+    ${lim("✳ Claude", "claude", s.limits?.claude)}${s.limits?.codex && !s.limits.codex.h5 && !s.limits.codex.d7 && state.mindMe
+      ? `<div class="lim"><span class="who2 codex">Codex</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>`
+      : lim("Codex", "codex", s.limits?.codex)}${mindLimHtml()}
     ${travelHtml()}`;
 }
 // 🧳 travel mode: Mac keeps running with the lid closed (features/travel.ts) — safety auto-off on low battery / heat / timer
@@ -2505,7 +2512,18 @@ document.addEventListener("click", async e => {
   try { const r = await api("/system/travel", { method: "POST", body: JSON.stringify({ on: b.dataset.travel === "on", hours: 8 }) }); state.travel = r; toast(r.on ? "เปิดโหมดเดินทางแล้ว — พับจอได้" : "ปิดโหมดเดินทางแล้ว"); refreshRc(); }
   catch (err) { toast(err.message); }
 }, true);
+// โควตา token ของ Mind (บัญชีที่ claude/codex ผ่าน Mind ใช้) — /mind/me · Mind รีเซ็ตเที่ยงคืนเวลาไทย · ขอไม่เกินทุก 1 นาที
+function mindLimHtml() {
+  const me = state.mindMe; if (!me) return "";
+  const lim = me.dailyTokenLimit, used = me.usedToday, pct = lim ? Math.round(used * 100 / lim) : null;
+  return `<div class="lim"><span class="who2 mind">Mind</span><div class="cell" style="grid-column:span 2"><div class="t"><span>วันนี้ <b>${kTok(used)}</b>${lim ? ` / ${kTok(lim)} · <b>${pct}%</b>` : " · ไม่จำกัด"}</span><span>รีเซ็ต 00:00</span></div>${pct == null ? "" : barHtml(pct)}</div></div>`;
+}
+async function loadMindMe() {
+  if (Date.now() - (loadMindMe.at || 0) < 60_000) return; loadMindMe.at = Date.now();
+  try { state.mindMe = await api("/mind/me"); const p = document.getElementById("rcpanel"); if (p) p.innerHTML = sysHtml(); } catch { /* not logged in to Mind */ }
+}
 async function loadSys() {
+  loadMindMe();
   api("/system/travel").then(t => { state.travel = t; const p = document.getElementById("rcpanel"); if (p) p.innerHTML = sysHtml(); }).catch(() => {});
   try { state.sys = await api("/system"); refreshRc(); } catch { /* offline */ }
 }
@@ -2773,6 +2791,7 @@ function openMoreMenu() {
     <button id="mm-bell"><span class="i">${pushOn ? "🔔" : "🔕"}</span><span class="t">แจ้งเตือน<small>${pushOn ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
     ${mawExt.pages.filter(pg => pg.tile === false).map(pg => `<button data-mpage="${esc(pg.key)}"><span class="i">${esc(pg.icon || "•")}</span><span class="t">${esc(pg.title)}<small>${esc(pg.hint || "")}</small></span></button>`).join("")}
     ${uiClean() && document.querySelector(".cx-home") ? `<button id="mm-cx"><span class="i">⚙</span><span class="t">Plugin · MCP · Hooks<small>ดูการตั้งค่า</small></span></button>` : ""}
+<button id="mm-ui"><span class="i">◐</span><span class="t">${uiClean() ? "หน้าตาเก่า" : "หน้าตาคลีน"}<small>${uiClean() ? "ตอนนี้: แบบคลีน · แตะเพื่อกลับแบบมีแถบแท็บ" : "ตอนนี้: แบบเก่า · แตะเพื่อใช้แบบคลีน"}</small></span></button>
 <button id="mm-web"><span class="i">🖥</span><span class="t">หน้าเว็บเดิม<small>maw-ui แบบเต็ม</small></span></button>
     <button class="ghost" id="mm-x">ปิด</button></div>`;
   document.body.appendChild(bg);
@@ -2783,6 +2802,7 @@ function openMoreMenu() {
   bg.querySelector("#mm-bell").onclick = e => { togglePush(e.currentTarget.querySelector(".i")); close(); };
   bg.querySelectorAll("[data-mpage]").forEach(b => b.onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage(b.dataset.mpage); });
   bg.querySelector("#mm-cx")?.addEventListener("click", () => { close(); document.querySelector(".cx-home")?.click(); });
+  bg.querySelector("#mm-ui").onclick = () => { close(); uiClean() ? store.set("maw-ui", "classic") : store.del("maw-ui"); state.page ? renderPage(state.page) : state.room || state.project ? renderProject() : renderHome(); };
   bg.querySelector("#mm-web").onclick = () => { store.set("maw-desktop-ui", "1"); location.href = "/?host=" + encodeURIComponent(location.origin) + "#fleet"; };
 }
 function toggleSound(btn) {

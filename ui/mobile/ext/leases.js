@@ -96,8 +96,11 @@
     slot.appendChild(b);
   }
 
+  // หน้าแรกวาดใหม่ทุก poll (2.5 วิ) — วันหมดอายุเครื่องเช่าไม่เปลี่ยนบ่อย → ขอจาก server ไม่เกินทุก 5 นาที (ประหยัดเน็ต)
+  let fetchedAt = 0;
   const homeHook = async () => {
-    try { cache = await api("/leases"); } catch { /* เงียบ — ไม่ให้หน้าแรกพังเพราะฟีเจอร์นี้ */ return; }
+    if (cache && Date.now() - fetchedAt < 300_000) return refreshHomeCard();
+    try { cache = await api("/leases"); fetchedAt = Date.now(); } catch { /* เงียบ — ไม่ให้หน้าแรกพังเพราะฟีเจอร์นี้ */ return; }
     refreshHomeCard();
   };
   mawExt.onHome.push(homeHook);

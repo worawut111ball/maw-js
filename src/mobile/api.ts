@@ -421,6 +421,17 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   await pressUntilSent(ch, text, () => pressKey(ch, "enter"));
 }
 
+const ETAG_PATH = /^\/mobile\/(projects|system|rooms\/[^/]+\/[^/]+\/chat)$/;
+/** JSON GET on a polled path → ETag + Cache-Control: no-cache; the same ETag in If-None-Match → 304 with no body. */
+export function etagJson(request: Request, response: unknown, set: { status?: number | string; headers: Record<string, any> }): Response | undefined {
+  if (request.method !== "GET" || !response || typeof response !== "object" || response instanceof Response) return;
+  if ((set.status ?? 200) !== 200 || set.headers["cache-control"] || !ETAG_PATH.test(new URL(request.url).pathname)) return;
+  const json = JSON.stringify(response), tag = `W/"${createHash("sha1").update(json).digest("base64url").slice(0, 22)}"`;
+  const headers = { etag: tag, "cache-control": "no-cache" };
+  if (request.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers });
+  return new Response(json, { headers: { ...headers, "content-type": "application/json; charset=utf-8" } });
+}
+
 /** A chat item for chat?lite=1: a tool step keeps name/summary/state but drops its command and output (flag lazy). */
 export function liteItem<T extends { tool?: any }>(x: T): T {
   const t = x.tool;
@@ -1807,6 +1818,8 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       if (/\/vault\/dl(-zip|\/[0-9a-z]+)$/.test(path)) return;      // signed short-lived links — the route checks the signature
       if (!isAuthorized(request.headers, cfg)) { set.status = 401; return { ok: false, error: "unauthorized" }; }
     })
+    // ประหยัดเน็ต: poll ที่ข้อมูลไม่เปลี่ยน (projects ทุก 2.5 วิ · system · แชท) ตอบ 304 ไม่มีเนื้อหา — browser ส่ง If-None-Match เอง
+    .mapResponse(({ request, response, set }) => etagJson(request, response, set))
     .get("/health", () => ({ ok: true, hooks: hookStates.size }))
     .get("/agents", async () => ({ agents: await listAgents() }))
     .get("/agents/:id/screen", async ({ params, query, set }) => {
