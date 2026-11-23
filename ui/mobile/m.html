@@ -65,9 +65,9 @@
   #app:has(> .uiclean) .composer #mic { grid-column: 3; grid-row: 2; border-radius: 50% !important; border-color: transparent; background: var(--card2); }
   #app:has(> .uiclean) .composer .send { grid-column: 4; grid-row: 2; width: 42px !important; height: 42px !important; border-radius: 50% !important; }
   /* ขั้น 3: ข้อความ AI ไม่มีกรอบ · ข้อความเราเป็นฟองเทา · ขั้นตอน agent เป็นบรรทัดบาง (บรรทัด .who ที่มีตัวหมุนตอนทำงานคงไว้) */
-  #app:has(> .uiclean) .msg.ai .bubble { background: none; border: 0; border-radius: 0; padding: 2px 4px; font-size: 15.5px; line-height: 1.72; }
+  #app:has(> .uiclean) .msg.ai .bubble { background: none; border: 0; border-radius: 0; padding: 2px 4px; font-size: 14.5px; line-height: 1.65; }
   #app:has(> .uiclean) .msg.ai .who { margin: 0 4px 2px; }
-  #app:has(> .uiclean) .msg.me .bubble { background: var(--card2); color: var(--text); border-radius: 20px; padding: 10px 16px; font-size: 15px; }
+  #app:has(> .uiclean) .msg.me .bubble { background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; border-radius: 20px 20px 6px 20px; padding: 9px 14px; font-size: 14.5px; font-weight: 500; box-shadow: 0 4px 14px #2563eb33; }
   #app:has(> .uiclean) .msg.me:not(.queued):not(.canceled):not(.pend) > .who { display: none; }
   #app:has(> .uiclean) .msg { margin: 18px 0 4px; }
   #app:has(> .uiclean) details.tool { margin: 1px 0 1px 2px; }
@@ -76,6 +76,9 @@
   #app:has(> .uiclean) details.tool .tn { font: 600 12.5px var(--mono); }
   #app:has(> .uiclean) details.tool.agent > summary { background: none; color: #c4b5fd; }
   #app:has(> .uiclean) details.tgroup { margin: 2px 0 2px 2px; }
+  #app:has(> .uiclean) details.tgroup.prev > summary { justify-content: flex-start; gap: 8px; }
+  #app:has(> .uiclean) details.tgroup.prev .gsum { flex: none; }
+  #app:has(> .uiclean) details.tgroup.prev[open] > summary .chev { transform: rotate(90deg); }
   #app:has(> .uiclean) details.tgroup > summary { background: none !important; border: 0 !important; padding: 5px 4px; color: var(--dim); }
   #app:has(> .uiclean) details.tgroup.err > summary .gsum::after { content: ""; }
   .macts { display: flex; gap: 14px; margin: 4px 4px 0; } .macts button { background: none; color: var(--dim); padding: 4px; border-radius: 8px; opacity: .7; } .macts button:active { opacity: 1; color: var(--text); }
@@ -232,7 +235,10 @@
 .msg.ai .who .gl { display: inline-block; width: 1em; text-align: center; }
 .msg.ai.live .who .gl { color: #f472b6; contain: layout paint; }
 @keyframes spinc { 0%,100% { color: #d97757; } 33% { color: #f472b6; } 66% { color: #c084fc; } }
-  .sugg[hidden] { display: none; }
+  .sugg[hidden], .qsugg[hidden] { display: none; }
+  .qsugg { display: flex; gap: 6px; margin: 6px 12px 0; overflow-x: auto; flex: none; scrollbar-width: none; }
+  .qsugg button { flex: none; height: 34px; padding: 0 14px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 600 13.5px var(--font); white-space: nowrap; }
+  .qsugg button:active { background: var(--accent); color: #031022; }
   .sugg { display: flex; align-items: center; gap: 8px; margin: 6px 12px 0; padding: 4px 4px 4px 12px; border: 1px dashed #3b4266; border-radius: 12px; background: #0d1020; flex: none; }
   .sugg .tx { flex: 1; min-width: 0; color: #9aa3c7; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
   .sugg .tx b { color: #c4b5fd; font-weight: 600; margin-right: 6px; }
@@ -835,6 +841,9 @@ function projCard(p) {
 // ── หน้าตาแบบคลีน (23 พ.ย. 69): หัวจอห้องแถวเดียว + ลิ้นชัก ☰ แทนแถบ branch / แท็บห้อง / seg / roomhead ──
 // แถบเดิมยังถูกวาดแต่ซ่อนด้วย CSS (#app:has(> .uiclean)) เพราะ refreshTabs() อ่าน #tabs อยู่ · สลับกลับหน้าตาเก่าได้ในลิ้นชัก (localStorage maw-ui)
 const uiClean = () => store.get("maw-ui") !== "classic";
+// เวลาที่เปิดใช้แต่ละโปรเจกต์ล่าสุด (เครื่องนี้) → ลิ้นชักเรียงโปรเจกต์จากใช้ล่าสุดไปเก่าสุด
+const projUsed = () => { try { return JSON.parse(store.get("maw-proj-used") || "{}") || {}; } catch { return {}; } };
+function markProjectUsed(name) { const u = projUsed(); if (Date.now() - (u[name] || 0) < 60_000) return; u[name] = Date.now(); store.set("maw-proj-used", JSON.stringify(u)); }
 const SVG = {
   menu: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h11M4 17h16"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l1 2h6l1-2h5"/></svg>',
@@ -893,7 +902,7 @@ function openDrawer() {
     </div>
     <div class="drw-l">
       ${live.length ? `<div class="drw-h">กำลังทำ · รอคุณ</div>${live.sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9)).map(row).join("")}` : ""}
-      ${cur ? group(cur) : ""}${state.projects.filter(p => p !== cur).map(group).join("")}
+      ${(() => { const u = projUsed(); return state.projects.map((p, i) => ({ p, i })).sort((a, b) => (u[b.p.name] || 0) - (u[a.p.name] || 0) || a.i - b.i).map(x => group(x.p)).join(""); })()}
     </div>
     <button class="drw-ui" data-classic>หน้าตาเก่า (แถบแท็บห้อง)</button></div>`;
   document.body.appendChild(bg);
@@ -967,6 +976,7 @@ function renderProject() {
   renderProject.binding = room && chatBinding(w.id, room.id);
   renderProject.room = room;
   const canType = !!room && room.status !== "ended" && room.status !== "asleep" && (p.source !== "herdr" || !!room.capabilities);
+  markProjectUsed(p.name);
   if (room && room.agent) store.set("maw-last-room", JSON.stringify({ project: p.name, ws: w.id, room: room.id })); // shares go here next time
   store.set("maw-last-view", JSON.stringify({ kind: "project", project: p.name, ws: w?.id, room: room?.id ?? null, mode: state.mode, pview: state.pview, fpath: state.fpath || "", fview: state.fview || null, at: Date.now() }));
   const segTabs = p.source === "superset" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : p.source === "folder" ? [["rooms", "ห้อง"], ["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : null;
@@ -1004,6 +1014,7 @@ function renderProject() {
       <div class="slash" id="slash" hidden></div>
       <div class="draftbar" id="draft" hidden></div>
       <div class="sugg" id="sugg" hidden></div>
+      <div class="qsugg" id="qsugg" hidden></div>
       <div class="att" id="att"></div>
       <div class="recbar" id="recbar" hidden><span class="rt"></span><button class="rdrop" aria-label="ทิ้งช่วงนี้">✕ ทิ้งช่วงนี้</button><button class="rstop" aria-label="หยุดและส่ง">■ หยุด·ส่ง</button></div>
       <div class="composer">${uiClean() ? `<button class="clip cplus" id="cplus" aria-label="เพิ่ม: แนบไฟล์ · สกิล · ปุ่มลัด">${SVG.plus}</button>` : ""}<button class="clip" id="clip" aria-label="แนบไฟล์"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></button><button class="clip" id="cam" aria-label="ถ่ายรูป"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg></button><button class="clip" id="mic" aria-label="กดค้างเพื่ออัดเสียง · แตะเพื่อแนบไฟล์เสียง"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button><input type="file" id="fileIn" multiple hidden><input type="file" id="camIn" accept="image/*" capture="environment" hidden><input type="file" id="audIn" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm,.aac,.opus" multiple hidden>
@@ -1368,6 +1379,18 @@ function renderList(list) {
     const run = [m];
     while (k + 1 < list.length && list[k + 1].role === "tool") run.push(list[++k]);
     if (run.length === 1) { out.push(renderItem(m)); continue; }
+    // หน้าตาคลีน: ขั้นล่าสุด 3 ขั้นเป็นบรรทัดของมันเอง (เห็นทันทีว่ากำลังทำอะไร) · ขั้นที่เก่ากว่ายุบเป็น "ขั้นก่อนหน้า (N)"
+    if (uiClean()) {
+      const SHOW = 3, old = run.slice(0, Math.max(0, run.length - SHOW)), recent = run.slice(-SHOW);
+      if (old.length) {
+        const key = "g" + run[0].i, oerr = old.filter(r => r.tool.error).length;
+        out.push(`<details class="tgroup prev ${oerr ? "err" : ""}" data-g="${key}" ${state.open.has(key) ? "open" : ""}>
+          <summary><span>🔧</span><span class="gsum">ขั้นก่อนหน้า (${old.length})${oerr ? ` · ✗ ${oerr}` : ""}</span><span class="chev">›</span></summary>
+          <div class="gbody">${old.map(renderItem).join("")}</div></details>`);
+      }
+      out.push(...recent.map(renderItem));
+      continue;
+    }
     const by = {}; for (const r of run) by[r.tool.name] = (by[r.tool.name] || 0) + 1;
     const errs = run.filter(r => r.tool.error).length, busy = run.some(r => r.tool.output == null);
     const st = busy ? "⏳" : errs ? `✗ ${errs}` : "✓";
@@ -1862,6 +1885,24 @@ async function pullDraft(raw, msg) {
   if (state.pulled === raw) { msg.oninput?.(); msg.dispatchEvent(new Event("maw-redraw-att")); }
 }
 // Claude Code's grey suggestion in the Mac's input box → one-tap chip above the composer
+// ปุ่มตอบเร็ว (ทุก agent · ไม่ใช้ token): อ่านข้อความล่าสุดของ agent ด้วย ext/quick-reply.js → "ข้อ 1" · "ทาง ก" · "ทำเลย" …
+// โชว์เมื่อ agent ตอบจบแล้ว (ไม่หมุน) · ช่องพิมพ์ว่าง · ไม่มีคำแนะนำของ Claude เอง · แตะ = ใส่ข้อความในช่องพิมพ์ (กดส่งเอง)
+function paintQuick(busy, claudeHas) {
+  const box = document.getElementById("qsugg"), msg = document.getElementById("msg");
+  if (!box || !msg) return;
+  const off = () => { box.hidden = true; box._k = ""; };
+  const items = state.chat?.room === state.room ? [...state.chat.items.values()] : [];
+  const lastAi = items.filter(m => m.role === "assistant").sort((a, b) => b.i - a.i)[0];
+  const lastMe = Math.max(-1, ...items.filter(m => m.role === "user").map(m => m.i));
+  if (busy || claudeHas || !lastAi || lastAi.i < lastMe || msg.value.trim() || !mawExt.quickReplies) return off();
+  const chips = mawExt.quickReplies(lastAi.text);
+  if (!chips.length) return off();
+  const k = lastAi.i + ":" + chips.map(c => c.value).join("|");
+  if (box._k === k && !box.hidden) return;
+  box._k = k; box.hidden = false;
+  box.innerHTML = chips.map((c, i) => `<button data-q="${i}">${esc(c.label)}</button>`).join("");
+  box.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { msg.value = chips[+b.dataset.q].value; msg.oninput?.(); msg.focus(); off(); });
+}
 async function loadSuggestion() {
   const box = document.getElementById("sugg"), msg = document.getElementById("msg");
   if (!box || !msg) return;
@@ -1869,7 +1910,7 @@ async function loadSuggestion() {
   const room = w?.rooms.find(r => r.id === state.room);
   const hide = () => { box.hidden = true; box._t = ""; };
   const spin = document.getElementById("spin");
-  if (!room || !["claude", "codex"].includes(room.agent)) { hide(); if (spin) spin.hidden = true; return; }
+  if (!room || !["claude", "codex"].includes(room.agent)) { hide(); if (spin) spin.hidden = true; paintQuick(!room || room.status === "working", false); return; }
   try {
     const r = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(room.id)}/suggestion?${qs({ agent: room.agent, sid: room.claudeSessionId || "" })}`);
     if (state.ws !== w.id || state.room !== room.id) return; // left this room while waiting
@@ -1927,6 +1968,8 @@ async function loadSuggestion() {
         db.querySelector('[data-d="clear"]').onclick = async e => { const b = e.currentTarget; if (!b.dataset.armed) { b.dataset.armed = 1; b.classList.add("warn"); b.textContent = "ล้างจริง?"; return; } await roomKey("clearbox"); db.hidden = true; toast("ล้างช่องพิมพ์ที่คอมแล้ว"); };
       }
     }
+    const sg0 = room.agent === "claude" && !r.spinner ? r.suggestion : null;
+    paintQuick(!!r.spinner || room.status === "working", !!(sg0 && sg0.text !== msg.value.trim()));
     if (room.agent !== "claude" || r.spinner) return hide();
     const sg = r.suggestion;
     if (!sg || sg.text === msg.value.trim()) return hide();
@@ -2925,6 +2968,7 @@ start();
 <script src="/m-ext/permissions.js" defer></script>
 <script src="/m-ext/herdr.js" defer></script>
 <script src="/m-ext/modes.js" defer></script>
+<script src="/m-ext/quick-reply.js" defer></script>
 <!-- continuity.js parked 10 พ.ย. 69 — owned-session switch feature ไม่ต่อเข้า production server จริง (capabilities เป็น not-certified เสมอ)
      ปุ่ม "เปลี่ยน agent / โมเดล" ของมันจึงโผล่ค้างแบบใช้งานไม่ได้ ซ้อนกับปุ่ม switch-agent.js ตัวใหม่ที่ใช้ได้จริง — ปิดไว้ก่อน โค้ดเก็บไว้เป็น reference
 <script src="/m-ext/continuity.js" defer></script> -->
