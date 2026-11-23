@@ -43,7 +43,41 @@
   .pr-a label { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; }
   .pr-a a { margin-left: auto; color: var(--accent); }
   .pr-more { display: block; width: 100%; padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; color: var(--dim); font-size: 12.5px; }
-  .pr-foot { padding: 8px 13px 11px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11.5px; }`;
+  .pr-foot { padding: 8px 13px 11px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11.5px; }
+  /* แบบคลีน (A, 23 พ.ย. 69): แท็บกรอง · repo พับได้ · แถวละ PR · แตะแล้วปุ่มอยู่ในแผ่นล่าง */
+  .pq-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--dim); padding: 0 2px; overflow-x: auto; scrollbar-width: none; }
+  .pq-tabs button { padding: 6px 0 8px; white-space: nowrap; background: none; border: 0; color: inherit; font: inherit; }
+  .pq-tabs button.on { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--text); }
+  .pq-tabs em { font-style: normal; color: var(--faint, #5c5c66); margin-left: 3px; font-variant-numeric: tabular-nums; }
+  .pq-tabs .rf { margin-left: auto; color: var(--dim); }
+  .pq-meta { font-size: 10.5px; color: var(--dim); padding: 6px 2px 4px; }
+  .pq-box { background: var(--card); border-radius: 14px; overflow: hidden; margin-top: 8px; }
+  .pq-gh { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; background: var(--card2); border: 0; color: var(--text); text-align: left; }
+  .pq-gh b { flex: 1; min-width: 0; font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pq-gh span { font-size: 10.5px; color: var(--dim); } .pq-gh .cv { color: var(--dim); transform: rotate(90deg); transition: transform .15s; }
+  .pq-box.fold .pq-gh { background: var(--card); } .pq-box.fold .pq-gh .cv { transform: none; } .pq-box.fold .pq-gb { display: none; }
+  .pq-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; background: none; border: 0; border-top: 1px solid var(--line); color: var(--text); text-align: left; font: inherit; }
+  .pq-row:active { background: #ffffff08; }
+  .pq-row .t { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .pq-row .t b { font-size: 12.5px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pq-row .t b i, .pq-sh .st i { font-style: normal; color: var(--dim); font-weight: 500; margin-right: 4px; }
+  .pq-row .t small, .pq-sh .sm { font-size: 10.5px; color: var(--dim); display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .pq-row .t small span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pq-row .cv { color: var(--dim); flex: none; }
+  .pq-d { width: 6px; height: 6px; border-radius: 50%; flex: none; background: #4b5563; }
+  .pq-d.ok { background: #22c55e; } .pq-d.bad { background: #ef4444; } .pq-d.run { background: #f59e0b; }
+  .pq-gf { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-top: 1px solid var(--line); }
+  .pq-gf a { color: var(--dim); font-size: 11px; text-decoration: none; }
+  .pq-more { display: block; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; color: var(--dim); font-size: 11.5px; }
+  .pq-sh { display: grid; gap: 10px; }
+  .pq-sh .st { font-size: 13px; font-weight: 650; line-height: 1.45; }
+  .pq-sh .vd { font-size: 11.5px; color: var(--dim); line-height: 1.4; overflow-wrap: anywhere; } .pq-sh .vd.ready { color: #86efac; } .pq-sh .vd.blocked { color: #fca5a5; }
+  .pq-opts { display: flex; gap: 14px; align-items: center; font-size: 11.5px; color: var(--dim); }
+  .pq-opts button { background: none; border: 0; padding: 4px 0; color: inherit; font: inherit; } .pq-opts button.on { color: var(--text); font-weight: 600; }
+  .pq-opts label { margin-left: auto; display: inline-flex; gap: 5px; align-items: center; }
+  .pq-btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+  .pq-btns button, .pq-btns a { height: 40px; border-radius: 12px; border: 0; background: var(--card2); color: var(--text); font: 600 12.5px var(--font); display: grid; place-items: center; text-decoration: none; }
+  .pq-btns .mg { background: #16a34a; color: #fff; } .pq-btns .armed { background: #f59e0b; color: #1a1003; } .pq-btns button:disabled { opacity: .5; }`;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 
   const S = { data: null, at: 0, loading: false, err: "", drafts: new Set(), fold: new Set(), unfold: new Set(), armed: null, busy: new Set(), method: new Map(), del: new Set() };
@@ -81,7 +115,58 @@
     const ready = prs.filter(p => p.status.ready).length, bad = prs.filter(p => /conflict|ci-failed|changes/.test(p.status.code)).length, draft = prs.filter(p => p.isDraft).length;
     return { all: prs.length, ready, bad, draft, other: prs.length - ready - bad - draft };
   };
+  const clean = () => typeof uiClean === "function" && uiClean();
+  const plain = t => String(t || "").replace(/^[^\p{L}\p{N}(#]+/u, "");   // status text without its leading ✅ / ❌ (the dot shows it)
+  const kind = p => p.isDraft ? "draft" : p.status.ready ? "ready" : /conflict|ci-failed|changes/.test(p.status.code) ? "bad" : "other";
+  const prRow = (repo, p) => `<button class="pq-row" data-open="${esc(key(repo, p.number))}"><span class="t"><b><i>#${p.number}</i>${esc(p.title)}</b>
+      <small><span class="pq-d ${sClass(p.status.code)}"></span><span>${esc(plain(p.status.text))} · ${esc(p.author || "")} · ${ago(p.updatedAt)}${p.reviewing ? " · AI กำลังตรวจ" : p.verdict && !p.verdict.stale ? ` · AI ${p.verdict.verdict === "ready" ? "ว่าพร้อม" : "ว่าติด"}` : ""}</span></small></span><span class="cv">›</span></button>`;
+  function drawClean() {
+    const d = S.data, c = counts(), tab = S.tab || "all";
+    if (!d) { root.innerHTML = `<div class="pr-empty">${S.err ? "โหลดไม่ได้: " + esc(S.err) : "กำลังโหลด PR จาก GitHub…"}</div>`; return; }
+    const tabs = [["all", "ทั้งหมด", c.all], ["ready", "พร้อม", c.ready], ["bad", "ติด", c.bad], ["other", "อื่นๆ", c.other], ["draft", "draft", c.draft]];
+    const groups = sortRepos(d.repos).map(r => {
+      const show = r.prs.filter(p => tab === "all" ? !p.isDraft : kind(p) === tab), drafts = tab === "all" ? r.prs.filter(p => p.isDraft) : [];
+      if (!show.length && !drafts.length && !(tab === "all" && r.error)) return "";
+      const folded = S.fold.has(r.repo) || (tab === "all" && !show.length && !S.unfold.has(r.repo)), showD = S.drafts.has(r.repo), n = r.repo.split("/")[1];
+      return `<section class="pq-box ${folded ? "fold" : ""}"><button class="pq-gh" data-fold="${esc(r.repo)}"><b>${esc(n)}</b><span>${show.length}${drafts.length ? ` · draft ${drafts.length}` : ""}</span><span class="cv">›</span></button>
+        <div class="pq-gb">${r.error ? `<div class="pr-err">${esc(r.error)}</div>` : ""}${show.map(p => prRow(r.repo, p)).join("")}
+          ${drafts.length ? `<button class="pq-more" data-dr="${esc(r.repo)}">${showD ? "▾" : "▸"} draft ${drafts.length} รายการ</button>${showD ? drafts.map(p => prRow(r.repo, p)).join("") : ""}` : ""}
+          <div class="pq-gf"><button class="pr-auto ${r.auto ? "on" : ""}" data-auto="${esc(r.repo)}" data-on="${r.auto ? 1 : 0}"><i></i>ตรวจออโต้</button><a href="https://github.com/${esc(r.repo)}/pulls" target="_blank" rel="noopener">GitHub ↗</a></div></div></section>`;
+    }).join("");
+    root.innerHTML = `<div class="pq-tabs">${tabs.map(([k, t, n]) => `<button class="${k === tab ? "on" : ""}" data-tab="${k}">${t}<em>${n}</em></button>`).join("")}<button class="rf" data-rf>${S.loading ? "…" : "↻"}</button></div>
+      <div class="pq-meta">อัปเดต ${hhmm(d.at)} · ห้องตรวจ team2 · AI ตรวจอย่างเดียว ไม่ merge</div>
+      ${groups || `<div class="pr-empty">ไม่มี PR ในกลุ่มนี้</div>`}
+      <div class="pq-meta">อีก ${d.empty} repo ไม่มี PR เปิด${d.errors ? ` · อ่านไม่ได้ ${d.errors} repo` : ""}</div>`;
+    paintSheet();
+  }
+  // แผ่นล่างของ PR ที่แตะ — ปุ่ม AI ตรวจ / เปิด / Merge (Merge และส่งตรวจยังต้องแตะสองครั้งเหมือนเดิม)
+  let sheetEl = null;
+  function openSheet(k) {
+    sheetEl?.remove();
+    const bg = document.createElement("div"); bg.className = "sheet-bg";
+    bg.innerHTML = `<div class="sheet pq-sh" data-k="${esc(k)}"></div>`;
+    bg.onclick = e => { if (e.target === bg) { bg.remove(); sheetEl = null; } };
+    bg.addEventListener("click", onClick);
+    bg.addEventListener("change", onChange);
+    document.body.appendChild(bg); sheetEl = bg; paintSheet();
+  }
+  function paintSheet() {
+    if (!sheetEl) return;
+    const box = sheetEl.querySelector(".pq-sh"), k = box.dataset.k, { repo, number } = find(k);
+    const p = S.data?.repos.find(r => r.repo === repo)?.prs.find(x => x.number === number);
+    if (!p) { sheetEl.remove(); sheetEl = null; return; }
+    const armed = S.armed && S.armed.k === k ? S.armed.kind : "", busy = S.busy.has(k), v = p.verdict, mm = S.method.get(k) || "squash";
+    box.innerHTML = `<div class="st"><i>${esc(repo.split("/")[1])} #${p.number}</i><br>${esc(p.title)}</div>
+      <div class="sm"><span class="pq-d ${sClass(p.status.code)}"></span>${esc(plain(p.status.text))} · ${esc(p.author || "")} · ${ago(p.updatedAt)}</div>
+      ${p.reviewing ? `<div class="vd">AI กำลังตรวจ · ห้อง ${esc(p.reviewing.room)}</div>` : v ? `<div class="vd ${v.stale ? "" : v.verdict}">AI ${v.stale ? `ตรวจก่อนอัปเดตล่าสุด (${v.verdict === "ready" ? "เคยพร้อม" : "เคยติด"})` : (v.verdict === "ready" ? "ว่าพร้อม" : "ว่าติด") + (v.note ? " · " + esc(v.note) : "")}</div>` : ""}
+      ${p.status.ready ? `<div class="pq-opts">${["squash", "merge", "rebase"].map(m => `<button class="${m === mm ? "on" : ""}" data-mm2="${m}">${m}</button>`).join("")}
+        <label><input type="checkbox" data-del="${esc(k)}" ${S.del.has(k) ? "checked" : ""}>ลบ branch</label></div>` : ""}
+      <div class="pq-btns"><button class="${armed === "review" ? "armed" : ""}" data-rv="${esc(k)}" ${busy || p.reviewing ? "disabled" : ""}>${armed === "review" ? "แตะอีกครั้ง" : "AI ตรวจ"}</button>
+        <a href="${esc(p.url)}" target="_blank" rel="noopener">เปิด GitHub</a>
+        ${p.status.ready ? `<button class="mg ${armed === "merge" ? "armed" : ""}" data-merge="${esc(k)}" ${busy ? "disabled" : ""}>${armed === "merge" ? "แตะอีกครั้ง = merge" : "Merge"}</button>` : ""}</div>`;
+  }
   function draw() {
+    if (clean()) return drawClean();
     const d = S.data, c = counts();
     if (!d) { root.innerHTML = `<div class="pr-empty">${S.err ? "โหลดไม่ได้: " + esc(S.err) : "กำลังโหลด PR จาก GitHub…"}</div>`; return; }
     const chip = (n, t, cls) => n ? `<span class="pr-chip ${cls}">${t} ${n}</span>` : "";
@@ -112,9 +197,12 @@
     S.armed = { k, kind, t: setTimeout(() => { S.armed = null; draw(); }, 4000) };
     draw();
   }
-  root.addEventListener("click", async e => {
+  async function onClick(e) {
     const t = e.target.closest("button"); if (!t) return;
     if (t.hasAttribute("data-rf")) return refresh(true);
+    if (t.dataset.tab) { S.tab = t.dataset.tab; return draw(); }
+    if (t.dataset.open) return openSheet(t.dataset.open);
+    if (t.dataset.mm2) { S.method.set(t.closest(".pq-sh").dataset.k, t.dataset.mm2); return paintSheet(); }
     if (t.dataset.fold) { const r = t.dataset.fold, g = t.closest(".pr-grp"); if (g.classList.contains("fold")) { S.fold.delete(r); S.unfold.add(r); } else { S.fold.add(r); S.unfold.delete(r); } return draw(); }
     if (t.dataset.dr) { S.drafts.has(t.dataset.dr) ? S.drafts.delete(t.dataset.dr) : S.drafts.add(t.dataset.dr); return draw(); }
     if (t.dataset.auto) {
@@ -138,16 +226,19 @@
         const r = await api("/prs/merge", { method: "POST", body: JSON.stringify({ repo, number, method, deleteBranch }) });
         toast(`merge #${number} แล้ว`); if (r.text) console.log("[prs]", r.text);
       }
+      if (kind === "merge") { sheetEl?.remove(); sheetEl = null; }
     } catch (err) { toast(err.message); }
     finally { S.busy.delete(k); }
     refresh(kind === "merge");
-  });
+  }
+  root.addEventListener("click", onClick);
 
-  root.addEventListener("change", e => {
+  function onChange(e) {
     const t = e.target;
     if (t.dataset.mm) S.method.set(t.dataset.mm, t.value);
     if (t.dataset.del) t.checked ? S.del.add(t.dataset.del) : S.del.delete(t.dataset.del);
-  });
+  }
+  root.addEventListener("change", onChange);
 
   async function refresh(fresh) {
     if (S.loading) return;

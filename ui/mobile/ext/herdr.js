@@ -121,9 +121,9 @@
   mawExt.keys.push({ label: 'หยุดงาน', show: ({ w, room }) => String(w?.id).startsWith('herdr:') && room?.capabilities?.stop && room.status === 'working', onClick: ({ w, room }) => window.mawHerdrStop(w, room) });
   mawExt.keys.push({ label: 'ปิดห้อง', show: ({ w, room }) => String(w?.id).startsWith('herdr:') && room?.capabilities?.close, onClick: ({ w, room }) => window.mawHerdrClose(w, room) });
   mawExt.pages.push({ key: 'herdr', title: 'Herdr', icon: '▦', hint: 'สร้าง agent / ทีม และติดตาม operation', mount: root => {
-    root.innerHTML = '<button data-new>สร้าง Herdr</button><button data-last>operation ล่าสุด</button><div data-list></div>';
+    root.innerHTML = '<div class="hd-acts"><button data-new>สร้าง Herdr</button><button data-last>operation ล่าสุด</button></div><div class="hsec"><b>operation</b></div><div data-list></div>';
     root.querySelector('[data-new]').onclick = () => window.mawHerdrCreate();
     root.querySelector('[data-last]').onclick = () => { const id = remembered('maw-herdr-operation'); if (id) window.mawHerdrProgress(id); };
-    request('/status').then(r => { if (root.isConnected) root.querySelector('[data-list]').innerHTML = r.operations.map(o => `<button data-op="${text(o.id)}">${text(o.label)} · ${text(phaseText[o.phase] || o.phase)}</button>`).join(''); root.querySelectorAll('[data-op]').forEach(b => b.onclick = () => window.mawHerdrProgress(b.dataset.op)); }).catch(e => { if (root.isConnected) root.querySelector('[data-list]').textContent = e.message; });
+    request('/status').then(r => { if (root.isConnected) root.querySelector('[data-list]').innerHTML = r.operations.length ? `<div class="hbox">${r.operations.map(o => `<button class="hrow" data-op="${text(o.id)}"><span class="t"><b>${text(o.label)}</b></span><span class="s">${text(phaseText[o.phase] || o.phase)} ›</span></button>`).join('')}</div>` : '<div class="empty">ยังไม่มี operation</div>'; root.querySelectorAll('[data-op]').forEach(b => b.onclick = () => window.mawHerdrProgress(b.dataset.op)); }).catch(e => { if (root.isConnected) root.querySelector('[data-list]').textContent = e.message; });
   } });
 })();

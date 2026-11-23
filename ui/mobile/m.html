@@ -41,6 +41,42 @@
   /* สถานะเครื่องบนหัวจอคลีน: เหลือแค่ไอคอนแมว (แตะแล้วเปิดแผงเหมือนเดิม) */
   header.chd .rc { padding: 0 6px; min-width: 0; } header.chd .rc > :not(.cat-box):not(.rc-trav) { display: none; }
   .cbd { position: absolute; top: 3px; right: 2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; background: #22d3ee; color: #031016; font: 800 10.5px/17px var(--font); font-style: normal; text-align: center; }
+  /* หน้าหลักแบบคลีน (แบบ A, 23 พ.ย. 69): หัวจอแถวเดียว · ค้นหา + ＋ · ทางลัดไอคอนแถวเดียว · "กำลังทำ" · รายการโปรเจคแบน */
+  #app:has(> .uiclean) .homehead { border-bottom: 0; }
+  #app:has(> .uiclean) .homehead h1 { font-size: 15px; }
+  #app:has(> .uiclean) .homehead .rc { background: none; border: 0; height: 34px; padding: 0 4px; font-size: 11.5px; }
+  #app:has(> .uiclean) .homehead .iconbtn { background: none; border: 0; }
+  #app:has(> .uiclean) .cx-home { display: none !important; }
+  /* หัวจอหน้าเมนู (PR · Mind · เอกสาร …) แบบคลีน: ← ไม่มีกล่อง · ชื่อหน้าไม่มี emoji · แมวเหลือไอคอนเดียว */
+  header.phd { gap: 4px; padding-inline: 4px 10px; border-bottom: 0; }
+  header.phd h1 { flex: 1; min-width: 0; font-size: 14px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header.phd #back { background: none; border: 0; min-width: 38px; }
+  header.phd .rc { background: none; border: 0; padding: 0 6px; min-width: 0; } header.phd .rc > :not(.cat-box):not(.rc-trav) { display: none; }
+  /* หน้า Herdr */
+  .hd-acts { display: flex; gap: 8px; margin: 0 0 14px; }
+  .hd-acts button { flex: 1; height: 38px; border-radius: 12px; border: 0; background: var(--card); color: var(--text); font: 600 12.5px var(--font); }
+  .hd-acts button:first-child { background: var(--accent); color: #04101f; }
+  .hsrch { display: flex; gap: 8px; margin: 2px 0 14px; }
+  .hsrch label { flex: 1; display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 12px; padding: 0 12px; height: 38px; color: var(--dim); }
+  .hsrch input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: 13px var(--font); padding: 0; }
+  .hsrch .hadd { width: 38px; height: 38px; flex: none; border-radius: 12px; background: var(--card); border: 0; color: var(--text); display: grid; place-items: center; }
+  .happs { display: grid; grid-template-columns: repeat(auto-fit, minmax(48px, 1fr)); gap: 4px; margin: 0 0 16px; }
+  .happ { position: relative; display: grid; justify-items: center; gap: 4px; background: none; border: 0; padding: 0; color: var(--dim); font: 10.5px var(--font); min-width: 0; }
+  .happ i { width: 40px; height: 40px; border-radius: 13px; background: var(--card); display: grid; place-items: center; color: var(--text); font-style: normal; font-size: 17px; }
+  .happ > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .happ .n { position: absolute; top: -3px; left: calc(50% + 9px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 99px; background: var(--card2, #23232a); border: 1px solid var(--line); color: var(--text); font: 700 9.5px/14px var(--font); }
+  .hsec { display: flex; justify-content: space-between; align-items: baseline; padding: 0 2px; margin: 0 0 6px; font-size: 11px; color: var(--dim); }
+  .hsec b { font-weight: 600; letter-spacing: .3px; }
+  .hbox { background: var(--card); border-radius: 14px; overflow: hidden; margin: 0 0 16px; }
+  .hrow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; background: none; border: 0; color: var(--text); text-align: left; font: inherit; }
+  .hrow + .hrow { border-top: 1px solid var(--line); }
+  .hrow:active { background: #ffffff08; }
+  .hrow .t { flex: 1; min-width: 0; display: grid; }
+  .hrow .t b { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hrow .t small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hrow .s { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+  .hrow .s.working { color: #4ade80; } .hrow .s.waiting { color: #f59e0b; }
+  .hmore { display: block; margin: -6px auto 12px; background: none; border: 0; color: var(--accent); font: 12px var(--font); padding: 6px 10px; }
   .drw-bg { position: fixed; inset: 0; z-index: 60; background: #0000; transition: background .2s; }
   .drw-bg.in { background: #0009; }
   .drw { position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 380px); background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 calc(env(safe-area-inset-bottom, 0px) + 8px); transform: translateX(-100%); transition: transform .22s ease; }
@@ -576,7 +612,7 @@ async function prefetchRooms(w) {
     for (const r of w.rooms.filter(r => r.agent && r.status !== "asleep" && r.id !== state.room && !chatHtmlCache.has(chatBinding(w.id, r.id))).slice(0, 4)) {
       if (state.ws !== w.id || document.hidden) break;
       const binding = chatBinding(w.id, r.id);
-      const c = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(r.id)}/chat?limit=150`).catch(() => null);
+      const c = await api(`/rooms/${encodeURIComponent(w.id)}/${encodeURIComponent(r.id)}/chat?limit=150${isHerdr(w.id) ? "" : "&lite=1"}`).catch(() => null);
       if (!c || c.kind !== "messages" || state.ws !== w.id || chatBinding(w.id, r.id) !== binding || chatHtmlCache.has(binding) || state.room === r.id) continue;
       const items = new Map(c.items.map(it => [it.i, it])), list = [...items.values()].sort((a, b) => a.i - b.i);
       chatCache.set(binding, { binding, conversation: c.conversation, room: r.id, epoch: c.epoch, start: c.start, total: c.total, items });
@@ -792,14 +828,16 @@ function tilesHtml() {
       <span class="tt"><b>${esc(pg.title)}</b><small>${esc(sm.text || "…")}</small></span>${sm.badge ? `<span class="tb">${esc(sm.badge)}</span>` : ""}</button>`;
   }).join("");
 }
-mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.hidden = !mawExt.pages.some(pg => pg.tile !== false); t.innerHTML = tilesHtml(); wireTiles(t); } };
+mawExt.refreshTiles = () => { const t = document.getElementById("tiles"); if (t && !state.page) { t.hidden = !mawExt.pages.some(pg => pg.tile !== false); t.innerHTML = uiClean() ? appsHtml() : tilesHtml(); wireTiles(t); } };
 // packs load deferred — on a cold start home is drawn before they register their pages
 window.addEventListener("load", () => mawExt.refreshTiles());
 function wireTiles(root) { root.querySelectorAll("[data-page]").forEach(b => b.onclick = () => { history.pushState({ v: "pg" }, ""); renderPage(b.dataset.page); }); }
 function renderPage(key) {
   const pg = mawExt.pages.find(x => x.key === key); if (!pg) return renderHome();
   state.page = key; state.project = null; state.room = null;
-  $app.dataset.view = ""; $app.innerHTML = `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
+  $app.dataset.view = ""; $app.innerHTML = uiClean()
+    ? `<i class="uiclean" hidden></i><header class="phd"><button class="iconbtn cb" id="back" aria-label="กลับ">${SVG.back}</button><h1>${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`
+    : `<header><button class="iconbtn" id="back" aria-label="กลับ">←</button><h1>${esc(pg.icon || "")} ${esc(pg.title)}</h1>${rcHtml()}</header><main class="pgmain" id="pgbody"></main>`;
   document.getElementById("back").onclick = () => history.back();
   try { pg.mount(document.getElementById("pgbody")); } catch (e) { document.getElementById("pgbody").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   store.set("maw-last-view", JSON.stringify({ kind: "page", key, at: Date.now() }));
@@ -811,13 +849,14 @@ function renderPage(key) {
 let homeScrollAt = 0;
 function renderHome(auto) {
   const onHome = $app.dataset.view === "home", oldMain = onHome ? $app.querySelector("main") : null;
+  if (auto && onHome && document.activeElement?.id === "hq") return;   // typing a search — the next poll redraws
   if (auto && onHome && Date.now() - homeScrollAt < 1500) { clearTimeout(renderHome._t); renderHome._t = setTimeout(() => { if ($app.dataset.view === "home") renderHome(true); }, 1600); return; }
   state.project = null; state.room = null; state.page = null;
   if (!resumeLast.pending) store.del("maw-last-view");   // home is home — unless we're about to put the user back
   const waiting = state.projects.flatMap(p => roomsOf(p).filter(r => r.status === "waiting").map(r => ({ ...r, project: p.name })));
   const busy = p => roomsOf(p).some(r => r.agent);
   const list = state.projects.filter(p => state.showEmpty || busy(p)).sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
-  const html = `
+  const html = uiClean() ? homeCleanHtml() : `
     <header class="homehead"><h1>maw</h1>${rcHtml()}
       <button class="iconbtn" id="refresh" aria-label="รีเฟรช">↻</button>
       <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
@@ -846,9 +885,63 @@ function renderHome(auto) {
   document.getElementById("toggleEmpty").onclick = () => { state.showEmpty = !state.showEmpty; renderHome(); };
 
   document.getElementById("openproj").onclick = () => openProjectSheet();
+  const hq = document.getElementById("hq");
+  if (hq) hq.oninput = () => { state.homeQ = hq.value; const box = document.getElementById("hlist"); box.innerHTML = homeListHtml(); box.querySelectorAll("[data-p]").forEach(b => b.onclick = () => openProject(b.dataset.p)); const t = document.getElementById("toggleEmpty"); if (t) t.hidden = !!state.homeQ; };
   const tl = document.getElementById("tiles"); if (tl) wireTiles(tl);
   extCall("onHome");
   document.getElementById("more").onclick = openMoreMenu;
+}
+// ── หน้าหลักแบบคลีน (แบบ A) ──
+const HICON = {
+  herdr: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  retro: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 4h10v16H7z"/><path d="M10 9h4M10 13h4"/></svg>',
+  prs: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-4"/></svg>',
+  mind: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>',
+  docs: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>',
+  vault: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4z"/><path d="M3 7v10l9 4 9-4V7"/></svg>',
+};
+const AGNAME = { claude: "Claude", codex: "Codex", gemini: "Gemini", opencode: "opencode" };
+function appsHtml() {
+  return mawExt.pages.filter(pg => pg.tile !== false).map(pg => {
+    let sm = {}; try { sm = pg.summary?.() || {}; } catch { /* pack not ready */ }
+    return `<button class="happ" data-page="${esc(pg.key)}"><i>${HICON[pg.key] || esc(pg.icon || "•")}</i>${sm.badge ? `<span class="n">${esc(sm.badge)}</span>` : ""}<span>${esc(pg.title)}</span></button>`;
+  }).join("");
+}
+// โปรเจคเรียงตามใช้ล่าสุด (เหมือนลิ้นชัก) แล้วตามงานที่ค้าง · ค้นหา = ชื่อโปรเจค หรือชื่อห้อง ในทุกโปรเจค
+function homeListHtml() {
+  const q = (state.homeQ || "").trim().toLowerCase(), used = projUsed();
+  const hit = p => !q || p.name.toLowerCase().includes(q) || roomsOf(p).some(r => String(r.title || "").toLowerCase().includes(q));
+  const list = state.projects.filter(p => q ? hit(p) : state.showEmpty || roomsOf(p).some(r => r.agent))
+    .sort((a, b) => (used[b.name] || 0) - (used[a.name] || 0) || score(b) - score(a) || a.name.localeCompare(b.name));
+  if (!list.length) return `<div class="empty">${q ? "ไม่เจอโปรเจคหรือห้องที่ตรง" : "ยังไม่มีโปรเจคที่มี agent ทำงาน"}</div>`;
+  return `<div class="hbox">${list.map(p => {
+    const r = roomsOf(p), n = s => r.filter(x => x.agent && x.status === s).length;
+    const ags = [...new Set(r.map(x => x.agent).filter(Boolean))].map(a => AGNAME[a] || a);
+    const right = n("waiting") ? `${n("waiting")} รอ` : n("working") ? `${n("working")} ทำ` : "";
+    return `<button class="hrow" data-p="${esc(p.name)}"><span class="t"><b>${esc(p.name)}${p.source === "herdr" ? " · Herdr" : ""}</b>
+      <small>${r.length} ห้อง${ags.length ? " · " + esc(ags.join(" · ")) : ""}</small></span><span class="s">${right} ›</span></button>`;
+  }).join("")}</div>`;
+}
+function homeCleanHtml() {
+  const live = state.projects.flatMap(p => roomsOf(p).filter(r => r.agent && (r.status === "waiting" || r.status === "working")).map(r => ({ ...r, project: p.name })))
+    .sort((a, b) => (b.status === "waiting") - (a.status === "waiting"));
+  const hasApps = mawExt.pages.some(pg => pg.tile !== false), q = state.homeQ || "";
+  return `<i class="uiclean" hidden></i>
+    <header class="homehead"><h1>maw</h1>${rcHtml()}
+      <button class="iconbtn" id="refresh" aria-label="รีเฟรช">↻</button>
+      <button class="iconbtn" id="more" aria-label="ตั้งค่า">⋯</button></header>
+    <main>
+      <div class="hsrch"><label>${SVG.search}<input id="hq" type="search" placeholder="ค้นหาโปรเจค · ห้อง" value="${esc(q)}" autocomplete="off"></label>
+        <button class="hadd" id="openproj" aria-label="เปิดโปรเจค · repo ในเครื่อง · โฟลเดอร์">${SVG.plus}</button></div>
+      <div class="happs" id="tiles" ${hasApps ? "" : "hidden"}>${appsHtml()}</div>
+      <div id="ext-home"></div>
+      ${live.length ? `<div class="hsec"><b>กำลังทำ</b><span>${live.length} ห้อง</span></div><div class="hbox">${live.map(r => `
+        <button class="hrow" data-go="${esc(r.project)}|${esc(r.ws)}|${esc(r.id)}">${dot(r.status)}<span class="t"><b>${esc(r.title)}</b>
+          <small>${esc(r.project)} · ${esc(AGNAME[r.agent] || r.agent)}</small></span><span class="s ${r.status}">${ST[r.status]}</span></button>`).join("")}</div>` : ""}
+      <div class="hsec"><b>โปรเจคล่าสุด</b><span>${state.projects.length} ทั้งหมด</span></div>
+      <div id="hlist">${homeListHtml()}</div>
+      <button class="hmore" id="toggleEmpty" ${q ? "hidden" : ""}>${state.showEmpty ? "ซ่อนโปรเจคที่ไม่มี agent" : `แสดงทุกโปรเจค (${state.projects.length})`}</button>
+    </main>`;
 }
 function score(p) { const r = roomsOf(p); return r.filter(x => x.status === "waiting").length * 100 + r.filter(x => x.status === "working").length * 10 + r.filter(x => x.agent).length; }
 function projCard(p) {
@@ -877,6 +970,7 @@ const SVG = {
   chat: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>',
   copy: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
   plus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  back: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   search: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
 };
 const mindBadge = () => { try { return mawExt.pages.find(pg => pg.key === "mind")?.summary()?.badge || ""; } catch { return ""; } };
@@ -1402,8 +1496,22 @@ function renderItem(m) {
   const st = t.bg === "running" ? `<span class="bgrun">กำลังทำงานเบื้องหลัง</span>` : t.output == null ? "⏳" : t.error ? "✗" : "✓";
   return `<details class="tool ${toolClass(t.name)} ${agent ? "agent" : ""} ${t.error ? "err" : ""}" data-i="${m.i}" ${state.open.has(m.i) ? "open" : ""}>
     <summary><span>${TOOL_ICON[t.name] || "🔧"}</span><span class="tn">${agent ? "เรียก agent" : esc(t.name)}</span><span class="tsum">${esc(t.summary)}</span><span class="tst">${st}</span></summary>
-    <div class="tbody">${t.input ? `<div class="lbl">${agent ? "คำสั่งที่ส่งให้ agent" : "สิ่งที่รัน"}</div><div class="prew"><button class="pcp">📋</button><pre>${esc(t.input)}</pre></div>` : ""}
-      <div class="lbl">ผลลัพธ์</div><div class="prew"><button class="pcp">📋</button><pre class="log">${t.output == null ? "กำลังทำงาน…" : t.output ? logHtml(t.output) : "(ไม่มีผลลัพธ์)"}</pre></div></div></details>`;
+    ${t.lazy ? `<div class="tbody" data-lazy><div class="lbl">กำลังโหลด…</div></div>` : toolBody(t, agent)}</details>`;
+}
+function toolBody(t, agent) {
+  return `<div class="tbody">${t.input ? `<div class="lbl">${agent ? "คำสั่งที่ส่งให้ agent" : "สิ่งที่รัน"}</div><div class="prew"><button class="pcp">📋</button><pre>${esc(t.input)}</pre></div>` : ""}
+      <div class="lbl">ผลลัพธ์</div><div class="prew"><button class="pcp">📋</button><pre class="log">${t.output == null ? "กำลังทำงาน…" : t.output ? logHtml(t.output) : "(ไม่มีผลลัพธ์)"}</pre></div></div>`;
+}
+// chat?lite=1 sends tool steps without command/output — fetch the one just opened (one request, then it stays in the cache)
+async function fillLazyTool(d, ws, room, ch) {
+  const body = d.querySelector(".tbody[data-lazy]"); if (!body || body._busy) return;
+  body._busy = true;
+  try {
+    const r = await api(`/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat/item?i=${d.dataset.i}`);
+    if (!r.item?.tool) throw new Error("ไม่พบข้อมูล");
+    ch.items.set(r.item.i, r.item);
+    if (d.isConnected) body.outerHTML = toolBody(r.item.tool, r.item.role === "agent");
+  } catch (e) { if (body.isConnected) body.innerHTML = `<div class="lbl">โหลดไม่ได้ · ${esc(e.message)} · ปิดแล้วเปิดใหม่เพื่อลองอีกครั้ง</div>`; body._busy = false; }
 }
 
 /** Consecutive tool calls collapse into one bar ("ran 5 commands"); tap to list them, tap a row for its output. */
@@ -1454,7 +1562,7 @@ function settleImages(scr) {
 async function loadChat(scr, older) {
   const ws = state.ws, room = state.room, mode = state.mode, binding = chatBinding(ws, room);
   const base = `/rooms/${encodeURIComponent(ws)}/${encodeURIComponent(room)}/chat`;
-  const q = older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : "?limit=150";
+  const q = (older && state.chat ? `?before=${state.chat.start}&limit=150${isHerdr(ws) ? "&epoch=" + encodeURIComponent(state.chat.epoch) : ""}` : "?limit=150") + (isHerdr(ws) ? "" : "&lite=1");
   const request = {}; scr._chatRequest = request;
   const c = await api(base + q).catch(e => { if (scr._chatRequest !== request) return { kind: "stale" }; throw e; });
   // the reply of a room we already left must not land in the room on screen now
@@ -1471,7 +1579,12 @@ async function loadChat(scr, older) {
   chatCache.set(binding, state.chat);
   scr._chatBinding = binding;
   const ch = state.chat;
-  for (const it of c.items) ch.items.set(it.i, it);
+  for (const it of c.items) {
+    // lite poll: a tool step opened earlier was fetched in full — keep it while its state (running / done) is the same
+    const had = ch.items.get(it.i);
+    if (it.tool?.lazy && had?.tool && !had.tool.lazy && (had.tool.output == null) === (it.tool.output == null)) continue;
+    ch.items.set(it.i, it);
+  }
   ch.start = older ? c.start : Math.min(ch.start, c.start);
   const grew = c.total > ch.total; ch.total = c.total;
   const list = [...ch.items.values()].sort((a, b) => a.i - b.i);
@@ -1484,7 +1597,8 @@ async function loadChat(scr, older) {
   reconcilePending(list); paintPending(); markLive();
   fillAudioMeta(scr);
   scr.querySelector("#older")?.addEventListener("click", () => loadChat(scr, true));
-  scr.querySelectorAll("details.tool").forEach(d => d.addEventListener("toggle", e => { e.stopPropagation(); const i = +d.dataset.i; d.open ? state.open.add(i) : state.open.delete(i); }));
+  scr.querySelectorAll("details.tool").forEach(d => d.addEventListener("toggle", e => { e.stopPropagation(); const i = +d.dataset.i; d.open ? state.open.add(i) : state.open.delete(i); if (d.open) fillLazyTool(d, ws, room, ch); }));
+  scr.querySelectorAll("details.tool[open]").forEach(d => fillLazyTool(d, ws, room, ch));
   scr.querySelectorAll("details.tgroup").forEach(d => d.addEventListener("toggle", () => { const g = d.dataset.g; d.open ? state.open.add(g) : state.open.delete(g); }));
   scr.querySelectorAll("[data-x]").forEach(a => a.onclick = () => { const k = a.dataset.x; state.open.has(k) ? state.open.delete(k) : state.open.add(k); scr._sig = ""; loadChat(scr); });
   if (older) scr.scrollTop = scr.scrollHeight - oldH + oldTop;
@@ -2658,7 +2772,8 @@ function openMoreMenu() {
     <button id="mm-snd"><span class="i">${soundOn() ? "🔊" : "🔈"}</span><span class="t">เสียงในแอป<small>${soundOn() ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
     <button id="mm-bell"><span class="i">${pushOn ? "🔔" : "🔕"}</span><span class="t">แจ้งเตือน<small>${pushOn ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
     ${mawExt.pages.filter(pg => pg.tile === false).map(pg => `<button data-mpage="${esc(pg.key)}"><span class="i">${esc(pg.icon || "•")}</span><span class="t">${esc(pg.title)}<small>${esc(pg.hint || "")}</small></span></button>`).join("")}
-    <button id="mm-web"><span class="i">🖥</span><span class="t">หน้าเว็บเดิม<small>maw-ui แบบเต็ม</small></span></button>
+    ${uiClean() && document.querySelector(".cx-home") ? `<button id="mm-cx"><span class="i">⚙</span><span class="t">Plugin · MCP · Hooks<small>ดูการตั้งค่า</small></span></button>` : ""}
+<button id="mm-web"><span class="i">🖥</span><span class="t">หน้าเว็บเดิม<small>maw-ui แบบเต็ม</small></span></button>
     <button class="ghost" id="mm-x">ปิด</button></div>`;
   document.body.appendChild(bg);
   const close = () => bg.remove();
@@ -2667,6 +2782,7 @@ function openMoreMenu() {
   bg.querySelector("#mm-snd").onclick = e => { toggleSound(e.currentTarget.querySelector(".i")); close(); };
   bg.querySelector("#mm-bell").onclick = e => { togglePush(e.currentTarget.querySelector(".i")); close(); };
   bg.querySelectorAll("[data-mpage]").forEach(b => b.onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage(b.dataset.mpage); });
+  bg.querySelector("#mm-cx")?.addEventListener("click", () => { close(); document.querySelector(".cx-home")?.click(); });
   bg.querySelector("#mm-web").onclick = () => { store.set("maw-desktop-ui", "1"); location.href = "/?host=" + encodeURIComponent(location.origin) + "#fleet"; };
 }
 function toggleSound(btn) {

@@ -73,6 +73,30 @@
   .mi-rt .t { font: 600 14px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .mi-rt .s { font-size: 11.5px; color: var(--dim); overflow-wrap: anywhere; }
   .mi-rt button.r.armed .s { color: #1a1003; } .mi-rt label { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--dim); padding: 4px 2px; }
   .mi-comp button { flex: none; width: 50px; height: 44px; border-radius: 13px; background: var(--accent); color: #031022; font-size: 19px; font-weight: 800; } .mi-comp button:disabled { opacity: .35; }`;
+  // แบบคลีน (B, 23 พ.ย. 69): "รอพี่" แยกบนสุด · ล่าสุดมีวงกลมอักษรผู้ส่ง · โหมดตอบพับไว้บรรทัดเดียว · ปุ่มเขียนลอย
+  const cssClean = `
+  .mq-seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--card); border-radius: 10px; padding: 3px; }
+  .mq-seg button { padding: 6px 0; border-radius: 8px; border: 0; background: none; color: var(--dim); font: 12px var(--font); }
+  .mq-seg button.on { background: var(--card2); color: var(--text); font-weight: 600; }
+  .mq-seg i { font-style: normal; margin-left: 5px; padding: 0 6px; border-radius: 99px; background: #f59e0b; color: #1a1003; font-size: 10px; font-weight: 800; }
+  .mq-mode { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--dim); padding: 2px 2px 0; }
+  .mq-mode b { color: var(--text); font-weight: 600; } .mq-mode button { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; }
+  .mq-hs { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dim); padding: 6px 2px 0; }
+  .mq-hs b { font-weight: 600; flex: 1; } .mq-hs button { background: none; border: 0; padding: 2px 0; color: var(--dim); font: inherit; } .mq-hs button.on { color: var(--text); font-weight: 600; }
+  .mq-box { background: var(--card); border-radius: 14px; overflow: hidden; }
+  .mq-row { display: flex; gap: 10px; width: 100%; padding: 10px 12px; background: none; border: 0; color: var(--text); text-align: left; font: inherit; }
+  .mq-row + .mq-row, .mq-box > .mi-more { border-top: 1px solid var(--line); } .mq-row:active { background: #ffffff08; }
+  .mq-av { width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--card2); color: var(--dim); margin-top: 2px; }
+  .mq-av.out { color: var(--accent); }
+  .mq-row .t { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .mq-row .t small { font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mq-row .t b { font-size: 12.5px; font-weight: 600; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .mq-row .t .s { font-size: 10.5px; color: var(--dim); } .mq-row .t .s.pending { color: #fbbf24; } .mq-row .t .s.approved { color: var(--accent); } .mq-row .t .s.failed, .mq-row .t .s.rejected { color: #f87171; }
+  .mq-row .w { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+  .mq-empty { font-size: 11.5px; color: var(--dim); padding: 12px; text-align: center; }
+  .mq-fab { position: fixed; right: 18px; bottom: calc(22px + env(safe-area-inset-bottom)); width: 48px; height: 48px; border-radius: 16px; border: 0; background: var(--accent); color: #04101f; display: grid; place-items: center; box-shadow: 0 8px 24px #0008; z-index: 5; }
+  .mi-page:has(.mq-fab) { padding-bottom: 64px; }`;
+  if (!document.getElementById("mi-style-clean")) { const s = document.createElement("style"); s.id = "mi-style-clean"; s.textContent = cssClean; document.head.appendChild(s); }
   if (!document.getElementById("mi-style")) { const s = document.createElement("style"); s.id = "mi-style"; s.textContent = css; document.head.appendChild(s); }
 
   const S = { tab: "mail", mail: null, mailErr: "", mailAt: 0, chats: null, chatsErr: "", chatsAt: 0, filter: "", shown: 40, armed: null, busy: false,
@@ -92,9 +116,41 @@
     : esc(p.replace(i ? /^\n/ : /^$/, "").replace(i < a.length - 1 ? /\n$/ : /^$/, "")).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")).join("");
 
   // ── draw ──
+  const clean = () => typeof uiClean === "function" && uiClean();
+  const PEN = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5l4 4L8 20H4v-4z"/></svg>';
+  const plainStatus = t => String(t || "").replace(/^[^\p{L}\p{N}(]+/u, "").replace(/^ปิดเรื่องแล้ว/, "ปิดแล้ว");
+  function mailRow(m) {
+    const out = m.sentByMe, who = out ? `ส่งถึง ${m.to}` : m.from;
+    return `<button class="mq-row" data-mail="${esc(m.id)}"><span class="mq-av ${out ? "out" : ""}">${out ? "↗" : esc((m.from || "?").trim()[0]?.toUpperCase() || "?")}</span>
+      <span class="t"><small>${esc(who)}</small><b>${esc(m.subject)}</b><span class="s ${esc(m.status)}">${esc(plainStatus(m.statusText))}</span></span><span class="w">${ago(m.ts)}</span></button>`;
+  }
+  function mailClean() {
+    const d = S.mail;
+    if (!d) return `<div class="mi-empty">${S.mailErr ? esc(S.mailErr) : "กำลังโหลด Mail Box…"}</div>`;
+    const me = d.mail.filter(mine), sent = d.mail.filter(m => m.sentByMe), flt = S.filter === "sent" ? "sent" : "all";
+    const rest = (flt === "sent" ? sent : d.mail).filter(m => !mine(m)), mode = MODES.find(m => m[0] === d.mode) || MODES[0];
+    const armedMode = S.armed?.k?.startsWith("mode:") ? S.armed.k.slice(5) : "";
+    const modeBox = S.modeOpen || armedMode ? `<div class="mi-seg sm">${MODES.map(([k, l]) => `<button class="${d.mode === k ? "on" : ""} ${k} ${armedMode === k ? "armed" : ""}" data-mode="${k}" ${S.busy ? "disabled" : ""}>${l}</button>`).join("")}</div>
+      <div class="mi-x ${armedMode ? "warn" : ""}">${esc(armedMode ? `แตะ "${MODES.find(m => m[0] === armedMode)[1]}" อีกครั้งเพื่อเปลี่ยน${armedMode !== "manual" ? " · จดหมายที่รอคุณอยู่จะถูกส่งให้ agent ตอบทันที" : ""}` : mode[2])}</div>` : "";
+    return `<div class="mq-mode"><span>การตอบจดหมาย: <b>${mode[1]}</b></span><button data-modeopen>${S.modeOpen ? "ปิด" : "เปลี่ยน ›"}</button></div>${modeBox}
+      ${S.mailErr ? `<div class="mi-x warn">${esc(S.mailErr)}</div>` : ""}
+      <div class="mq-hs"><b>รอพี่</b><span>${me.length}</span></div>
+      <div class="mq-box">${me.length ? me.map(mailRow).join("") : `<div class="mq-empty">ไม่มีจดหมายรอพี่ · โหมด${mode[1]}</div>`}</div>
+      <div class="mq-hs"><b>ล่าสุด</b><button class="${flt === "all" ? "on" : ""}" data-flt="all">ทั้งหมด ${d.total}</button><button class="${flt === "sent" ? "on" : ""}" data-flt="sent">ส่งแล้ว ${sent.length}</button><button data-rf>${S.loading.has("mail") ? "…" : "↻"}</button></div>
+      ${rest.length ? `<div class="mq-box">${rest.slice(0, S.shown).map(mailRow).join("")}${rest.length > S.shown ? `<button class="mi-more" data-more>แสดงเพิ่ม (${rest.length - S.shown})</button>` : ""}</div>`
+        : `<div class="mq-box"><div class="mq-empty">${flt === "sent" ? "ยังไม่ได้ส่งจดหมาย" : "ยังไม่มีจดหมาย"}</div></div>`}
+      <button class="mq-fab" data-compose aria-label="เขียนจดหมาย">${PEN}</button>`;
+  }
   function draw() {
     if (!root.isConnected) return;
     const w = S.mail?.waiting || 0;
+    if (clean()) {
+      const seg = `<div class="mq-seg"><button class="${S.tab === "mail" ? "on" : ""}" data-tab="mail">Mail Box${w ? `<i>${w}</i>` : ""}</button>
+        <button class="${S.tab === "chat" ? "on" : ""}" data-tab="chat">Chat${S.chats ? ` · ${S.chats.length}` : ""}</button></div>`;
+      if (S.tab === "chat" && S.open) { if (!root.querySelector(".mi-conv")) root.innerHTML = seg + convShell(); drawConv(); return; }
+      root.innerHTML = seg + (S.tab === "mail" ? mailClean() : chatsHtml());
+      return;
+    }
     const seg = `<div class="mi-seg"><button class="${S.tab === "mail" ? "on" : ""}" data-tab="mail">📬 Mail Box${w ? `<i>${w}</i>` : ""}</button>
       <button class="${S.tab === "chat" ? "on" : ""}" data-tab="chat">💬 Chat${S.chats ? ` · ${S.chats.length}` : ""}</button></div>`;
     if (S.tab === "chat" && S.open) { if (!root.querySelector(".mi-conv")) root.innerHTML = seg + convShell(); drawConv(); return; }
@@ -321,6 +377,7 @@
     if (t.dataset.tab) { S.tab = t.dataset.tab; disarm(); clearTimeout(S.pollT); root.innerHTML = ""; draw(); if (S.tab === "chat") { if (!S.chats || Date.now() - S.chatsAt > 20_000) loadChats(false); if (S.open) loadChat(true); } return; }
     if (t.dataset.flt) { S.filter = t.dataset.flt; S.shown = 40; return draw(); }
     if (t.hasAttribute("data-compose")) return openCompose();
+    if (t.hasAttribute("data-modeopen")) { S.modeOpen = !S.modeOpen; return draw(); }
     if (t.hasAttribute("data-more")) { S.shown += 40; return draw(); }
     if (t.hasAttribute("data-rf")) return loadMail(true);
     if (t.hasAttribute("data-rfc")) return loadChats(true);

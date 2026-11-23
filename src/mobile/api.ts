@@ -412,16 +412,48 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
     // box unsent. Pause, press, then check the box and press again while our text is still there.
     await sleep(250);
     await tmux.sendKeys(ch.pane, "Enter");
-    const head = text.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 24);
-    for (let k = 0; k < 2 && head; k++) {
-      await sleep(700);
-      const box = inputDraft(await readScreen(ch, 40).catch(() => ""))?.text.replace(/\s+/g, " ") ?? "";
-      if (!box.startsWith(head)) return;
-      await tmux.sendKeys(ch.pane, "Enter");
-    }
+    await pressUntilSent(ch, text, () => tmux.sendKeys(ch.pane, "Enter"));
     return;
   }
   await ssAsync(["terminals", "send", "--local", "--workspace", ch.workspaceId, "--terminal", ch.terminalId, "--text", text]);
+  // Codex opens its skill picker on "$name" and the Enter that came with the text only picks the skill → the
+  // message stays in the box. Same check as tmux: Enter again while our text is still sitting there.
+  await pressUntilSent(ch, text, () => pressKey(ch, "enter"));
+}
+
+/** A chat item for chat?lite=1: a tool step keeps name/summary/state but drops its command and output (flag lazy). */
+export function liteItem<T extends { tool?: any }>(x: T): T {
+  const t = x.tool;
+  if (!t || (!t.input && !t.output)) return x;
+  return { ...x, tool: { ...t, input: undefined, output: t.output == null ? null : "", lazy: true } };
+}
+
+/** Codex's input line: "› text" sitting right above its status line ("… · Context 59% used"); a "›" further up is chat history.
+ *  An empty box shows a grey placeholder ("Ask Codex to do anything") that reads as text here — only use it to compare with
+ *  text you just typed (pressUntilSent), never as "there is a draft". */
+export function codexDraft(raw: string): string | null {
+  const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n");
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 12); i--) {
+    if (!/Context \d+% (used|left)/.test(lines[i])) continue;
+    let j = i - 1; while (j >= 0 && !lines[j].trim()) j--;
+    const m = j >= 0 ? lines[j].match(/^\s*› ?(.*)$/) : null;
+    return m && m[1].trim() ? m[1].trim() : null;
+  }
+  return null;
+}
+
+/** After Enter: re-read the box and press Enter again (max 2) while it still starts with the text just typed. */
+export async function pressUntilSent(ch: ReplyChannel, text: string, enter: () => Promise<unknown>,
+  read = (c: ReplyChannel) => { if ("workspaceId" in c) ssScreens.delete(c.workspaceId + "/" + c.terminalId); return readScreen(c, 40); },
+  pause = 700): Promise<void> {
+  const head = text.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 24);
+  for (let k = 0; k < 2 && head; k++) {
+    await sleep(pause);
+    const raw = await read(ch).catch(() => "");
+    const box = (inputDraft(raw)?.text ?? codexDraft(raw) ?? "").replace(/\s+/g, " ");
+    if (!box.startsWith(head)) return;
+    await enter();
+  }
 }
 
 /** Type text where the cursor is, without Enter (a dialog's "Type something." row) — the caller presses Enter. */
@@ -2012,6 +2044,8 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
         if (live?.status === "idle" && end === items.length && last?.role === "user" && !last.queued && last.ts && Date.now() - Date.parse(last.ts) > 8000)
           page = page.map(x => (x === last ? { ...x, canceled: true } : x));
         // a rewind renumbers the items → a different epoch makes the phone drop what it cached and take the page fresh
+        // lite=1: tool steps come without their command/output (most stay folded) → the phone fetches one with /chat/item when opened
+        if (query.lite === "1") page = page.map(liteItem);
         return { ok: true, kind: "messages", epoch: fork ? `${BOOT_ID}.r${fork}` : BOOT_ID, total: items.length, start, items: page };
       }
       if (ch.kind === "superset") {
@@ -2021,7 +2055,20 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
         } catch { /* not an agent terminal */ }
       }
       return { ok: true, kind: "none" };
-    }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()), epoch: t.Optional(t.String()) }) })
+    }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()), epoch: t.Optional(t.String()), lite: t.Optional(t.String()) }) })
+    // one chat item in full (a tool step the phone got from chat?lite=1 and the user just opened)
+    .get("/rooms/:ws/:room/chat/item", async ({ params, query, set }) => {
+      const ch = params.ws.startsWith("herdr:") ? null : roomChannel(params.ws, params.room);
+      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
+      const live = [...readLiveRooms().values()].find(r => r.channel && (
+        (r.channel.kind === "tmux" && ch.kind === "tmux" && r.channel.pane === ch.pane) ||
+        (r.channel.kind === "superset" && ch.kind === "superset" && r.channel.terminalId === ch.terminalId)));
+      const codex = !live && ch.kind === "superset" ? codexFileFor(ch.terminalId) : null;
+      const items = live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
+      const item = items?.find((x: any) => x.i === +query.i);
+      if (!item) { set.status = 404; return { ok: false, error: "ไม่พบข้อความนี้แล้ว" }; }
+      return { ok: true, item };
+    }, { query: t.Object({ i: t.String() }) })
     .post("/rooms/:ws/:room/delivery/:id/resolve", async ({ params, body, set }) => {
       try { await writeGuard.assertRoom(params.ws, params.room); } catch { return continuityWriteFailure(set); }
       set.headers["cache-control"] = "no-store";
