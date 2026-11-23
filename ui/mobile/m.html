@@ -47,11 +47,34 @@
   .drw-bg.in .drw { transform: none; }
   .drw-s { margin: 4px 14px 8px; height: 42px; border-radius: 13px; background: var(--card); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--dim); }
   .drw-s input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: 16px var(--font); }
+  .drw-top { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 14px 8px; }
+  .drw-top button { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; border-radius: 12px; background: var(--card); color: var(--text); font: 14px var(--font); }
+  .drw-top .cbd { position: static; }
+  .drw-tabs { display: flex; gap: 6px; align-items: center; padding: 0 14px 10px; overflow-x: auto; flex: none; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+  .drw-tabs span { flex: none; font-size: 12px; color: var(--dim); margin-right: 2px; }
+  .drw-tabs button { flex: none; height: 30px; padding: 0 12px; border-radius: 99px; background: var(--card2); color: var(--text); font: 13px var(--font); }
+  .drw-l:has(.drw-p) { display: block; }
+  .drw-p { border-radius: 14px; margin: 0 0 6px; background: var(--card); }
+  .drw-ph { width: 100%; display: flex; align-items: center; gap: 8px; padding: 12px 12px; background: none; color: var(--text); text-align: left; }
+  .drw-ph .chev { flex: none; color: var(--dim); transition: transform .15s; font-size: 16px; width: 12px; }
+  .drw-p.open .drw-ph .chev, .drw-p.found .drw-ph .chev { transform: rotate(90deg); }
+  .drw-ph { background: var(--card2); border-radius: 14px; }
+  .drw-p.open .drw-ph, .drw-p.found .drw-ph { border-radius: 14px 14px 0 0; }
+  .drw-ph .pn { flex: 1; min-width: 0; font: 700 16px var(--font); color: #fff; letter-spacing: .01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drw-ph .s { flex: none; font-size: 11.5px; color: var(--dim); }
+  .drw-ph .s.w, .drw-ph .s.k { color: var(--text); }
+  .drw-pr { display: none; padding: 0 6px 6px; } .drw-p.open .drw-pr, .drw-p.found .drw-pr { display: grid; gap: 1px; }
+  .drw-pr { padding-top: 4px !important; }
+  .drw-p .drw-r { padding: 8px 10px 8px 16px; font-size: 13.5px; color: #aab0c6; }
+  .drw-p .drw-r .a, .drw-p .drw-r .br { font-size: 10.5px; opacity: .8; }
+  .drw-p .drw-r.on { color: #fff; font-weight: 600; }
+  .drw-p .drw-r.on { background: var(--card2); }
   .drw-nav { display: grid; gap: 1px; padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
   .drw-nav button { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 11px; background: none; color: var(--text); font: 15px var(--font); text-align: left; position: relative; }
   .drw-nav .cbd { position: static; margin-left: auto; }
   .drw-l { flex: 1; overflow-y: auto; padding: 6px 8px; display: grid; gap: 1px; align-content: start; }
-  .drw-h { font-size: 12px; color: var(--dim); padding: 12px 10px 4px; letter-spacing: .03em; }
+  .drw-h { font-size: 12px; color: var(--dim); padding: 12px 10px 4px; letter-spacing: .03em; display: flex; align-items: center; gap: 6px; }
+  .drw-h.busy { color: var(--text); font-weight: 600; }
   .drw-r { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 11px; background: none; color: var(--text); font: 14.5px var(--font); text-align: left; min-width: 0; }
   .drw-r.on { background: var(--card2); }
   .drw-r .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -883,40 +906,51 @@ function openDrawer() {
   document.querySelector(".drw-bg")?.remove();
   const cur = state.projects.find(x => x.name === state.project);
   const bg = document.createElement("div"); bg.className = "drw-bg";
-  const all = state.projects.flatMap(p => p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))));
-  const live = all.filter(x => ["working", "waiting"].includes(x.r.status));
-  const liveIds = new Set(live.map(x => x.w.id + "/" + x.r.id));
   const rank = { waiting: 0, working: 1, done: 2, idle: 3, unknown: 4, asleep: 5, ended: 6 };
-  const row = ({ p, w, r }) => `<button class="drw-r ${p.name === state.project && w.id === state.ws && r.id === state.room ? "on" : ""}" data-go="${esc(p.name)}" data-gw="${esc(w.id)}" data-gr="${esc(r.id)}" data-q="${esc((r.title + " " + p.name + " " + (w.branch || "") + " " + (r.agent || "")).toLowerCase())}">
+  // โปรเจกต์ที่มีห้องรอคุณ/กำลังทำ ขึ้นบนสุดทั้งโปรเจกต์ · ที่เหลือเรียงตามใช้ล่าสุด · แต่ละโปรเจกต์เป็นกลุ่มพับได้
+  // (เปิดไว้: โปรเจกต์ที่อยู่ · มีห้องรอคุณ/กำลังทำ · ที่เคยกดเปิดในรอบนี้)
+  const busyOf = p => { const st = p.workspaces.flatMap(w => w.rooms.map(r => r.status)); return st.includes("waiting") ? 2 : st.includes("working") ? 1 : 0; };
+  state.drwOpen ||= new Set();
+  const isOpen = p => state.drwOpen.has(p.name) ? !state.drwOpen.has("-" + p.name) : (p === cur || busyOf(p) > 0) && !state.drwOpen.has("-" + p.name);
+  const row = ({ p, w, r }) => `<button class="drw-r ${p.name === state.project && w.id === state.ws && r.id === state.room ? "on" : ""}" data-go="${esc(p.name)}" data-gw="${esc(w.id)}" data-gr="${esc(r.id)}" data-q="${esc((r.title + " " + (r.agent || "")).toLowerCase())}">
       ${dot(r.status)}<span class="t">${esc(r.title)}</span>${p.workspaces.length > 1 ? `<span class="br">${esc(w.branch || w.name)}</span>` : ""}<span class="a">${esc(r.agent || "")}</span></button>`;
-  const group = (p) => { const rs = p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))).filter(x => !liveIds.has(x.w.id + "/" + x.r.id)).sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9));
-    return rs.length ? `<div class="drw-h" data-grp>${esc(p.name)}</div>${rs.map(row).join("")}` : ""; };
+  const group = p => {
+    const rs = p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))).sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9));
+    if (!rs.length) return "";
+    const b = busyOf(p), nW = rs.filter(x => x.r.status === "waiting").length, nK = rs.filter(x => x.r.status === "working").length;
+    const sum = [nW ? `<span class="s w">${nW} รอคุณ</span>` : "", nK ? `<span class="s k">${nK} กำลังทำ</span>` : "", `<span class="s">${rs.length} ห้อง</span>`].join("");
+    return `<section class="drw-p ${isOpen(p) ? "open" : ""} ${b ? "busy" : ""} ${p === cur ? "cur" : ""}" data-pn="${esc(p.name)}">
+      <button class="drw-ph" data-tog><span class="chev">›</span><span class="pn">${esc(p.name)}</span>${sum}</button>
+      <div class="drw-pr">${rs.map(row).join("")}</div></section>`;
+  };
   const tabs = cur && cur.source !== "tmux" && cur.source !== "herdr" ? [["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => cur.source === "superset" || t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : [];
-  const b = mindBadge();
+  const mb = mindBadge(), u = projUsed();
+  const ordered = state.projects.map((p, i) => ({ p, i, b: busyOf(p) })).sort((a, b) => b.b - a.b || (u[b.p.name] || 0) - (u[a.p.name] || 0) || a.i - b.i).map(x => x.p);
   bg.innerHTML = `<div class="drw" role="dialog" aria-label="ห้องทั้งหมด">
     <label class="drw-s">${SVG.search}<input type="search" placeholder="ค้นห้อง / โปรเจกต์" autocomplete="off"></label>
-    <div class="drw-nav">
-      <button data-home>🏠 หน้าแรก</button>
-      <button data-dmind>📬 Mind Mail${b ? `<i class="cbd">${esc(b)}</i>` : ""}</button>
-      ${tabs.map(([k, l]) => `<button data-pv2="${esc(k)}">${esc(l)} · ${esc(cur.name)}</button>`).join("")}
-    </div>
-    <div class="drw-l">
-      ${live.length ? `<div class="drw-h">กำลังทำ · รอคุณ</div>${live.sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9)).map(row).join("")}` : ""}
-      ${(() => { const u = projUsed(); return state.projects.map((p, i) => ({ p, i })).sort((a, b) => (u[b.p.name] || 0) - (u[a.p.name] || 0) || a.i - b.i).map(x => group(x.p)).join(""); })()}
-    </div>
+    <div class="drw-top"><button data-home>🏠 หน้าแรก</button><button data-dmind>📬 Mind Mail${mb ? `<i class="cbd">${esc(mb)}</i>` : ""}</button></div>
+    ${tabs.length ? `<div class="drw-tabs"><span>${esc(cur.name)}</span>${tabs.map(([k, l]) => `<button data-pv2="${esc(k)}">${esc(l)}</button>`).join("")}</div>` : ""}
+    <div class="drw-l">${ordered.map(group).join("")}</div>
     <button class="drw-ui" data-classic>หน้าตาเก่า (แถบแท็บห้อง)</button></div>`;
   document.body.appendChild(bg);
   const close = () => bg.remove();
   bg.addEventListener("click", e => { if (e.target === bg) close(); });
   bg.querySelectorAll("[data-go]").forEach(x => x.onclick = () => { close(); goRoom(x.dataset.go, x.dataset.gw, x.dataset.gr); });
+  bg.querySelectorAll("[data-tog]").forEach(x => x.onclick = () => {
+    const sec = x.closest(".drw-p"), n = sec.dataset.pn, open = !sec.classList.contains("open");
+    sec.classList.toggle("open", open); state.drwOpen.delete(n); state.drwOpen.delete("-" + n); state.drwOpen.add(open ? n : "-" + n);
+  });
   bg.querySelector("[data-home]").onclick = () => { close(); state.project = null; renderHome(); };
   bg.querySelector("[data-dmind]").onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage("mind"); };
   bg.querySelectorAll("[data-pv2]").forEach(x => x.onclick = () => { close(); state.pview = x.dataset.pv2; renderProject(); });
   bg.querySelector("[data-classic]").onclick = () => { close(); store.set("maw-ui", "classic"); toast("กลับหน้าตาเก่าแล้ว · แตะ ☰ บนหัวจอห้องเพื่อใช้แบบคลีนอีกครั้ง"); renderProject(); };
   const inp = bg.querySelector("input");
   inp.oninput = () => { const q = inp.value.trim().toLowerCase();
-    bg.querySelectorAll(".drw-r").forEach(x => { x.hidden = !!q && !x.dataset.q.includes(q); });
-    bg.querySelectorAll(".drw-h").forEach(h => { let n = h.nextElementSibling, any = false; while (n && n.classList.contains("drw-r")) { if (!n.hidden) any = true; n = n.nextElementSibling; } h.hidden = !any; }); };
+    bg.querySelectorAll(".drw-p").forEach(sec => {
+      const all = !!q && sec.dataset.pn.toLowerCase().includes(q); // ค้นตรงชื่อโปรเจกต์ = โชว์ทั้งกลุ่ม · ไม่งั้นค้นจากชื่อห้อง
+      let any = false; sec.querySelectorAll(".drw-r").forEach(x => { x.hidden = !!q && !all && !x.dataset.q.includes(q); if (!x.hidden) any = true; });
+      sec.hidden = !!q && !any; sec.classList.toggle("found", !!q && any);
+    }); };
   requestAnimationFrame(() => bg.classList.add("in"));
 }
 // ขั้น 3: ปุ่มคัดลอกใต้ข้อความ AI (หน้าตาคลีน) — คัดลอกตัวหนังสือที่เห็นใน bubble
