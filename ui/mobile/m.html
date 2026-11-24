@@ -1597,6 +1597,7 @@ async function loadChat(scr, older, full) {
   if (scr._sig === sig) { if (pendingSends.length) { reconcilePending(list); paintPending(); } markLive(); return c; }
   const atBottom = scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 60, oldH = scr.scrollHeight, oldTop = scr.scrollTop;
   scr._sig = sig;
+  paceBump();   // แชทมีของใหม่ → poll เร็วกลับมา
   scr.innerHTML = (ch.start > 0 ? `<button class="older" id="older">โหลดข้อความก่อนหน้า (อีก ${ch.start})</button>` : `<div class="sys">— จุดเริ่มของห้องนี้ —</div>`) + renderList(list);
   rememberChatHtml(binding, scr.innerHTML);
   reconcilePending(list); paintPending(); markLive();
@@ -3123,12 +3124,30 @@ async function checkVersion() {
 setInterval(() => { if (!document.hidden) checkVersion(); }, 60_000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
 checkVersion();
+// ประหยัดเน็ต: ห้อง/หน้าแรกที่นิ่ง ถามห่างขึ้น — ไม่มีอะไรเปลี่ยนและไม่ได้แตะจอ 30 วิ → ทุก 5 วิ · 2 นาที → ทุก 10 วิ
+// agent กำลังทำ/รอตอบ · สถานะห้องไหนเปลี่ยน · แชทมีของใหม่ · แตะ/พิมพ์ · กลับมาเปิดแอป → กลับไปทุก 2.5 วิทันที
+const pace = { last: Date.now(), at: 0, sig: "" };
+const paceBump = () => { pace.last = Date.now(); };
+["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, paceBump, { passive: true, capture: true }));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) paceBump(); });
+function pollGap() {
+  // only the rooms on this screen count (another project's busy room must not keep this one fast)
+  const rooms = state.projects.flatMap(p => p.workspaces.flatMap(w => w.rooms));
+  const here = state.room ? rooms.filter(r => r.id === state.room) : state.project ? [] : rooms;
+  const sig = here.map(r => r.id + ":" + r.status).join(",");
+  if (sig !== pace.sig) { pace.sig = sig; paceBump(); }
+  if (here.some(r => r.agent && (r.status === "working" || r.status === "waiting"))) return 2500;
+  const quiet = Date.now() - pace.last;
+  return quiet < 30_000 ? 2500 : quiet < 120_000 ? 5000 : 10_000;
+}
 function start() {
   clearInterval(timer); clearInterval(start._sys);
   if (!start._pend) { start._pend = 1; restorePending().catch(() => {}); resumeLast().catch(() => {}); }
   load(); loadSys(); takeShared(); takeOpen(); start._sys = setInterval(() => { if (!document.hidden) loadSys(); }, 10_000);
   timer = setInterval(() => {
     if (document.hidden) return;
+    if (Date.now() - pace.at < pollGap() - 200) return;
+    pace.at = Date.now();
     if (state.project && state.room) loadScreen();
     load();
   }, 2500);
