@@ -60,13 +60,24 @@ self.addEventListener("push", e => {
     const open = wins.find(c => c.visibilityState === "visible" && new URL(c.url).pathname === "/m.html");
     if (open) { open.postMessage({ type: "sound", kind: d.kind, title: d.title, body: d.body, url: d.url }); return; }
     await self.registration.showNotification(d.title || "maw", { vibrate: buzz,
-      body: d.body || "", tag: d.tag || "maw", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: d.url || "/m.html" },
+      body: d.body || "", tag: d.tag || "maw", renotify: true, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: d.url || "/m.html", act: d.act || "" },
+      // คำขออนุญาตของ Claude: ปุ่ม ✓ อนุมัติ / ✕ ปฏิเสธ บนแจ้งเตือน (token ใช้ครั้งเดียว · server เช็คว่าคำถามบนจอยังเป็นอันเดิม)
+      ...(d.act && Array.isArray(d.actions) ? { actions: d.actions.slice(0, 2), requireInteraction: true } : {}),
     });
   })());
 });
 self.addEventListener("notificationclick", e => {
   e.notification.close();
-  const url = e.notification.data?.url || "/m.html";
+  const url = e.notification.data?.url || "/m.html", act = e.notification.data?.act;
+  if ((e.action === "allow" || e.action === "deny") && act) {
+    e.waitUntil((async () => {
+      let r = { ok: false, error: "ต่อ maw ไม่ได้" };
+      try { r = await (await fetch("/mobile/push/act", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ t: act, action: e.action }) })).json(); } catch { /* offline */ }
+      if (r.ok) await self.registration.showNotification(e.action === "allow" ? "✓ อนุมัติแล้ว" : "✕ ปฏิเสธแล้ว", { body: e.notification.title || "", tag: (e.notification.tag || "maw") + "-done", icon: "/icon-192.png", badge: "/icon-192.png", data: { url } });
+      else await self.registration.showNotification("ยังไม่ได้ทำ — แตะเพื่อเปิดแอป", { body: r.error || "", tag: (e.notification.tag || "maw") + "-done", icon: "/icon-192.png", badge: "/icon-192.png", data: { url } });
+    })());
+    return;
+  }
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const w = wins.find(c => new URL(c.url).pathname === "/m.html");

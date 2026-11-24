@@ -114,3 +114,5 @@ External CLI/native keyboard และ daemon ที่เปิดนอก API
 
 
 8 พ.ย.69 — continuityเพิ่มauthenticatedfacts preview/selection callbacksและverifyก่อนswitch; noactor/archivepathจากclient. ไม่มีserviceคืน503. scope room-backendเปิดได้เฉพาะtrustedcapabilityและbackendของroomพร้อม; defaultall-backendsเดิม. Sourceมีpreparedseams ยังไม่เปิดproduction.
+
+24 พ.ย. 69 — context.ts เพิ่ม MCP เปิด/ปิด (`mcpState` · `setClaudeMcp` · `setCodexMcp` · `GET/POST /settings/mcp`): Claude ต่อโปรเจคใน ~/.claude.json (`disabledMcpServers` · `disabledMcpjsonServers` แบบเดียวกับ `/mcp disable`) · Codex `enabled = false` ใน ~/.codex/config.toml · สำรองไฟล์ใน ~/.maw/backup ก่อนเขียนทุกครั้ง · เทสต์ `test/mobile-mcp-switch.test.ts` (ไอ้แดง Claude Code · พี่ Ball สั่ง)

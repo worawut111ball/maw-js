@@ -4,10 +4,10 @@
 // Secrets rule: config files hold API keys in env/headers/args. Nothing but names, types, command basenames,
 // versions and redacted+shortened hook commands may leave this module.
 import { execFileSync } from "child_process";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, join } from "path";
-import { workspacePath } from "./ctx";
+import { workspacePath, listTmuxPanes } from "./ctx";
 
 // ── redaction ──────────────────────────────────────────────────────────────
 const MASK = "***";
@@ -157,6 +157,64 @@ export function readAgentSettings(home = homedir(), folder?: string | null) {
   return { claude, codex };
 }
 
+// ── MCP on/off (24 พ.ย. 69) ────────────────────────────────────────────────
+// Same switches Claude Code's own `/mcp disable|enable` writes: per project in ~/.claude.json →
+// projects[folder].disabledMcpServers (user/local servers) · .disabledMcpjsonServers (that folder's .mcp.json).
+// Codex: global `enabled = false` under [mcp_servers.<name>] in ~/.codex/config.toml. Takes effect for sessions started after.
+// Only names that already exist can be switched; each write keeps a timestamped copy in ~/.maw/backup/ and is atomic.
+export interface McpSwitch { name: string; scope: "user" | "local" | "project" | "codex"; type: McpType; enabled: boolean }
+const MCP_NAME = /^[\w.@-]{1,80}$/;
+/** The folder whose Claude settings a room uses: its tmux pane's cwd, else its workspace path. */
+export function mcpFolder(ws: string, room: string): string | null {
+  if (ws === "tmux") return listTmuxPanes().find(p => p.id === room)?.cwd ?? null;
+  return workspacePath(ws);
+}
+export function mcpState(home = homedir(), folder?: string | null) {
+  const cj = readJson(join(home, ".claude.json")) ?? {}, proj = folder ? cj.projects?.[folder] ?? {} : {};
+  const off = new Set<string>(proj.disabledMcpServers ?? []), offJ = new Set<string>(proj.disabledMcpjsonServers ?? []);
+  const claude: McpSwitch[] = [];
+  const add = (servers: any, scope: McpSwitch["scope"], disabled: Set<string>) => {
+    for (const [name, def] of Object.entries(servers ?? {})) if (MCP_NAME.test(name)) claude.push({ name, scope, type: mcpType(def), enabled: !disabled.has(name) });
+  };
+  add(cj.mcpServers, "user", off);
+  if (folder) { add(proj.mcpServers, "local", off); add(readJson(join(folder, ".mcp.json"))?.mcpServers, "project", offJ); }
+  const toml = readToml(join(home, ".codex/config.toml"));
+  const codex: McpSwitch[] = Object.entries(toml?.mcp_servers ?? {}).filter(([n]) => MCP_NAME.test(n))
+    .map(([name, def]: [string, any]) => ({ name, scope: "codex", type: mcpType(def), enabled: def?.enabled !== false }));
+  return { folder: folder ?? null, project: folder ? basename(folder) : null, claude, codex };
+}
+function backupThenWrite(home: string, file: string, text: string) {
+  const dir = join(home, ".maw", "backup"); mkdirSync(dir, { recursive: true });
+  const st = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  if (existsSync(file)) copyFileSync(file, join(dir, `${basename(file)}.${st}`));
+  const tmp = file + ".maw-tmp"; writeFileSync(tmp, text); renameSync(tmp, file);
+}
+/** Claude: add/remove the name in that project's disabled list (re-read right before writing — Claude rewrites this file too). */
+export function setClaudeMcp(home: string, folder: string, name: string, scope: string, on: boolean): boolean {
+  if (!mcpState(home, folder).claude.some(m => m.name === name && m.scope === scope)) return false;
+  const file = join(home, ".claude.json"), cj = JSON.parse(readFileSync(file, "utf-8"));
+  const key = scope === "project" ? "disabledMcpjsonServers" : "disabledMcpServers";
+  const proj = ((cj.projects ??= {})[folder] ??= {}), list: string[] = Array.isArray(proj[key]) ? proj[key] : [];
+  proj[key] = on ? list.filter(n => n !== name) : [...new Set([...list, name])];
+  backupThenWrite(home, file, JSON.stringify(cj, null, 2));
+  return true;
+}
+/** `enabled = false` right under [mcp_servers.<name>] (before its sub-tables) · on = remove the line (default true). */
+export function tomlSetEnabled(text: string, name: string, on: boolean): string | null {
+  const lines = text.split("\n"), head = lines.findIndex(l => l.trim() === `[mcp_servers.${name}]` || l.trim() === `[mcp_servers."${name}"]`);
+  if (head < 0) return null;
+  let end = head + 1; while (end < lines.length && !/^\s*\[/.test(lines[end])) end++;
+  const body = lines.slice(head + 1, end).filter(l => !/^\s*enabled\s*=/.test(l));
+  return [...lines.slice(0, head + 1), ...(on ? [] : ["enabled = false"]), ...body, ...lines.slice(end)].join("\n");
+}
+export function setCodexMcp(home: string, name: string, on: boolean): boolean {
+  if (!mcpState(home).codex.some(m => m.name === name)) return false;
+  const file = join(home, ".codex/config.toml"), next = tomlSetEnabled(readFileSync(file, "utf-8"), name, on);
+  if (next == null) return false;
+  backupThenWrite(home, file, next);
+  return true;
+}
+
 // ── @file mentions ─────────────────────────────────────────────────────────
 export interface FileHit { path: string; dir?: boolean }
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".next", ".nuxt", "out", "target", ".turbo", ".cache", "coverage", "__pycache__", ".venv", "venv", ".dart_tool", ".gradle", "Pods", "DerivedData", ".idea"]);
@@ -243,4 +301,13 @@ export function mount(app: any): void {
     return { ok: true, files: rankFiles(files, dirs, String(query?.q ?? "").slice(0, 200)) };
   });
   app.get("/settings/agents", () => ({ ok: true, ...readAgentSettings() }));
+  app.get("/settings/mcp", ({ query }: any) => ({ ok: true, ...mcpState(homedir(), query.ws && query.room ? mcpFolder(String(query.ws), String(query.room)) : null) }));
+  app.post("/settings/mcp", ({ body, set }: any) => {
+    const { ws, room, agent, name, scope, on } = body ?? {};
+    if (typeof name !== "string" || !MCP_NAME.test(name) || typeof on !== "boolean") { set.status = 400; return { ok: false, error: "bad request" }; }
+    if (agent === "codex") return setCodexMcp(homedir(), name, on) ? { ok: true } : (set.status = 404, { ok: false, error: "ไม่พบ MCP นี้ใน Codex" });
+    const folder = typeof ws === "string" && typeof room === "string" ? mcpFolder(ws, room) : null;
+    if (!folder) { set.status = 400; return { ok: false, error: "เปิดจากในห้องเพื่อเลือกโปรเจค" }; }
+    return setClaudeMcp(homedir(), folder, name, String(scope), on) ? { ok: true } : (set.status = 404, { ok: false, error: "ไม่พบ MCP นี้ในโปรเจคนี้" });
+  });
 }

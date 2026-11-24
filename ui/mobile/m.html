@@ -82,10 +82,32 @@
   .drw { position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 380px); background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 calc(env(safe-area-inset-bottom, 0px) + 8px); transform: translateX(-100%); transition: transform .22s ease; }
   .drw-bg.in .drw { transform: none; }
   /* เดสก์ท็อป (กว้าง ≥ 1000px · แบบคลีน): ลิ้นชักเปิดค้างเป็นแถบซ้ายแบบแอป AI ทั่วไป · เนื้อหาเลื่อนไปขวา · ข้อความอยู่กลางกว้างพออ่าน */
+  /* ⌘K แผงค้นทุกอย่าง */
+  .pal-bg { position: fixed; inset: 0; z-index: 80; background: #000a; display: flex; justify-content: center; align-items: flex-start; padding-top: 10vh; }
+  .pal { width: min(640px, calc(100vw - 24px)); max-height: 72vh; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 24px 64px #000a; }
+  .pal input { border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); font: 15px var(--font); padding: 14px 16px; outline: 0; }
+  .pal-l { overflow-y: auto; padding: 6px 0; }
+  .pal-h { font-size: 10.5px; color: var(--dim); padding: 8px 16px 4px; letter-spacing: .3px; }
+  .pal-r { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 8px 16px; background: none; border: 0; color: var(--text); text-align: left; font: 13px var(--font); }
+  .pal-r .t { flex: none; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .pal-r .s { flex: 1; min-width: 0; color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pal-r.msgr { display: grid; gap: 2px; } .pal-r.msgr .s { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .pal-r.on { background: #ffffff10; } .pal-r mark { background: #f59e0b44; color: inherit; border-radius: 3px; }
+  .pal-f { font-size: 10.5px; color: var(--dim); padding: 8px 16px; border-top: 1px solid var(--line); }
+  .msg.flash { animation: msgflash 1.6s ease; } @keyframes msgflash { 0%, 40% { background: #f59e0b22; } 100% { background: transparent; } }
+  .keys-t { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; } .keys-t kbd { font: 12px var(--mono); background: var(--card2, #23232a); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
   .drw-bg.pinned { right: auto; width: 300px; z-index: 40; background: none !important; }
   .drw-bg.pinned .drw { width: 300px; transform: none; transition: none; }
   body.drw-pinned { padding-left: 300px; }
-  body.drw-pinned #app > :not(header):not(.uiclean) { width: min(calc(100% - 24px), 900px); margin-left: auto; margin-right: auto; box-sizing: border-box; }
+  body.drw-pinned #app > :not(header):not(.uiclean):not(.screenwrap) { width: min(calc(100% - 24px), 900px); margin-left: auto; margin-right: auto; box-sizing: border-box; }
+  /* แชทเลื่อนได้เต็มความกว้าง (แถบเลื่อนชิดขอบจอแบบแอป AI) แต่ข้อความอยู่คอลัมน์กลาง 900px */
+  body.drw-pinned #app > .screenwrap #screen { padding-inline: max(16px, calc((100% - 876px) / 2)); }
+  /* แถบเลื่อนบาง ไม่มีราง — แชท · แถบซ้าย · หน้าอื่น */
+  #screen, .drw-l, main, .pgmain { scrollbar-width: thin; scrollbar-color: #3a3a46 transparent; }
+  #screen::-webkit-scrollbar, .drw-l::-webkit-scrollbar, main::-webkit-scrollbar, .pgmain::-webkit-scrollbar { width: 8px; height: 8px; }
+  #screen::-webkit-scrollbar-track, .drw-l::-webkit-scrollbar-track, main::-webkit-scrollbar-track, .pgmain::-webkit-scrollbar-track { background: transparent; }
+  #screen::-webkit-scrollbar-thumb, .drw-l::-webkit-scrollbar-thumb, main::-webkit-scrollbar-thumb, .pgmain::-webkit-scrollbar-thumb { background: #3a3a46; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+  #screen::-webkit-scrollbar-thumb:hover, .drw-l::-webkit-scrollbar-thumb:hover { background-color: #555564; }
   body.drw-pinned #app > .spin { margin-left: auto !important; margin-right: auto !important; padding-inline: 14px; }   /* .spin มี margin !important ของมันเอง */
   .drw-bg.pinned .drw-tabs { flex-wrap: wrap; row-gap: 6px; }   /* แถบซ้ายกว้าง 300px: ไฟล์ · Git · ห้องเก่า · Superset ขึ้นบรรทัดใหม่แทนล้น */
   .drw-s { margin: 4px 14px 8px; height: 42px; border-radius: 13px; background: var(--card); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--dim); }
@@ -1022,6 +1044,105 @@ function wireCleanHeader(p, w, room) {
   $app.querySelector("[data-mind]")?.addEventListener("click", () => { history.pushState({ v: "pg" }, ""); renderPage("mind"); });
   $app.querySelector("[data-newroom]")?.addEventListener("click", () => document.getElementById("add")?.click());
 }
+// ── ⌘K ค้นทุกอย่าง: ห้อง · โปรเจค · หน้า · คำสั่ง (ในเครื่อง ทันที) + ข้อความในทุกห้อง (GET /search) ──
+function putInBox(text) { const m = document.getElementById("msg"); if (!m) return toast("เปิดห้องก่อน"); m.value = text; m.focus(); m.setSelectionRange(text.length, text.length); m.oninput?.(); }
+function paletteCmds() {
+  const inRoom = !!document.getElementById("msg");
+  return [
+    { t: "หน้าแรก", s: "ไปหน้าแรก", run: () => { state.project = null; renderHome(); } },
+    ...mawExt.pages.map(pg => ({ t: pg.title, s: "หน้า", run: () => { history.pushState({ v: "pg" }, ""); renderPage(pg.key); } })),
+    ...(document.querySelector("[data-newroom]") ? [{ t: "ห้องใหม่", s: "เปิดห้องใหม่ในโปรเจคนี้", run: () => document.querySelector("[data-newroom]").click() }] : []),
+    { t: "เปิดโปรเจค", s: "repo ในเครื่อง · โฟลเดอร์", run: () => openProjectSheet() },
+    ...(mawExt.openSettings ? [{ t: "MCP · Plugin · Hooks", s: inRoom ? "เปิด/ปิด MCP ของโปรเจคนี้" : "ดูการตั้งค่า · เปิด/ปิด MCP ของ Codex", run: () => mawExt.openSettings() }] : []),
+    ...(inRoom ? ["/compact", "/clear", "/context", "/cost", "/model", "/mcp"].map(c => ({ t: c, s: "ใส่ในช่องพิมพ์ · กด Enter เพื่อส่ง", run: () => putInBox(c) })) : []),
+    { t: uiClean() ? "หน้าตาเก่า" : "หน้าตาคลีน", s: "สลับหน้าตา", run: () => { uiClean() ? store.set("maw-ui", "classic") : store.del("maw-ui"); state.page ? renderPage(state.page) : state.project ? renderProject() : renderHome(); } },
+    { t: "ปุ่มลัดทั้งหมด", s: "⌘/", run: () => showKeys() },
+  ];
+}
+function openPalette() {
+  if (document.querySelector(".pal-bg")) return document.querySelector(".pal-bg").remove();
+  const bg = document.createElement("div"); bg.className = "pal-bg";
+  bg.innerHTML = `<div class="pal" role="dialog" aria-label="ค้นทุกอย่าง"><input placeholder="ค้นห้อง · โปรเจค · หน้า · คำสั่ง · ข้อความในทุกห้อง" autocomplete="off"><div class="pal-l"></div>
+    <div class="pal-f">↑↓ เลือก · Enter เปิด · Esc ปิด · พิมพ์ 2 ตัวขึ้นไปเพื่อค้นข้อความในทุกห้อง</div></div>`;
+  document.body.appendChild(bg);
+  const inp = bg.querySelector("input"), list = bg.querySelector(".pal-l");
+  let rows = [], sel = 0, msgs = [], seq = 0;
+  const close = () => bg.remove();
+  const hl = (t, q) => { const x = esc(t); if (!q) return x; const i = t.toLowerCase().indexOf(q); return i < 0 ? x : esc(t.slice(0, i)) + "<mark>" + esc(t.slice(i, i + q.length)) + "</mark>" + esc(t.slice(i + q.length)); };
+  function draw() {
+    const q = inp.value.trim().toLowerCase(), has = x => !q || (x.t + " " + (x.s || "")).toLowerCase().includes(q);
+    const rooms = state.projects.flatMap(p => p.workspaces.flatMap(w => w.rooms.map(r => ({ t: r.title || r.agent || "ห้อง", s: `${p.name}${r.agent ? " · " + r.agent : ""} · ${ST[r.status] || r.status || ""}`, run: () => goRoom(p.name, w.id, r.id) })))).filter(has).slice(0, 8);
+    const projs = state.projects.map(p => ({ t: p.name, s: `โปรเจค · ${p.workspaces.flatMap(w => w.rooms).length} ห้อง`, run: () => openProject(p.name) })).filter(has).slice(0, 5);
+    const cmds = paletteCmds().filter(has).slice(0, 8);
+    const ms = msgs.flatMap(r => r.hits.map(h => ({ t: `${r.title} · ${r.project}`, s: (h.role === "user" ? "คุณ: " : "") + h.snippet, msg: true, run: () => { goRoom(r.project, r.ws, r.room); jumpToMessage(h.i); } })));
+    rows = [];
+    const sec = (name, xs) => xs.length ? `<div class="pal-h">${name}</div>` + xs.map(x => { rows.push(x); return `<button class="pal-r ${x.msg ? "msgr" : ""}" data-k="${rows.length - 1}"><span class="t">${hl(x.t, q)}</span><span class="s">${hl(x.s || "", q)}</span></button>`; }).join("") : "";
+    list.innerHTML = sec("ห้อง", rooms) + sec("โปรเจค", projs) + sec("คำสั่ง", cmds) + sec("ข้อความในห้อง", ms) || `<div class="pal-h">ไม่เจอ${q.length >= 2 ? " · กำลังค้นข้อความ…" : ""}</div>`;
+    sel = Math.min(sel, Math.max(0, rows.length - 1)); mark();
+    list.querySelectorAll("[data-k]").forEach(b => { b.onclick = () => { close(); rows[+b.dataset.k].run(); }; b.onmouseenter = () => { sel = +b.dataset.k; mark(); }; });
+  }
+  const mark = () => list.querySelectorAll("[data-k]").forEach(b => { const on = +b.dataset.k === sel; b.classList.toggle("on", on); if (on) b.scrollIntoView({ block: "nearest" }); });
+  inp.oninput = () => {
+    sel = 0; msgs = []; draw();
+    const q = inp.value.trim(), my = ++seq; clearTimeout(inp._t);
+    if (q.length >= 2) inp._t = setTimeout(async () => { try { const r = await api("/search?q=" + encodeURIComponent(q)); if (my === seq && bg.isConnected) { msgs = r.results || []; draw(); } } catch { /* offline */ } }, 280);
+  };
+  inp.onkeydown = e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(rows.length - 1, sel + 1); mark(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); mark(); }
+    else if (e.key === "Enter") { e.preventDefault(); const x = rows[sel]; if (x) { close(); x.run(); } }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+  };
+  bg.addEventListener("click", e => { if (e.target === bg) close(); });
+  draw(); inp.focus();
+}
+/** After opening a room from a search hit: wait for the chat, load older pages if needed, then scroll to message i and flash it. */
+async function jumpToMessage(i) {
+  for (let k = 0; k < 40; k++) {
+    await new Promise(r => setTimeout(r, 250));
+    const el = document.querySelector(`#screen [data-mi="${i}"]`);
+    if (el) { state.follow = false; el.scrollIntoView({ block: "center" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1700); return; }
+    const older = document.getElementById("older");
+    if (older && state.chat && state.chat.start > i && k % 4 === 3) older.click();
+  }
+  toast("หาข้อความนั้นในแชทไม่เจอ (อาจเก่าเกินที่โหลด)");
+}
+function showKeys() {
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform), M = mac ? "⌘" : "Ctrl", A = mac ? "⌥" : "Alt";
+  const rows = [[`${M} K`, "ค้นทุกอย่าง: ห้อง · โปรเจค · หน้า · คำสั่ง · ข้อความในทุกห้อง"], [`${M} /`, "ปุ่มลัดทั้งหมด (หน้านี้)"], [`${A} ↑ / ${A} ↓`, "ห้องก่อนหน้า / ถัดไป ในโปรเจคเดียวกัน"],
+    ["↑ (ช่องพิมพ์ว่าง)", "เอาข้อความที่ส่งล่าสุดกลับมาแก้"], ["Esc Esc", "หยุด agent (ส่ง Esc ให้ห้อง)"], [`${A} C`, "คัดลอกคำตอบล่าสุดของ agent"],
+    [`${M} V (ไม่ได้อยู่ในช่องพิมพ์)`, "ข้อความที่ลากเลือก / คลิปบอร์ด → ลงช่องพิมพ์"], ["Enter / Shift Enter", "ส่ง / ขึ้นบรรทัดใหม่"]];
+  const bg = document.createElement("div"); bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><h2 style="margin:0 0 12px">ปุ่มลัด</h2><div class="keys-t">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join("")}</div><button class="ghost" style="margin-top:14px;width:100%">ปิด</button></div>`;
+  document.body.appendChild(bg);
+  bg.onclick = e => { if (e.target === bg || e.target.closest("button")) bg.remove(); };
+}
+// ปุ่มลัดเดสก์ท็อป
+document.addEventListener("keydown", e => {
+  const mod = e.metaKey || e.ctrlKey, a = document.activeElement, typing = a?.matches?.("input, textarea, select, [contenteditable]:not([contenteditable=false])");
+  if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); return openPalette(); }
+  if (mod && !e.altKey && e.key === "/") { e.preventDefault(); return showKeys(); }
+  if (document.querySelector(".pal-bg, .sheet-bg, .pls-bg, .zoom")) return;
+  if (e.altKey && !mod && (e.key === "ArrowUp" || e.key === "ArrowDown") && state.project && state.room) {
+    const p = state.projects.find(x => x.name === state.project), all = p ? p.workspaces.flatMap(w => w.rooms.map(r => [w.id, r.id])) : [];
+    const k = all.findIndex(([w, r]) => w === state.ws && r === state.room); if (k < 0 || all.length < 2) return;
+    e.preventDefault(); const [w, r] = all[(k + (e.key === "ArrowUp" ? -1 : 1) + all.length) % all.length]; return goRoom(state.project, w, r);
+  }
+  if (e.key === "ArrowUp" && !mod && !e.altKey && !e.shiftKey && a?.id === "msg" && !a.value) {
+    const last = state.chat ? [...state.chat.items.values()].filter(m => m.role === "user" && !m.canceled).sort((x, y) => y.i - x.i)[0] : null;
+    if (last?.text) { e.preventDefault(); putInBox(last.text); }
+    return;
+  }
+  if (e.altKey && !mod && e.code === "KeyC" && !typing) {
+    const b = [...document.querySelectorAll("#screen .msg.ai .bubble")].pop(); if (!b) return;
+    e.preventDefault(); navigator.clipboard?.writeText(b.innerText).then(() => toast("คัดลอกคำตอบล่าสุดแล้ว"), () => toast("คัดลอกไม่ได้"));
+    return;
+  }
+  if (e.key === "Escape" && !typing && state.room) {
+    if (Date.now() - (document._escAt || 0) < 900) { document._escAt = 0; roomKey("esc").then(() => toast("ส่ง Esc ให้ห้องแล้ว (หยุด agent)"), err => toast(err.message)); }
+    else { document._escAt = Date.now(); toast("กด Esc อีกครั้งเพื่อหยุด agent"); }
+  }
+});
 function goRoom(name, ws, room) {
   const p = state.projects.find(x => x.name === name); if (!p) return;
   if (state.project !== name) state.repo = "";
@@ -1558,9 +1679,9 @@ function renderItem(m) {
         ? `<a class="upfile" href="/mobile/uploads/${day}/${file}" target="_blank">🎤 ${file.replace(/^[0-9a-f]{8}-/, "")}</a><audio class="upaudio" controls preload="metadata" src="/mobile/uploads/${day}/${file}"></audio><div class="upmeta" data-meta="/mobile/uploads/${day}/${file}">${(/-(\d+)s\.\w+$/.exec(file) || [])[1] ? "ยาว " + Math.floor(/-(\d+)s\.\w+$/.exec(file)[1] / 60) + ":" + String(/-(\d+)s\.\w+$/.exec(file)[1] % 60).padStart(2, "0") : ""}</div>`
         : `<a class="upfile" href="/mobile/uploads/${day}/${file}" target="_blank">📎 ${file.replace(/^[0-9a-f]{8}-/, "")}</a>`);
     const pics = (m.images || []).map(u => `<img class="upimg" src="${esc(u)}" loading="lazy" data-zoom="${esc(u)}">`).join("");
-    return `<div class="msg me ${m.queued ? "queued" : ""} ${m.canceled ? "canceled" : ""}"><div class="who">${m.canceled ? "✕ ยกเลิกแล้ว · ลบจากคอม ไม่ได้ส่ง" : m.queued ? "⏳ รอส่ง · Claude จะอ่านเมื่อทำงานรอบนี้เสร็จ" : "คุณ"} · ${hhmm(m.ts)}</div><div class="bubble">${pics ? `<div class="pics">${pics}</div>` : ""}${body}${long ? `<br><a class="more" data-x="u${m.i}">${state.open.has("u" + m.i) ? "ย่อ" : "ดูทั้งหมด"}</a>` : ""}</div></div>`;
+    return `<div class="msg me ${m.queued ? "queued" : ""} ${m.canceled ? "canceled" : ""}" data-mi="${m.i}"><div class="who">${m.canceled ? "✕ ยกเลิกแล้ว · ลบจากคอม ไม่ได้ส่ง" : m.queued ? "⏳ รอส่ง · Claude จะอ่านเมื่อทำงานรอบนี้เสร็จ" : "คุณ"} · ${hhmm(m.ts)}</div><div class="bubble">${pics ? `<div class="pics">${pics}</div>` : ""}${body}${long ? `<br><a class="more" data-x="u${m.i}">${state.open.has("u" + m.i) ? "ย่อ" : "ดูทั้งหมด"}</a>` : ""}</div></div>`;
   }
-  if (m.role === "assistant") return `<div class="msg ai ${esc(agentKind())}"><div class="who">${esc(agentName()).replace(/^(\S+)\s/, '<span class="gl">$1</span> ')} · ${hhmm(m.ts)}</div><div class="bubble">${md(m.text)}</div>${uiClean() ? `<div class="macts"><button data-cpy aria-label="คัดลอกข้อความ">${SVG.copy}</button></div>` : ""}</div>`;
+  if (m.role === "assistant") return `<div class="msg ai ${esc(agentKind())}" data-mi="${m.i}"><div class="who">${esc(agentName()).replace(/^(\S+)\s/, '<span class="gl">$1</span> ')} · ${hhmm(m.ts)}</div><div class="bubble">${md(m.text)}</div>${uiClean() ? `<div class="macts"><button data-cpy aria-label="คัดลอกข้อความ">${SVG.copy}</button></div>` : ""}</div>`;
   if (m.role === "system") return `<div class="sys">${esc(m.text)} · ${hhmm(m.ts)}</div>`;
   const t = m.tool, agent = m.role === "agent";
   const st = t.bg === "running" ? `<span class="bgrun">กำลังทำงานเบื้องหลัง</span>` : t.output == null ? "⏳" : t.error ? "✗" : "✓";
@@ -2862,6 +2983,7 @@ function openMoreMenu() {
     <button id="mm-bell"><span class="i">${pushOn ? "🔔" : "🔕"}</span><span class="t">แจ้งเตือน<small>${pushOn ? "เปิดอยู่ · แตะเพื่อปิด" : "ปิดอยู่ · แตะเพื่อเปิด"}</small></span></button>
     ${mawExt.pages.filter(pg => pg.tile === false).map(pg => `<button data-mpage="${esc(pg.key)}"><span class="i">${esc(pg.icon || "•")}</span><span class="t">${esc(pg.title)}<small>${esc(pg.hint || "")}</small></span></button>`).join("")}
     ${uiClean() && document.querySelector(".cx-home") ? `<button id="mm-cx"><span class="i">⚙</span><span class="t">Plugin · MCP · Hooks<small>ดูการตั้งค่า</small></span></button>` : ""}
+<button id="mm-k"><span class="i">⌕</span><span class="t">ค้นทุกอย่าง<small>ห้อง · หน้า · คำสั่ง · ข้อความในทุกห้อง (เดสก์ท็อป ⌘K)</small></span></button>
 <button id="mm-ui"><span class="i">◐</span><span class="t">${uiClean() ? "หน้าตาเก่า" : "หน้าตาคลีน"}<small>${uiClean() ? "ตอนนี้: แบบคลีน · แตะเพื่อกลับแบบมีแถบแท็บ" : "ตอนนี้: แบบเก่า · แตะเพื่อใช้แบบคลีน"}</small></span></button>
 <button id="mm-web"><span class="i">🖥</span><span class="t">หน้าเว็บเดิม<small>maw-ui แบบเต็ม</small></span></button>
     <button class="ghost" id="mm-x">ปิด</button></div>`;
@@ -2873,6 +2995,7 @@ function openMoreMenu() {
   bg.querySelector("#mm-bell").onclick = e => { togglePush(e.currentTarget.querySelector(".i")); close(); };
   bg.querySelectorAll("[data-mpage]").forEach(b => b.onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage(b.dataset.mpage); });
   bg.querySelector("#mm-cx")?.addEventListener("click", () => { close(); document.querySelector(".cx-home")?.click(); });
+  bg.querySelector("#mm-k").onclick = () => { close(); openPalette(); };
   bg.querySelector("#mm-ui").onclick = () => { close(); uiClean() ? store.set("maw-ui", "classic") : store.del("maw-ui"); state.page ? renderPage(state.page) : state.room || state.project ? renderProject() : renderHome(); };
   bg.querySelector("#mm-web").onclick = () => { store.set("maw-desktop-ui", "1"); location.href = "/?host=" + encodeURIComponent(location.origin) + "#fleet"; };
 }

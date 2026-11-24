@@ -221,9 +221,9 @@ describe("@file mentions", () => {
 });
 
 describe("mount", () => {
-  test("registers both routes", () => {
+  test("registers its routes", () => {
     const paths: string[] = [];
-    mount({ get: (p: string) => { paths.push(p); } });
-    expect(paths).toEqual(["/rooms/:ws/:room/files", "/settings/agents"]);
+    mount({ get: (p: string) => { paths.push("GET " + p); }, post: (p: string) => { paths.push("POST " + p); } });
+    expect(paths).toEqual(["GET /rooms/:ws/:room/files", "GET /settings/agents", "GET /settings/mcp", "POST /settings/mcp"]);
   });
 });

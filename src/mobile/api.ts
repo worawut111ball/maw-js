@@ -434,6 +434,16 @@ export function etagJson(request: Request, response: unknown, set: { status?: nu
   return new Response(json, { headers: { ...headers, "content-type": "application/json; charset=utf-8" } });
 }
 
+/** Chat items of a (non-Herdr) room: the live Claude session on its pane/terminal, else the Codex rollout of a Superset terminal. */
+export function roomItems(ws: string, room: string, liveRooms = readLiveRooms()): any[] | null {
+  const ch = roomChannel(ws, room); if (!ch || ch.kind === "herdr") return null;
+  const live = [...liveRooms.values()].find(r => r.channel && (
+    (r.channel.kind === "tmux" && ch.kind === "tmux" && r.channel.pane === ch.pane) ||
+    (r.channel.kind === "superset" && ch.kind === "superset" && r.channel.terminalId === ch.terminalId)));
+  const codex = !live && ch.kind === "superset" ? codexFileFor(ch.terminalId) : null;
+  return live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
+}
+
 /** A chat item for chat?lite=1: a tool step keeps name/summary/state but drops its command and output (flag lazy). */
 export function liteItem<T extends { tool?: any }>(x: T): T {
   const t = x.tool;
@@ -1288,13 +1298,13 @@ export function pushFor(event: string, room: string, message?: string): { title:
 }
 const lastPush = new Map<string, number>();
 /** Send to every subscribed phone; drop subscriptions the push service says are gone. Same session + kind at most once a minute. */
-export async function notifyPhones(sid: string, kind: string, msg: { title: string; body: string }) {
+export async function notifyPhones(sid: string, kind: string, msg: { title: string; body: string }, extra: Record<string, unknown> = {}) {
   const key = sid + kind, now = Date.now();
   if (now - (lastPush.get(key) ?? 0) < 60_000) return 0;
   lastPush.set(key, now);
   const d = loadPush(); if (!d.subs.length) return 0;
   webpush.setVapidDetails("mailto:maw-mobile@localhost", d.vapid.publicKey, d.vapid.privateKey);
-  const payload = JSON.stringify({ ...msg, kind, tag: sid, url: `/m.html?open=${encodeURIComponent(sid)}` });
+  const payload = JSON.stringify({ ...msg, kind, tag: sid, url: `/m.html?open=${encodeURIComponent(sid)}`, ...extra });
   let sent = 0; const keep: any[] = [];
   for (const sub of d.subs) {
     try { await webpush.sendNotification(sub, payload, { TTL: 600, urgency: "high" }); sent++; keep.push(sub); }
@@ -1302,6 +1312,44 @@ export async function notifyPhones(sid: string, kind: string, msg: { title: stri
   }
   if (keep.length !== d.subs.length) savePush({ ...d, subs: keep });
   return sent;
+}
+
+// ── อนุมัติ/ปฏิเสธจากแจ้งเตือน (24 พ.ย. 69) ─────────────────────────────────────────────────────────────
+// A Claude permission dialog on screen ("Do you want to …?" + "❯ 1. Yes …") → its block of lines and a fingerprint.
+export function permissionDialog(raw: string): { sig: string; yesFirst: boolean } | null {
+  const lines = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n");
+  let one = -1;
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 40); i--) if (/^\s*[❯›>]?\s*1[.)]\s+Yes\b/.test(lines[i])) { one = i; break; }
+  if (one < 0) return null;
+  let q = -1; for (let i = one - 1; i >= Math.max(0, one - 12); i--) if (/(Do you want|Would you like|Allow\b)/i.test(lines[i])) { q = i; break; }
+  if (q < 0) return null;
+  let end = one; while (end + 1 < lines.length && /^\s*[❯›>]?\s*\d[.)]\s+\S/.test(lines[end + 1])) end++;
+  const block = lines.slice(Math.max(0, q - 8), end + 1).map(l => l.replace(/^\s*[❯›>]\s*/, "").replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
+  return { sig: createHash("sha1").update(block).digest("hex"), yesFirst: /^\s*[❯›>]\s*1[.)]\s+Yes\b/.test(lines[one]) };
+}
+const approvals = new Map<string, { sid: string; sig: string; exp: number }>();
+/** Permission push with ✓/✕ buttons: only when the dialog is on screen now (up to 3 looks), bound to that exact dialog. */
+const chOfSid = (sid: string): ReplyChannel | undefined => readLiveRooms().get(sid)?.channel ?? undefined;
+export async function notifyPermission(sid: string, kind: string, msg: { title: string; body: string }, read = readScreen, chOf = chOfSid, send = notifyPhones) {
+  const ch = chOf(sid);
+  let dlg: ReturnType<typeof permissionDialog> = null;
+  for (let k = 0; ch && k < 3 && !dlg; k++) { if (k) await sleep(1000); dlg = permissionDialog(await read(ch, 40).catch(() => "")); }
+  if (!dlg) return send(sid, kind, msg);
+  const now = Date.now(); for (const [t, a] of approvals) if (a.exp < now) approvals.delete(t);
+  const t = randomBytes(24).toString("base64url");
+  approvals.set(t, { sid, sig: dlg.sig, exp: now + 10 * 60_000 });
+  return send(sid, kind, msg, { act: t, actions: [{ action: "allow", title: "✓ อนุมัติ" }, { action: "deny", title: "✕ ปฏิเสธ" }] });
+}
+/** Tap on ✓/✕: single-use token · not expired · the same dialog still on screen · allow only when "1. Yes" is the highlighted choice. */
+export async function actOnApproval(token: string, action: string, read = readScreen, press = pressKey, chOf = chOfSid): Promise<{ ok: boolean; error?: string }> {
+  const a = approvals.get(token); approvals.delete(token);
+  if (!a || a.exp < Date.now() || (action !== "allow" && action !== "deny")) return { ok: false, error: "ลิงก์อนุมัติหมดอายุหรือใช้ไปแล้ว" };
+  const ch = chOf(a.sid); if (!ch) return { ok: false, error: "ไม่พบห้องนี้แล้ว" };
+  const dlg = permissionDialog(await read(ch, 40).catch(() => ""));
+  if (!dlg || dlg.sig !== a.sig) return { ok: false, error: "คำถามเปลี่ยนไปแล้ว — เปิดแอปเพื่อดู" };
+  if (action === "allow" && !dlg.yesFirst) return { ok: false, error: "ตัวเลือกบนจอไม่ได้อยู่ที่ Yes — เปิดแอปเพื่อเลือกเอง" };
+  await press(ch, action === "allow" ? "enter" : "esc");
+  return { ok: true };
 }
 
 // ── Context, plan limits and Mac health for the phone header ───────
@@ -1812,11 +1860,20 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       // StopFailure: the error kind only ("rate_limit", "overloaded"…), never conversation text
       const why = ev === "StopFailure" ? clip(String(b.error_type ?? (typeof b.error === "string" ? b.error : b.error?.type ?? b.error?.message) ?? b.reason ?? "").replace(/\s+/g, " "), 80) ?? undefined : b.message;
       const msg = pushFor(ev, room, why);
-      if (msg) notifyPhones(String(b.session_id), ev === "StopFailure" ? "error" : status, msg).catch(() => {});
+      if (msg) (/permission/i.test(String(b.message ?? "")) && (ev === "Notification" || ev === "PermissionRequest")
+        ? notifyPermission(String(b.session_id), status, msg) : notifyPhones(String(b.session_id), ev === "StopFailure" ? "error" : status, msg)).catch(() => {});
       return { ok: true };
     })
+    // ✓/✕ on a permission push: the service worker has no bearer token — the single-use token from the push is the proof
+    .post("/push/act", async ({ body, set }) => {
+      const b = body as any;
+      if (typeof b?.t !== "string" || typeof b?.action !== "string") { set.status = 400; return { ok: false }; }
+      const r = await actOnApproval(b.t, b.action);
+      if (!r.ok) set.status = 409;
+      return r;
+    })
     .onBeforeHandle(({ request, path, set }) => {
-      if (path.endsWith("/hook")) return;
+      if (path.endsWith("/hook") || path.endsWith("/push/act")) return;
       if (/\/vault\/dl(-zip|\/[0-9a-z]+)$/.test(path)) return;      // signed short-lived links — the route checks the signature
       if (!isAuthorized(request.headers, cfg)) { set.status = 401; return { ok: false, error: "unauthorized" }; }
     })
@@ -2085,16 +2142,29 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
       }
       return { ok: true, kind: "none" };
     }, { query: t.Object({ before: t.Optional(t.String()), limit: t.Optional(t.String()), epoch: t.Optional(t.String()), lite: t.Optional(t.String()) }) })
+    // ⌘K ค้นข้อความทุกห้อง: คำที่พิมพ์ (≥ 2 ตัว) ในข้อความเรา/agent ของห้อง Claude/Codex ที่อ่านแชทได้ · ห้องละ ≤ 3 · รวม ≤ 40
+    .get("/search", ({ query }) => {
+      const q = String(query.q ?? "").trim().toLowerCase();
+      if (q.length < 2) return { ok: true, results: [] };
+      const live = readLiveRooms(), results: any[] = [];
+      for (const p of buildProjects(supersetSnapshot(), live, { folders: loadFolders(), panes: listTmuxPanes() })) for (const w of p.workspaces) for (const r of w.rooms) {
+        if (!r.agent || results.length >= 40) continue;
+        const items = roomItems(w.id, r.id, live); if (!items) continue;
+        const hits: any[] = [];
+        for (let k = items.length - 1; k >= Math.max(0, items.length - 600) && hits.length < 3; k--) {
+          const it: any = items[k]; if (it.role !== "user" && it.role !== "assistant") continue;
+          const text = String(it.text ?? ""), at = text.toLowerCase().indexOf(q); if (at < 0) continue;
+          const a = Math.max(0, at - 50), z = Math.min(text.length, at + q.length + 80);
+          hits.push({ i: it.i, role: it.role, ts: it.ts, snippet: (a ? "…" : "") + text.slice(a, z).replace(/\s+/g, " ") + (z < text.length ? "…" : "") });
+        }
+        if (hits.length) results.push({ project: p.name, ws: w.id, room: r.id, title: r.title, agent: r.agent, hits });
+      }
+      return { ok: true, results };
+    }, { query: t.Object({ q: t.Optional(t.String({ maxLength: 200 })) }) })
     // one chat item in full (a tool step the phone got from chat?lite=1 and the user just opened)
     .get("/rooms/:ws/:room/chat/item", async ({ params, query, set }) => {
-      const ch = params.ws.startsWith("herdr:") ? null : roomChannel(params.ws, params.room);
-      if (!ch) { set.status = 400; return { ok: false, error: "bad room" }; }
-      const live = [...readLiveRooms().values()].find(r => r.channel && (
-        (r.channel.kind === "tmux" && ch.kind === "tmux" && r.channel.pane === ch.pane) ||
-        (r.channel.kind === "superset" && ch.kind === "superset" && r.channel.terminalId === ch.terminalId)));
-      const codex = !live && ch.kind === "superset" ? codexFileFor(ch.terminalId) : null;
-      const items = live ? claudeTranscript(live.sessionId) : codex ? codexTranscript(codex) : null;
-      const item = items?.find((x: any) => x.i === +query.i);
+      if (params.ws.startsWith("herdr:") || !roomChannel(params.ws, params.room)) { set.status = 400; return { ok: false, error: "bad room" }; }
+      const item = roomItems(params.ws, params.room)?.find((x: any) => x.i === +query.i);
       if (!item) { set.status = 404; return { ok: false, error: "ไม่พบข้อความนี้แล้ว" }; }
       return { ok: true, item };
     }, { query: t.Object({ i: t.String() }) })

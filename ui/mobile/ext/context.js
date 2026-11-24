@@ -35,7 +35,10 @@
   .cx-pill.user { background: #60a5fa22; color: #93c5fd; } .cx-pill.project { background: #a78bfa22; color: #c4b5fd; } .cx-pill.local { background: #f59e0b22; color: #fbbf24; }
   .cx-pill.mono { font-family: var(--mono); }
   .cx-none { padding: 10px 12px; color: var(--dim); font-size: 12.5px; }
-  .cx-note { color: var(--dim); font-size: 12px; margin-top: 2px; }`;
+  .cx-note { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .cx-sw { position: relative; width: 38px; height: 22px; flex: none; border-radius: 99px; border: 0; background: #3a3a46; transition: background .15s; }
+  .cx-sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #c9c9d2; transition: left .15s; }
+  .cx-sw.on { background: #16a34a; } .cx-sw.on::after { left: 19px; background: #fff; } .cx-sw:disabled { opacity: .5; }`;
   if (!document.getElementById("cx-style")) { const st = document.createElement("style"); st.id = "cx-style"; st.textContent = css; document.head.appendChild(st); }
 
   // ── @file mentions ──
@@ -121,16 +124,39 @@
       <h3>MCP ${n(cmcp.length)}</h3>${mcpRows(cmcp)}`;
   };
 
+  // MCP เปิด/ปิด: Claude ต่อโปรเจคของห้องที่เปิดอยู่ · Codex ทั้งเครื่อง (GET/POST /settings/mcp)
+  const room = () => (typeof state !== "undefined" && state.ws && state.room ? { ws: state.ws, room: state.room } : null);
+  const swRow = (m, agent) => `<div class="cx-row ${m.enabled ? "" : "off"}"><span class="cx-name">${esc(m.name)}</span>`
+    + `<span class="cx-r"><span class="cx-pill ${esc(m.scope)}">${esc(m.scope)}</span><span class="cx-pill mono">${esc(m.type)}</span>`
+    + `<button class="cx-sw ${m.enabled ? "on" : ""}" data-sw="${esc(m.name)}" data-agent="${agent}" data-scope="${esc(m.scope)}" aria-label="${m.enabled ? "ปิด" : "เปิด"} ${esc(m.name)}"></button></span></div>`;
+  async function drawSwitches(sheet) {
+    const box = sheet.querySelector(".cx-mcp"), r = room();
+    try {
+      const d = await api("/settings/mcp" + (r ? `?ws=${encodeURIComponent(r.ws)}&room=${encodeURIComponent(r.room)}` : ""));
+      box.innerHTML = `<h3>MCP · Claude ${d.project ? `โปรเจค ${esc(d.project)}` : "(เปิดจากในห้องเพื่อเปิด/ปิดรายโปรเจค)"}</h3>`
+        + (d.project ? (d.claude.length ? `<div class="cx-list">${d.claude.map(m => swRow(m, "claude")).join("")}</div>` : none("ไม่มี MCP server")) : "")
+        + `<h3>MCP · Codex (ทั้งเครื่อง)</h3>` + (d.codex.length ? `<div class="cx-list">${d.codex.map(m => swRow(m, "codex")).join("")}</div>` : none("ไม่มี MCP server"))
+        + `<div class="cx-note">มีผลกับห้องที่เปิดใหม่ · ห้องที่เปิดอยู่: Claude พิมพ์ /mcp เพื่อต่อใหม่ · Codex ต้องเริ่ม session ใหม่</div>`;
+      box.querySelectorAll("[data-sw]").forEach(b => b.onclick = async () => {
+        const on = !b.classList.contains("on"); b.disabled = true;
+        try { await api("/settings/mcp", { method: "POST", body: JSON.stringify({ ...(room() || {}), agent: b.dataset.agent, name: b.dataset.sw, scope: b.dataset.scope, on }) });
+          toast(`${on ? "เปิด" : "ปิด"} ${b.dataset.sw} แล้ว · มีผลกับห้องที่เปิดใหม่`); drawSwitches(sheet); }
+        catch (e) { toast(e.message); b.disabled = false; }
+      });
+    } catch (e) { box.innerHTML = `<div class="cx-none">โหลด MCP ไม่ได้: ${esc(e.message)}</div>`; }
+  }
   async function openSettings() {
     const bg = document.createElement("div"); bg.className = "sheet-bg";
     bg.innerHTML = `<div class="sheet cx-sheet"><h2>⚙ Plugin · MCP · Hooks</h2>
-      <div class="cx-note">อ่านอย่างเดียว · ไม่แสดงค่า env / token / args ของ server</div>
+      <div class="cx-note">เปิด/ปิด MCP ได้ด้านล่าง · ส่วนอื่นอ่านอย่างเดียว · ไม่แสดงค่า env / token / args ของ server</div>
+      <div class="cx-mcp"><div class="cx-none">กำลังโหลด MCP…</div></div>
       <div class="cx-body"><div class="cx-none">กำลังโหลด…</div></div>
       <button class="ghost" id="cx-close" style="margin-top:14px">ปิด</button></div>`;
     document.body.appendChild(bg);
     bg.querySelector("#cx-close").onclick = () => bg.remove();
     bg.onclick = e => { if (e.target === bg) bg.remove(); };
     const sheet = bg.querySelector(".sheet");
+    drawSwitches(sheet);
     if (cache) draw(sheet, cache);
     try { cache = await api("/settings/agents"); if (bg.isConnected) draw(sheet, cache); }
     catch (e) { if (!cache && bg.isConnected) sheet.querySelector(".cx-body").innerHTML = `<div class="cx-none">โหลดไม่ได้: ${esc(e.message)}</div>`; }
@@ -145,6 +171,8 @@
     b.onclick = openSettings;
     slot.appendChild(b);
   };
+  mawExt.openSettings = openSettings;   // ⌘K · ปุ่มในแผ่น "+" ของห้อง
+  mawExt.keys.push({ label: "⚙ MCP", cls: "cx-key", onClick: () => openSettings() });
   mawExt.onHome.push(homeButton);
   homeButton(); // home may already be on screen before this deferred script ran
 })();
