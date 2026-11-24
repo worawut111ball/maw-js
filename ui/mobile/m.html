@@ -81,6 +81,13 @@
   .drw-bg.in { background: #0009; }
   .drw { position: absolute; top: 0; bottom: 0; left: 0; width: min(86vw, 380px); background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 calc(env(safe-area-inset-bottom, 0px) + 8px); transform: translateX(-100%); transition: transform .22s ease; }
   .drw-bg.in .drw { transform: none; }
+  /* เดสก์ท็อป (กว้าง ≥ 1000px · แบบคลีน): ลิ้นชักเปิดค้างเป็นแถบซ้ายแบบแอป AI ทั่วไป · เนื้อหาเลื่อนไปขวา · ข้อความอยู่กลางกว้างพออ่าน */
+  .drw-bg.pinned { right: auto; width: 300px; z-index: 40; background: none !important; }
+  .drw-bg.pinned .drw { width: 300px; transform: none; transition: none; }
+  body.drw-pinned { padding-left: 300px; }
+  body.drw-pinned #app > :not(header):not(.uiclean) { width: min(calc(100% - 24px), 900px); margin-left: auto; margin-right: auto; box-sizing: border-box; }
+  body.drw-pinned #app > .spin { margin-left: auto !important; margin-right: auto !important; padding-inline: 14px; }   /* .spin มี margin !important ของมันเอง */
+  .drw-bg.pinned .drw-tabs { flex-wrap: wrap; row-gap: 6px; }   /* แถบซ้ายกว้าง 300px: ไฟล์ · Git · ห้องเก่า · Superset ขึ้นบรรทัดใหม่แทนล้น */
   .drw-s { margin: 4px 14px 8px; height: 42px; border-radius: 13px; background: var(--card); display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--dim); }
   .drw-s input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: 16px var(--font); }
   .drw-top { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 14px 8px; }
@@ -1022,10 +1029,25 @@ function goRoom(name, ws, room) {
   state.follow = true; state.chat = null; state.queued = []; state.open = new Set();
   renderProject();
 }
-function openDrawer() {
-  document.querySelector(".drw-bg")?.remove();
+const drwWide = () => matchMedia("(min-width: 1000px)").matches;
+/** เดสก์ท็อป: ลิ้นชักค้างไว้ซ้าย (ไม่ใช่ตอนแบบเก่า · จอแคบ · ยังไม่ login · ผู้ใช้ปิดไว้ด้วย ☰) — เรียกหลังวาดหน้าและทุก poll */
+function syncPinnedDrawer() {
+  const on = uiClean() && drwWide() && store.get("maw-drw-pin") !== "off" && state.projects.length > 0 && !!$app.querySelector("header");
+  document.body.classList.toggle("drw-pinned", on);
+  const cur = document.querySelector(".drw-bg.pinned");
+  if (!on) { cur?.remove(); return; }
+  if (cur && document.activeElement?.matches?.(".drw-bg.pinned input") && document.activeElement.value) return;   // typing in its search box
+  openDrawer({ pinned: true });
+}
+window.addEventListener("resize", () => { clearTimeout(syncPinnedDrawer._t); syncPinnedDrawer._t = setTimeout(syncPinnedDrawer, 150); });
+// ทุกครั้งที่สลับหน้า (หน้าแรก · ห้อง · หน้าเมนู · login) #app ถูกวาดใหม่ → ไฮไลต์ห้องในแถบซ้ายตาม / ซ่อนเมื่อไม่ควรมี
+new MutationObserver(() => requestAnimationFrame(syncPinnedDrawer)).observe($app, { childList: true });
+function openDrawer(opts = {}) {
+  const pinned = !!opts.pinned, old = document.querySelector(pinned ? ".drw-bg.pinned" : ".drw-bg:not(.pinned)");
+  // จอกว้างที่ลิ้นชักค้างอยู่แล้ว: ☰ = พับ/กางแถบซ้าย (จำไว้ในเครื่อง)
+  if (!pinned && drwWide() && uiClean() && state.projects.length) { store.get("maw-drw-pin") === "off" ? store.del("maw-drw-pin") : store.set("maw-drw-pin", "off"); return syncPinnedDrawer(); }
   const cur = state.projects.find(x => x.name === state.project);
-  const bg = document.createElement("div"); bg.className = "drw-bg";
+  const bg = document.createElement("div"); bg.className = "drw-bg" + (pinned ? " pinned" : "");
   const rank = { waiting: 0, working: 1, done: 2, idle: 3, unknown: 4, asleep: 5, ended: 6 };
   // โปรเจกต์ที่มีห้องรอคุณ/กำลังทำ ขึ้นบนสุดทั้งโปรเจกต์ · ที่เหลือเรียงตามใช้ล่าสุด · แต่ละโปรเจกต์เป็นกลุ่มพับได้
   // (เปิดไว้: โปรเจกต์ที่อยู่ · มีห้องรอคุณ/กำลังทำ · ที่เคยกดเปิดในรอบนี้)
@@ -1052,8 +1074,14 @@ function openDrawer() {
     ${tabs.length ? `<div class="drw-tabs"><span>${esc(cur.name)}</span>${tabs.map(([k, l]) => `<button data-pv2="${esc(k)}">${esc(l)}</button>`).join("")}</div>` : ""}
     <div class="drw-l">${ordered.map(group).join("")}</div>
     <button class="drw-ui" data-classic>หน้าตาเก่า (แถบแท็บห้อง)</button></div>`;
+  // แถบซ้ายถูกวาดใหม่ทุก poll — เนื้อหาเท่าเดิมไม่แตะ DOM · เปลี่ยนก็คงตำแหน่งเลื่อนไว้
+  if (pinned && old && old._html === bg.innerHTML) return;
+  const keep = old?.querySelector(".drw-l")?.scrollTop || 0;
+  old?.remove();
+  bg._html = bg.innerHTML;
   document.body.appendChild(bg);
-  const close = () => bg.remove();
+  if (keep) bg.querySelector(".drw-l").scrollTop = keep;
+  const close = () => { if (!pinned) bg.remove(); };
   bg.addEventListener("click", e => { if (e.target === bg) close(); });
   bg.querySelectorAll("[data-go]").forEach(x => x.onclick = () => { close(); goRoom(x.dataset.go, x.dataset.gw, x.dataset.gr); });
   bg.querySelectorAll("[data-tog]").forEach(x => x.onclick = () => {
@@ -1063,7 +1091,7 @@ function openDrawer() {
   bg.querySelector("[data-home]").onclick = () => { close(); state.project = null; renderHome(); };
   bg.querySelector("[data-dmind]").onclick = () => { close(); history.pushState({ v: "pg" }, ""); renderPage("mind"); };
   bg.querySelectorAll("[data-pv2]").forEach(x => x.onclick = () => { close(); state.pview = x.dataset.pv2; renderProject(); });
-  bg.querySelector("[data-classic]").onclick = () => { close(); store.set("maw-ui", "classic"); toast("กลับหน้าตาเก่าแล้ว · แตะ ☰ บนหัวจอห้องเพื่อใช้แบบคลีนอีกครั้ง"); renderProject(); };
+  bg.querySelector("[data-classic]").onclick = () => { close(); store.set("maw-ui", "classic"); toast("กลับหน้าตาเก่าแล้ว · แตะ ☰ บนหัวจอห้องเพื่อใช้แบบคลีนอีกครั้ง"); state.project ? renderProject() : renderHome(); syncPinnedDrawer(); };
   const inp = bg.querySelector("input");
   inp.oninput = () => { const q = inp.value.trim().toLowerCase();
     bg.querySelectorAll(".drw-p").forEach(sec => {
@@ -1071,7 +1099,7 @@ function openDrawer() {
       let any = false; sec.querySelectorAll(".drw-r").forEach(x => { x.hidden = !!q && !all && !x.dataset.q.includes(q); if (!x.hidden) any = true; });
       sec.hidden = !!q && !any; sec.classList.toggle("found", !!q && any);
     }); };
-  requestAnimationFrame(() => bg.classList.add("in"));
+  if (pinned) bg.classList.add("in"); else requestAnimationFrame(() => bg.classList.add("in"));
 }
 // ขั้น 3: ปุ่มคัดลอกใต้ข้อความ AI (หน้าตาคลีน) — คัดลอกตัวหนังสือที่เห็นใน bubble
 document.addEventListener("click", async e => {
@@ -1079,6 +1107,24 @@ document.addEventListener("click", async e => {
   const t = b.closest(".msg")?.querySelector(".bubble")?.innerText || "";
   try { await navigator.clipboard.writeText(t); toast("คัดลอกแล้ว"); } catch { toast("คัดลอกไม่ได้ในเบราว์เซอร์นี้"); }
 });
+// Ctrl/⌘+V ตอนเคอร์เซอร์ไม่ได้อยู่ในช่องพิมพ์ (เดสก์ท็อป):
+//   ลากเลือกข้อความในแชทไว้ → ข้อความนั้นลงช่องพิมพ์เลย (คัดลอก+วางในทีเดียว) · ไม่ได้เลือก → วางของในคลิปบอร์ดลงช่องพิมพ์
+document.addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "v") return;
+  const msg = document.getElementById("msg"); if (!msg || !msg.isConnected || msg.offsetParent === null) return;
+  const a = document.activeElement;
+  if (a?.matches?.("input, textarea, select, [contenteditable]:not([contenteditable=false])") || document.querySelector(".sheet-bg, .pls-bg, .zoom")) return;
+  const sel = window.getSelection(), txt = sel && !sel.isCollapsed ? sel.toString().trim() : "";
+  if (txt && document.getElementById("screen")?.contains(sel.anchorNode)) {
+    e.preventDefault();
+    msg.value = msg.value.trim() ? msg.value.replace(/\s*$/, "\n") + txt : txt;
+    sel.removeAllRanges();
+    msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length); msg.oninput?.();
+    toast("ใส่ข้อความที่เลือกลงช่องพิมพ์แล้ว");
+    return;
+  }
+  msg.focus();   // ไม่ preventDefault → browser วางลงช่องที่เพิ่ง focus (ข้อความ · รูปผ่าน msg.onpaste)
+}, true);
 // แผ่น "+" (ขั้น 2): รวมแนบไฟล์ · ถ่ายรูป · สกิล · ปุ่มของ ext · ปุ่มลัด — แตะแล้ว "กดแทน" ปุ่มเดิมที่ซ่อนอยู่ (handler เดิมทำงานครบ ไม่ต้องเขียนซ้ำ)
 function openPlusSheet() {
   document.querySelector(".pls-bg")?.remove();
@@ -3105,6 +3151,7 @@ async function load(manual) {
     state.projects = (await api("/projects")).projects;
     soundOnChange(state.projects);
     if (state.page) mawExt.refreshTiles(); else if (!state.project) renderHome(true); else if (!document.querySelector(".sheet-bg")) refreshTabs();
+    syncPinnedDrawer();
     if (manual) toast("อัปเดตแล้ว");
   } catch (e) { if (e.message !== "unauthorized" && !e.offline) toast("โหลดไม่ได้: " + e.message); }
 }
