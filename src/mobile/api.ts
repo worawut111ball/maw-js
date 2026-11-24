@@ -421,7 +421,9 @@ export async function typeInto(ch: ReplyChannel, text: string): Promise<void> {
   await pressUntilSent(ch, text, () => pressKey(ch, "enter"));
 }
 
-const ETAG_PATH = /^\/mobile\/(projects|system|rooms\/[^/]+\/[^/]+\/(chat|suggestion|mode|prompt))$/;
+const ETAG_PATH = /^\/mobile\/(projects|system|batch|rooms\/[^/]+\/[^/]+\/(chat|suggestion|mode|prompt))$/;
+/** Paths /batch may run: the polled read-only GETs of the phone, never Herdr rooms (their reads are live-only). */
+export const BATCH_PATH = /^\/(projects|system|rooms\/(?!herdr)[^/?]+\/[^/?]+\/(chat|suggestion|mode|prompt))(\?[^#]*)?$/;
 /** JSON GET on a polled path → ETag + Cache-Control: no-cache; the same ETag in If-None-Match → 304 with no body. */
 export function etagJson(request: Request, response: unknown, set: { status?: number | string; headers: Record<string, any> }): Response | undefined {
   if (request.method !== "GET" || !response || typeof response !== "object" || response instanceof Response) return;
@@ -1820,6 +1822,20 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
     })
     // ประหยัดเน็ต: poll ที่ข้อมูลไม่เปลี่ยน (projects ทุก 2.5 วิ · system · แชท) ตอบ 304 ไม่มีเนื้อหา — browser ส่ง If-None-Match เอง
     .mapResponse(({ request, response, set }) => etagJson(request, response, set))
+    // ประหยัดเน็ต: มือถือรวม GET ที่ออกพร้อมกัน (projects · แชท · suggestion · mode · prompt) เป็นคำขอเดียว
+    // แต่ละอันวิ่งผ่าน route เดิมของมันเอง (app.handle) ด้วย header เดิม → ผลเหมือนขอแยกทุกอย่าง
+    .get("/batch", async ({ request, set }) => {
+      const paths = new URL(request.url).searchParams.getAll("p");
+      if (!paths.length || paths.length > 8 || !paths.every(p => BATCH_PATH.test(p))) { set.status = 400; return { ok: false, error: "bad batch" }; }
+      const headers = new Headers(request.headers); headers.delete("if-none-match");
+      const results = await Promise.all(paths.map(async p => {
+        const r = await app.handle(new Request(new URL("/mobile" + p, request.url), { headers }));
+        const text = await r.text();
+        let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { ok: false, error: "bad json" }; }
+        return { status: r.status, body };
+      }));
+      return { ok: true, results };
+    })
     .get("/health", () => ({ ok: true, hooks: hookStates.size }))
     .get("/agents", async () => ({ agents: await listAgents() }))
     .get("/agents/:id/screen", async ({ params, query, set }) => {

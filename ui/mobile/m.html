@@ -662,9 +662,33 @@ setInterval(() => {
 }, 30_000);
 async function api(path, opts = {}) {
   const t0 = performance.now();
-  try { return await apiRaw(path, opts); } finally { perfNote(path, performance.now() - t0); }
+  try { return await ((!opts.method || opts.method === "GET") && !opts.headers && BATCHABLE.test(path) ? batched(path) : apiRaw(path, opts)); }
+  finally { perfNote(path, performance.now() - t0); }
 }
-const liveOnlyPath = path => /^\/rooms\/herdr(?::|%3a)[^/]*\/[^/]+\/chat(?:\?|$)/i.test(path) || /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path);
+// ประหยัดเน็ต: GET ที่ poll พร้อมกัน (projects · แชท · suggestion · mode · prompt) ภายใน 15 ms ส่งเป็นคำขอเดียว /batch
+// แต่ละอันได้ผล/ข้อผิดพลาดของตัวเองเหมือนขอแยก · server เก่าที่ไม่มี /batch หรือคำขอรวมล้ม → ขอแยกตามเดิม
+const BATCHABLE = /^\/(projects|system|rooms\/(?!herdr)[^/?]+\/[^/?]+\/(chat|suggestion|mode|prompt))(\?|$)/;
+const batchQ = []; let batchOff = false;
+function batched(path) {
+  if (batchOff || !net.online) return apiRaw(path);
+  return new Promise((res, rej) => { batchQ.push({ path, res, rej }); if (batchQ.length === 1) setTimeout(flushBatch, 15); });
+}
+async function flushBatch() {
+  const q = batchQ.splice(0), each = () => q.forEach(x => apiRaw(x.path).then(x.res, x.rej));
+  if (q.length < 2) return each();
+  let r;
+  try { r = await apiRaw("/batch?" + q.map(x => "p=" + encodeURIComponent(x.path)).join("&")); }
+  catch (e) { if (e.status === 404) batchOff = true; return each(); }
+  q.forEach((x, k) => {
+    const it = r.results?.[k];
+    if (!it) return apiRaw(x.path).then(x.res, x.rej);
+    if (it.status === 401) { renderLogin(); return x.rej(new Error("unauthorized")); }
+    if (it.status !== 200 || it.body?.ok === false) { const e = new Error(it.body?.error || ("HTTP " + it.status)); e.body = it.body; e.status = it.status; return x.rej(e); }
+    if (!liveOnlyPath(x.path)) offlineCache.put(x.path, it.body);
+    x.res(it.body);
+  });
+}
+const liveOnlyPath = path => /^\/rooms\/herdr(?::|%3a)[^/]*\/[^/]+\/chat(?:\?|$)/i.test(path) || /^\/herdr\//.test(path) || /\/delivery(?:\/|$)|\/prompt(?:\/|$)|\/continuity(?:\/|$)/.test(path) || /^\/batch\?/.test(path);
 async function apiRaw(path, opts = {}) {
   // The optional protocol pack owns this awaited fence, including old permission/key closures.
   await window.mawContinuityTransport?.guard(path);

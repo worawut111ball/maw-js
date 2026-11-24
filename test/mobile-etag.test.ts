@@ -27,3 +27,13 @@ describe("etagJson — polled GETs answer 304 when unchanged", () => {
     expect(etagJson(req("/mobile/projects"), { ok: true }, { headers: { "cache-control": "no-store" } })).toBeUndefined();
   });
 });
+
+import { BATCH_PATH } from "../src/mobile/api";
+describe("BATCH_PATH — what /batch may run", () => {
+  test("polled read-only GETs only, never Herdr", () => {
+    for (const p of ["/projects", "/system", "/rooms/tmux/%2535/chat?limit=30&lite=1", "/rooms/a-b/c-d/suggestion?agent=codex&sid=", "/rooms/w/r/mode?sid=x", "/rooms/w/r/prompt"])
+      expect(BATCH_PATH.test(p)).toBe(true);
+    for (const p of ["/rooms/w/r/send", "/rooms/herdr:x/r/chat", "/rooms/herdr%3Ax/r/chat", "/prs", "/batch?p=/system", "/rooms/w/r/chat/item?i=1", "/vault/dl"])
+      expect(BATCH_PATH.test(p)).toBe(false);
+  });
+});
