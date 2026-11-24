@@ -698,6 +698,7 @@ async function api(path, opts = {}) {
 // แต่ละอันได้ผล/ข้อผิดพลาดของตัวเองเหมือนขอแยก · server เก่าที่ไม่มี /batch หรือคำขอรวมล้ม → ขอแยกตามเดิม
 const BATCHABLE = /^\/(projects|system|rooms\/(?!herdr)[^/?]+\/[^/?]+\/(chat|suggestion|mode|prompt))(\?|$)/;
 const batchQ = []; let batchOff = false;
+const batchTags = new Map();   // path → { etag, body } of the last full answer — sent back as e= so unchanged parts return 304
 function batched(path) {
   if (batchOff || !net.online) return apiRaw(path);
   return new Promise((res, rej) => { batchQ.push({ path, res, rej }); if (batchQ.length === 1) setTimeout(flushBatch, 15); });
@@ -706,14 +707,16 @@ async function flushBatch() {
   const q = batchQ.splice(0), each = () => q.forEach(x => apiRaw(x.path).then(x.res, x.rej));
   if (q.length < 2) return each();
   let r;
-  try { r = await apiRaw("/batch?" + q.map(x => "p=" + encodeURIComponent(x.path)).join("&")); }
+  try { r = await apiRaw("/batch?" + q.map(x => "p=" + encodeURIComponent(x.path) + "&e=" + encodeURIComponent(batchTags.get(x.path)?.etag || "")).join("&")); }
   catch (e) { if (e.status === 404) batchOff = true; return each(); }
   q.forEach((x, k) => {
     const it = r.results?.[k];
     if (!it) return apiRaw(x.path).then(x.res, x.rej);
+    if (it.status === 304) { const kept = batchTags.get(x.path); return kept ? x.res(kept.body) : apiRaw(x.path).then(x.res, x.rej); }
     if (it.status === 401) { renderLogin(); return x.rej(new Error("unauthorized")); }
     if (it.status !== 200 || it.body?.ok === false) { const e = new Error(it.body?.error || ("HTTP " + it.status)); e.body = it.body; e.status = it.status; return x.rej(e); }
     if (!liveOnlyPath(x.path)) offlineCache.put(x.path, it.body);
+    if (it.etag) { batchTags.set(x.path, { etag: it.etag, body: it.body }); if (batchTags.size > 60) batchTags.delete(batchTags.keys().next().value); }
     x.res(it.body);
   });
 }

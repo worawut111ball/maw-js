@@ -470,6 +470,8 @@ export async function pressUntilSent(ch: ReplyChannel, text: string, enter: () =
   read = (c: ReplyChannel) => { if ("workspaceId" in c) ssScreens.delete(c.workspaceId + "/" + c.terminalId); return readScreen(c, 40); },
   pause = 700): Promise<void> {
   const head = text.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 24);
+  // "!cmd" = bash mode: it runs on the first Enter and the box can still show it — a second Enter would queue it again
+  if (head.startsWith("!")) return;
   for (let k = 0; k < 2 && head; k++) {
     await sleep(pause);
     const raw = await read(ch).catch(() => "");
@@ -822,9 +824,17 @@ function resultText(c: any): string {
 }
 
 /** User strings that are harness plumbing, not something the person typed. */
-function userMessage(raw: string): { role: "user" | "system"; text: string } | null {
+function userMessage(raw: string): { role: "user" | "system" | "bash"; text: string; alt?: string } | null {
   const t = raw.trim();
   if (!t) return null;
+  // "!cmd" typed in Claude Code: <bash-input>cmd</bash-input> → one "! cmd" bubble (its queued copy may lack the "!")
+  // then <bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr> → a folded Bash step under it
+  const bin = t.match(/^<bash-input>([\s\S]*?)<\/bash-input>$/);
+  if (bin) return { role: "user", text: "! " + bin[1].trim(), alt: bin[1].trim() };
+  if (/^<bash-(stdout|stderr)>/.test(t)) {
+    const tag = (k: string) => (t.match(new RegExp(`<bash-${k}>([\\s\\S]*?)</bash-${k}>`))?.[1] ?? "").trim();
+    return { role: "bash", text: [tag("stdout"), tag("stderr")].filter(Boolean).join("\n") };
+  }
   if (/^<(local-command-stdout|local-command-caveat|system-reminder|local-command-stderr)>/.test(t)) return null;
   const cmd = t.match(/<command-name>([^<]*)<\/command-name>[\s\S]*?(?:<command-args>([\s\S]*?)<\/command-args>)?/);
   if (cmd) return { role: "user", text: `${cmd[1].trim()} ${(cmd[2] ?? "").trim()}`.trim() };
@@ -882,7 +892,12 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
       // "remove" names the message; "dequeue" (agent became free) has no text and takes the oldest one —
       // it then arrives as a normal user turn, which must not be shown twice
       const pending = st.items.filter(x => x.queued && (e.operation === "dequeue" || x.text === (userMessage(text)?.text ?? text)));
-      if (e.operation === "enqueue") { const m = userMessage(text); if (m?.role === "user") push({ role: "user", ts, text: m.text, queued: true }); }
+      if (e.operation === "enqueue") {
+        const m = userMessage(text), last = st.items.at(-2)?.text?.startsWith("! ") ? st.items.at(-2) : st.items.at(-1);
+        // "!cmd" already ran as bash; a re-pressed Enter queues the same text without "!" — not a new message
+        const echo = !!m && last?.role === "user" && last.text === "! " + m.text.replace(/^!\s*/, "") && !!last.ts && !!ts && Date.parse(ts) - Date.parse(last.ts) < 15_000;
+        if (m?.role === "user" && !echo) push({ role: "user", ts, text: m.text, queued: true });
+      }
       else if (e.operation === "dequeue" && pending[0]) { pending[0].queued = false; (st.sentQ ??= []).push(pending[0]); }
       // "remove" = either Claude took it mid-turn (a queued_command follows right away) or the user deleted it on the Mac
       else if (e.operation === "remove" && pending[0]) { pending[0].queued = false; (st.sentQ ??= []).push(pending[0]); (st.removedQ ??= []).push(pending[0]); }
@@ -901,10 +916,10 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
       const pr = e.attachment.prompt;
       const raw = typeof pr === "string" ? pr : Array.isArray(pr) ? pr.map((b: any) => b.text ?? "").join("\n") : "";
       const images = Array.isArray(pr) ? pr.map(imageOf).filter(Boolean) as string[] : [];
-      const m = userMessage(raw) ?? (images.length ? { role: "user" as const, text: "" } : null);
-      const seen = st.sentQ?.findIndex(x => x.text === m?.text) ?? -1;
-      if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; st.removedQ = st.removedQ?.filter(x => x !== it); if (images.length) it.images = images; continue; } // already shown at enqueue time
-      if (m) push({ role: m.role, ts: e.attachment.timestamp ?? ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
+      const m0 = userMessage(raw), m = (m0?.role === "bash" ? null : m0) ?? (images.length ? { role: "user" as const, text: "" } : null);
+      const seen = st.sentQ?.findIndex(x => x.text === m?.text || (!!(m as any)?.alt && x.text === (m as any).alt)) ?? -1;
+      if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; if (m) it.text = m.text; st.removedQ = st.removedQ?.filter(x => x !== it); if (images.length) it.images = images; continue; } // already shown at enqueue time
+      if (m) push({ role: m.role as "user" | "system", ts: e.attachment.timestamp ?? ts, text: m.text, ...(images.length && m.role === "user" ? { images } : {}) });
       continue;
     }
     if (e.type === "user" && e.isCompactSummary) {   // the summary Claude reads after /compact — not something the person typed
@@ -922,8 +937,13 @@ export function parseTranscriptLines(st: ParseState, lines: string[]): void {
           const raw = String(b.text ?? "");
           if (raw.trimStart().startsWith("<task-notification>")) finishBackground(st, raw);
           const m = userMessage(raw); if (!m) continue;
-          const seen = m.role === "user" ? st.sentQ?.findIndex(x => x.text === m.text) ?? -1 : -1;
-          if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; if (!owner) owner = it; continue; } // shown when it was queued
+          if (m.role === "bash") {
+            const prev = st.items.at(-1), cmd = prev?.role === "user" && prev.text?.startsWith("! ") ? prev.text.slice(2) : "";
+            push({ role: "tool", ts, tool: { name: "Bash", summary: cmd || "ผลคำสั่ง !", input: cmd, output: cut(m.text, OUT_MAX), error: false } });
+            continue;
+          }
+          const seen = m.role === "user" ? st.sentQ?.findIndex(x => x.text === m.text || (!!m.alt && x.text === m.alt)) ?? -1 : -1;
+          if (seen >= 0) { const it = st.sentQ!.splice(seen, 1)[0]; it.text = m.text; if (!owner) owner = it; continue; } // shown when it was queued
           const it = push({ role: m.role, ts, text: m.text }); if (m.role === "user" && !owner) owner = it;
           // "/compact" is written after the summary it produced → show the command first, then the note
           const prev = st.items[it.i - 1];
@@ -1882,14 +1902,19 @@ export function createMobileApi(cfg: MobileConfig = loadMobileConfig(), options:
     // ประหยัดเน็ต: มือถือรวม GET ที่ออกพร้อมกัน (projects · แชท · suggestion · mode · prompt) เป็นคำขอเดียว
     // แต่ละอันวิ่งผ่าน route เดิมของมันเอง (app.handle) ด้วย header เดิม → ผลเหมือนขอแยกทุกอย่าง
     .get("/batch", async ({ request, set }) => {
-      const paths = new URL(request.url).searchParams.getAll("p");
+      const sp = new URL(request.url).searchParams, paths = sp.getAll("p"), tags = sp.getAll("e");
       if (!paths.length || paths.length > 8 || !paths.every(p => BATCH_PATH.test(p))) { set.status = 400; return { ok: false, error: "bad batch" }; }
-      const headers = new Headers(request.headers); headers.delete("if-none-match");
-      const results = await Promise.all(paths.map(async p => {
+      // e (same order as p) = the ETag the phone holds for that part → an unchanged part comes back {status: 304} without body,
+      // so one busy part (projects of another room) does not resend the rest (the chat)
+      const results = await Promise.all(paths.map(async (p, k) => {
+        const headers = new Headers(request.headers); headers.delete("if-none-match");
+        if (tags[k]) headers.set("if-none-match", tags[k]);
         const r = await app.handle(new Request(new URL("/mobile" + p, request.url), { headers }));
+        const etag = r.headers.get("etag") ?? undefined;
+        if (r.status === 304) return { status: 304, etag };
         const text = await r.text();
         let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { ok: false, error: "bad json" }; }
-        return { status: r.status, body };
+        return { status: r.status, etag, body };
       }));
       return { ok: true, results };
     })
