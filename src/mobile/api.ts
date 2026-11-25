@@ -331,6 +331,15 @@ export function agentSpinner(raw: string): { verb: string; detail: string } | nu
     if (m) return { verb: m[1].trim(), detail: (m[2] ?? "").trim() };
     m = /^•\s+(Working|Thinking|Exploring|Running)\b[^(]*\((.*)\)\s*$/.exec(l);
     if (m) return { verb: m[1] + "…", detail: m[2].replace(/\s*•\s*esc to interrupt/, "").trim() };
+    // Codex's other live states share "(… • esc to interrupt)": "Reconnecting... waiting for network (7m 52s • esc to interrupt)"
+    // + the reason on the next line ("└ Connection failed: error sending request")
+    m = /^•\s+(\S.*?)\s*\(([^()]*esc to interrupt[^()]*)\)\s*$/.exec(l);
+    if (m) {
+      const why = /^└\s*(.+)$/.exec((lines[i + 1] ?? "").trim())?.[1]?.trim();
+      const detail = m[2].replace(/\s*•?\s*esc to interrupt/, "").trim();
+      const verb = m[1].replace(/\.{3}/g, "…");
+      return { verb: verb.includes("…") ? verb : verb + "…", detail: why ? (detail ? detail + " · " : "") + why : detail };
+    }
   }
   return null;
 }

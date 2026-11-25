@@ -224,6 +224,6 @@ describe("mount", () => {
   test("registers its routes", () => {
     const paths: string[] = [];
     mount({ get: (p: string) => { paths.push("GET " + p); }, post: (p: string) => { paths.push("POST " + p); } });
-    expect(paths).toEqual(["GET /rooms/:ws/:room/files", "GET /settings/agents", "GET /settings/mcp", "POST /settings/mcp"]);
+    expect(paths).toEqual(["GET /rooms/:ws/:room/files", "GET /settings/agents", "GET /settings/mcp", "GET /settings/mcp/catalog", "POST /settings/mcp/add", "POST /settings/mcp/remove", "POST /settings/mcp"]);
   });
 });

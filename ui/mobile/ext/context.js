@@ -38,7 +38,16 @@
   .cx-note { color: var(--dim); font-size: 12px; margin-top: 2px; }
   .cx-sw { position: relative; width: 38px; height: 22px; flex: none; border-radius: 99px; border: 0; background: #3a3a46; transition: background .15s; }
   .cx-sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #c9c9d2; transition: left .15s; }
-  .cx-sw.on { background: #16a34a; } .cx-sw.on::after { left: 19px; background: #fff; } .cx-sw:disabled { opacity: .5; }`;
+  .cx-sw.on { background: #16a34a; } .cx-sw.on::after { left: 19px; background: #fff; } .cx-sw:disabled { opacity: .5; }
+  .cx-rm { flex: none; height: 24px; padding: 0 8px; border-radius: 8px; border: 0; background: none; color: var(--dim); font-size: 11px; }
+  .cx-rm.armed { background: #ef4444; color: #fff; }
+  .cx-addbtn { margin-top: 10px; width: 100%; height: 38px; border-radius: 12px; border: 1px dashed #3b4266; background: none; color: var(--accent); font: 600 13px var(--font); }
+  .cx-add { margin-top: 10px; display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--card2); border: 1px solid var(--line); }
+  .cx-add select, .cx-add input { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 14px var(--font); outline: 0; }
+  .cx-cat { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cx-cat button { padding: 5px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: 12px var(--font); }
+  .cx-cat button.on { border-color: var(--accent); color: var(--accent); }
+  .cx-add .go { height: 38px; border-radius: 10px; border: 0; background: var(--accent); color: #031022; font: 700 13px var(--font); } .cx-add .go:disabled { opacity: .5; }`;
   if (!document.getElementById("cx-style")) { const st = document.createElement("style"); st.id = "cx-style"; st.textContent = css; document.head.appendChild(st); }
 
   // ── @file mentions ──
@@ -128,7 +137,32 @@
   const room = () => (typeof state !== "undefined" && state.ws && state.room ? { ws: state.ws, room: state.room } : null);
   const swRow = (m, agent) => `<div class="cx-row ${m.enabled ? "" : "off"}"><span class="cx-name">${esc(m.name)}</span>`
     + `<span class="cx-r"><span class="cx-pill ${esc(m.scope)}">${esc(m.scope)}</span><span class="cx-pill mono">${esc(m.type)}</span>`
+    + (m.scope === "project" ? "" : `<button class="cx-rm" data-rm="${esc(m.name)}" data-agent="${agent}" data-scope="${esc(m.scope)}">ลบ</button>`)
     + `<button class="cx-sw ${m.enabled ? "on" : ""}" data-sw="${esc(m.name)}" data-agent="${agent}" data-scope="${esc(m.scope)}" aria-label="${m.enabled ? "ปิด" : "เปิด"} ${esc(m.name)}"></button></span></div>`;
+  let catalog = null;
+  // ＋ เพิ่ม MCP แบบ URL: เลือกจากรายการที่ใช้บ่อย หรือใส่ชื่อ + https URL เอง (ไม่มีช่องใส่ key/token — ตัวที่ต้องล็อกอินทำผ่านหน้าเว็บของมัน)
+  function addForm(sheet, d) {
+    const box = sheet.querySelector(".cx-addbox");
+    box.innerHTML = `<div class="cx-add">
+      <select data-target>${d.project ? `<option value="claude:local">Claude · เฉพาะโปรเจค ${esc(d.project)}</option>` : ""}<option value="claude:user">Claude · ทุกโปรเจค</option><option value="codex:">Codex · ทั้งเครื่อง</option></select>
+      <div class="cx-cat">${(catalog || []).map(c => `<button data-cat="${esc(c.name)}" title="${esc(c.note)}">${esc(c.name)}</button>`).join("")}</div>
+      <div class="cx-note" data-catnote>เลือกจากรายการ หรือใส่เอง</div>
+      <input data-name placeholder="ชื่อ เช่น context7" autocomplete="off" autocapitalize="off">
+      <input data-url placeholder="https://…" inputmode="url" autocomplete="off" autocapitalize="off">
+      <button class="go" data-go>เพิ่ม</button>
+      <div class="cx-note">หลังเพิ่ม: ตัวที่ต้องล็อกอิน ให้พิมพ์ /mcp ในห้อง Claude แล้วเลือก Authenticate · Codex รัน codex mcp login ชื่อ บน Mac</div></div>`;
+    const name = box.querySelector("[data-name]"), url = box.querySelector("[data-url]"), note = box.querySelector("[data-catnote]");
+    box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => {
+      const c = catalog.find(x => x.name === b.dataset.cat); name.value = c.name; url.value = c.url; note.textContent = c.note;
+      box.querySelectorAll("[data-cat]").forEach(x => x.classList.toggle("on", x === b));
+    });
+    box.querySelector("[data-go]").onclick = async e => {
+      const [agent, scope] = box.querySelector("[data-target]").value.split(":"); e.target.disabled = true;
+      try { await api("/settings/mcp/add", { method: "POST", body: JSON.stringify({ ...(room() || {}), agent, scope: scope || undefined, name: name.value.trim(), url: url.value.trim() }) });
+        toast(`เพิ่ม ${name.value.trim()} แล้ว · มีผลกับห้องที่เปิดใหม่`); box.innerHTML = ""; drawSwitches(sheet); }
+      catch (err) { toast(err.message); e.target.disabled = false; }
+    };
+  }
   async function drawSwitches(sheet) {
     const box = sheet.querySelector(".cx-mcp"), r = room();
     try {
@@ -136,7 +170,19 @@
       box.innerHTML = `<h3>MCP · Claude ${d.project ? `โปรเจค ${esc(d.project)}` : "(เปิดจากในห้องเพื่อเปิด/ปิดรายโปรเจค)"}</h3>`
         + (d.project ? (d.claude.length ? `<div class="cx-list">${d.claude.map(m => swRow(m, "claude")).join("")}</div>` : none("ไม่มี MCP server")) : "")
         + `<h3>MCP · Codex (ทั้งเครื่อง)</h3>` + (d.codex.length ? `<div class="cx-list">${d.codex.map(m => swRow(m, "codex")).join("")}</div>` : none("ไม่มี MCP server"))
-        + `<div class="cx-note">มีผลกับห้องที่เปิดใหม่ · ห้องที่เปิดอยู่: Claude พิมพ์ /mcp เพื่อต่อใหม่ · Codex ต้องเริ่ม session ใหม่</div>`;
+        + `<div class="cx-note">มีผลกับห้องที่เปิดใหม่ · ห้องที่เปิดอยู่: Claude พิมพ์ /mcp เพื่อต่อใหม่ · Codex ต้องเริ่ม session ใหม่</div>`
+        + `<button class="cx-addbtn" data-addmcp>＋ เพิ่ม MCP</button><div class="cx-addbox"></div>`;
+      box.querySelector("[data-addmcp]").onclick = async () => {
+        if (!catalog) try { catalog = (await api("/settings/mcp/catalog")).catalog; } catch { catalog = []; }
+        addForm(sheet, d);
+      };
+      box.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {
+        if (!b.classList.contains("armed")) { b.classList.add("armed"); b.textContent = "แตะอีกครั้ง = ลบ"; setTimeout(() => { if (b.isConnected) { b.classList.remove("armed"); b.textContent = "ลบ"; } }, 4000); return; }
+        b.disabled = true;
+        try { await api("/settings/mcp/remove", { method: "POST", body: JSON.stringify({ ...(room() || {}), agent: b.dataset.agent, name: b.dataset.rm, scope: b.dataset.scope }) });
+          toast(`ลบ ${b.dataset.rm} แล้ว`); drawSwitches(sheet); }
+        catch (e) { toast(e.message); b.disabled = false; }
+      });
       box.querySelectorAll("[data-sw]").forEach(b => b.onclick = async () => {
         const on = !b.classList.contains("on"); b.disabled = true;
         try { await api("/settings/mcp", { method: "POST", body: JSON.stringify({ ...(room() || {}), agent: b.dataset.agent, name: b.dataset.sw, scope: b.dataset.scope, on }) });
@@ -148,7 +194,7 @@
   async function openSettings() {
     const bg = document.createElement("div"); bg.className = "sheet-bg";
     bg.innerHTML = `<div class="sheet cx-sheet"><h2>⚙ Plugin · MCP · Hooks</h2>
-      <div class="cx-note">เปิด/ปิด MCP ได้ด้านล่าง · ส่วนอื่นอ่านอย่างเดียว · ไม่แสดงค่า env / token / args ของ server</div>
+      <div class="cx-note">เปิด/ปิด · เพิ่ม (URL) · ลบ MCP ได้ด้านล่าง · ส่วนอื่นอ่านอย่างเดียว · ไม่แสดงค่า env / token / args ของ server</div>
       <div class="cx-mcp"><div class="cx-none">กำลังโหลด MCP…</div></div>
       <div class="cx-body"><div class="cx-none">กำลังโหลด…</div></div>
       <button class="ghost" id="cx-close" style="margin-top:14px">ปิด</button></div>`;

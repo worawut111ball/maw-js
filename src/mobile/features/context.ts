@@ -215,6 +215,81 @@ export function setCodexMcp(home: string, name: string, on: boolean): boolean {
   return true;
 }
 
+// ── เพิ่ม/ลบ MCP แบบ URL (24 พ.ย. 69) — ผ่าน CLI ของแต่ละตัว (`claude mcp add --transport http` · `codex mcp add --url`) ──
+// No headers / env / commands from the phone: only an https URL (servers that need a key sign in through their own page).
+export const MCP_CATALOG = [
+  { name: "context7", url: "https://mcp.context7.com/mcp", note: "เอกสาร library ล่าสุด" },
+  { name: "figma", url: "https://mcp.figma.com/mcp", note: "อ่านงานออกแบบ · ล็อกอิน Figma" },
+  { name: "canva", url: "https://mcp.canva.com/mcp", note: "งานออกแบบ · ล็อกอิน Canva" },
+  { name: "github", url: "https://api.githubcopilot.com/mcp/", note: "repo · PR · issue · ล็อกอิน GitHub" },
+  { name: "sentry", url: "https://mcp.sentry.dev/mcp", note: "error ของแอป · ล็อกอิน Sentry" },
+  { name: "linear", url: "https://mcp.linear.app/mcp", note: "งาน/ตั๋ว · ล็อกอิน Linear" },
+  { name: "notion", url: "https://mcp.notion.com/mcp", note: "เอกสาร Notion · ล็อกอิน" },
+  { name: "vercel", url: "https://mcp.vercel.com", note: "deploy · ล็อกอิน Vercel" },
+];
+const NEW_NAME = /^[A-Za-z0-9][\w.-]{0,40}$/;
+export type CliRun = (bin: string, args: string[], cwd: string) => string;
+const cliRun: CliRun = (bin, args, cwd) => {
+  const env = { ...process.env }; delete env.CODEX_HOME;   // the user's own config, not a wrapper's
+  return execFileSync(bin, args, { cwd, env, encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] });
+};
+// maw runs under launchd with PATH=/usr/bin:/bin… and `claude`/`codex` in a shell are Mind wrappers → the real CLIs by path
+const firstBin = (list: (string | undefined)[], name: string) => list.find(p => p && existsSync(p)) ?? name;
+const claudeBin = (home: string) => firstBin([process.env.CLAUDE_BIN, join(home, ".local/bin/claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"], "claude");
+const codexBin = (home: string) => firstBin([process.env.CODEX_BIN, join(home, ".local/bin/codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"], "codex");
+function backupFile(home: string, file: string) {
+  if (!existsSync(file)) return;
+  const dir = join(home, ".maw", "backup"); mkdirSync(dir, { recursive: true });
+  copyFileSync(file, join(dir, `${basename(file)}.${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}`));
+}
+const cliError = (e: any) => String(e?.stderr || e?.message || e).replace(/\s+/g, " ").trim().slice(0, 200);
+/** agent claude: scope "user" (ทั้งเครื่อง) or "local" (โปรเจคนี้ · needs folder) · agent codex: always global. */
+export function addMcp(home: string, o: { agent: string; name: string; url: string; scope?: string; folder?: string | null }, run: CliRun = cliRun): { ok: boolean; error?: string } {
+  if (!NEW_NAME.test(o.name)) return { ok: false, error: "ชื่อใช้ได้แค่ a-z 0-9 . _ - (ไม่เกิน 41 ตัว)" };
+  let u: URL; try { u = new URL(o.url); } catch { return { ok: false, error: "URL ไม่ถูกต้อง" }; }
+  if (u.protocol !== "https:" || u.username || u.password) return { ok: false, error: "ใช้ได้แค่ https:// และห้ามมีรหัสใน URL" };
+  const st = mcpState(home, o.folder);
+  try {
+    if (o.agent === "codex") {
+      if (st.codex.some(m => m.name === o.name)) return { ok: false, error: "Codex มี MCP ชื่อนี้แล้ว" };
+      backupFile(home, join(home, ".codex/config.toml"));
+      run(codexBin(home), ["mcp", "add", o.name, "--url", u.href], home);
+      return { ok: true };
+    }
+    if (o.agent !== "claude" || (o.scope !== "user" && o.scope !== "local")) return { ok: false, error: "เลือกที่จะเพิ่มไม่ถูกต้อง" };
+    if (o.scope === "local" && !o.folder) return { ok: false, error: "เพิ่มเฉพาะโปรเจคต้องเปิดจากในห้อง" };
+    if (st.claude.some(m => m.name === o.name && m.scope !== "project")) return { ok: false, error: "Claude มี MCP ชื่อนี้แล้ว" };
+    backupFile(home, join(home, ".claude.json"));
+    run(claudeBin(home), ["mcp", "add", "--transport", "http", "-s", o.scope, o.name, u.href], o.scope === "local" ? o.folder! : home);
+    return { ok: true };
+  } catch (e) {
+    // some CLIs exit non-zero on a warning after writing — the config decides
+    const now = mcpState(home, o.folder), there = o.agent === "codex" ? now.codex.some(m => m.name === o.name) : now.claude.some(m => m.name === o.name && m.scope === o.scope);
+    return there ? { ok: true } : { ok: false, error: "เพิ่มไม่สำเร็จ: " + cliError(e) };
+  }
+}
+/** Remove a user/local (Claude) or Codex server that exists now · a project's .mcp.json belongs to the repo → never here. */
+export function removeMcp(home: string, o: { agent: string; name: string; scope?: string; folder?: string | null }, run: CliRun = cliRun): { ok: boolean; error?: string } {
+  const st = mcpState(home, o.folder);
+  try {
+    if (o.agent === "codex") {
+      if (!st.codex.some(m => m.name === o.name)) return { ok: false, error: "ไม่พบ MCP นี้ใน Codex" };
+      backupFile(home, join(home, ".codex/config.toml"));
+      run(codexBin(home), ["mcp", "remove", o.name], home);
+      return { ok: true };
+    }
+    if (o.scope !== "user" && o.scope !== "local") return { ok: false, error: "MCP ของ .mcp.json อยู่ใน repo — ปิดได้ แต่ลบที่นี่ไม่ได้" };
+    if (!st.claude.some(m => m.name === o.name && m.scope === o.scope)) return { ok: false, error: "ไม่พบ MCP นี้" };
+    if (o.scope === "local" && !o.folder) return { ok: false, error: "เปิดจากในห้องเพื่อลบของโปรเจคนี้" };
+    backupFile(home, join(home, ".claude.json"));
+    run(claudeBin(home), ["mcp", "remove", "-s", o.scope, o.name], o.scope === "local" ? o.folder! : home);
+    return { ok: true };
+  } catch (e) {
+    const now = mcpState(home, o.folder), there = o.agent === "codex" ? now.codex.some(m => m.name === o.name) : now.claude.some(m => m.name === o.name && m.scope === o.scope);
+    return there ? { ok: false, error: "ลบไม่สำเร็จ: " + cliError(e) } : { ok: true };
+  }
+}
+
 // ── @file mentions ─────────────────────────────────────────────────────────
 export interface FileHit { path: string; dir?: boolean }
 const SKIP_DIRS = new Set(["node_modules", ".git", "build", "dist", ".next", ".nuxt", "out", "target", ".turbo", ".cache", "coverage", "__pycache__", ".venv", "venv", ".dart_tool", ".gradle", "Pods", "DerivedData", ".idea"]);
@@ -302,6 +377,16 @@ export function mount(app: any): void {
   });
   app.get("/settings/agents", () => ({ ok: true, ...readAgentSettings() }));
   app.get("/settings/mcp", ({ query }: any) => ({ ok: true, ...mcpState(homedir(), query.ws && query.room ? mcpFolder(String(query.ws), String(query.room)) : null) }));
+  app.get("/settings/mcp/catalog", () => ({ ok: true, catalog: MCP_CATALOG }));
+  const folderOf = (b: any) => typeof b?.ws === "string" && typeof b?.room === "string" ? mcpFolder(b.ws, b.room) : null;
+  app.post("/settings/mcp/add", ({ body, set }: any) => {
+    const b = body ?? {}, r = addMcp(homedir(), { agent: String(b.agent), name: String(b.name ?? ""), url: String(b.url ?? ""), scope: b.scope, folder: folderOf(b) });
+    if (!r.ok) set.status = 400; return r;
+  });
+  app.post("/settings/mcp/remove", ({ body, set }: any) => {
+    const b = body ?? {}, r = removeMcp(homedir(), { agent: String(b.agent), name: String(b.name ?? ""), scope: b.scope, folder: folderOf(b) });
+    if (!r.ok) set.status = 400; return r;
+  });
   app.post("/settings/mcp", ({ body, set }: any) => {
     const { ws, room, agent, name, scope, on } = body ?? {};
     if (typeof name !== "string" || !MCP_NAME.test(name) || typeof on !== "boolean") { set.status = 400; return { ok: false, error: "bad request" }; }

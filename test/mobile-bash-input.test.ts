@@ -28,3 +28,10 @@ test("stderr kept · a real later message with the same words is still shown", (
   expect(st.items[1].tool.output).toBe("ls: nope: No such file");
   expect(st.items.at(-1)).toMatchObject({ role: "user", text: "ls nope", queued: true });
 });
+
+import { agentSpinner } from "../src/mobile/api";
+test("Codex live states: Working · Reconnecting with its reason · finished screens give nothing", () => {
+  expect(agentSpinner("• Working (12s • esc to interrupt)")).toEqual({ verb: "Working…", detail: "12s" });
+  expect(agentSpinner("• Reconnecting... waiting for network (7m 52s • esc to interrupt)\n  └ Connection failed: error sending request\n  └ Tip: Press ^r")).toEqual({ verb: "Reconnecting… waiting for network", detail: "7m 52s · Connection failed: error sending request" });
+  expect(agentSpinner("  Worked for 14s • 06:53\n› Ask Codex to do anything\n  GPT-6 · Context 40% used")).toBeNull();
+});

@@ -60,3 +60,33 @@ describe("MCP switches", () => {
     expect(setCodexMcp(h, "ghost", false)).toBe(false);
   });
 });
+
+import { addMcp, removeMcp, MCP_CATALOG } from "../src/mobile/features/context";
+describe("add / remove MCP by URL (CLI)", () => {
+  const fake = (h: string) => { const calls: string[][] = []; return { calls, run: (bin: string, args: string[], cwd: string) => { calls.push([bin.split("/").pop()!, ...args, "@" + (cwd === h ? "home" : "proj")]); return ""; } }; };
+  test("Claude user/local and Codex call the right CLI with --transport http / --url", () => {
+    const { h, proj } = home(), f = fake(h);
+    expect(addMcp(h, { agent: "claude", name: "context7", url: "https://mcp.context7.com/mcp", scope: "user" }, f.run).ok).toBe(true);
+    expect(addMcp(h, { agent: "claude", name: "sentry", url: "https://mcp.sentry.dev/mcp", scope: "local", folder: proj }, f.run).ok).toBe(true);
+    expect(addMcp(h, { agent: "codex", name: "linear", url: "https://mcp.linear.app/mcp" }, f.run).ok).toBe(true);
+    expect(f.calls).toEqual([
+      ["claude", "mcp", "add", "--transport", "http", "-s", "user", "context7", "https://mcp.context7.com/mcp", "@home"],
+      ["claude", "mcp", "add", "--transport", "http", "-s", "local", "sentry", "https://mcp.sentry.dev/mcp", "@proj"],
+      ["codex", "mcp", "add", "linear", "--url", "https://mcp.linear.app/mcp", "@home"],
+    ]);
+  });
+  test("refuses: http · credentials in URL · bad name · existing name · local without a room · removing .mcp.json server", () => {
+    const { h, proj } = home(), f = fake(h);
+    expect(addMcp(h, { agent: "codex", name: "x", url: "http://a.b/mcp" }, f.run).ok).toBe(false);
+    expect(addMcp(h, { agent: "codex", name: "x", url: "https://u:p@a.b/mcp" }, f.run).ok).toBe(false);
+    expect(addMcp(h, { agent: "codex", name: "bad name!", url: "https://a.b/mcp" }, f.run).ok).toBe(false);
+    expect(addMcp(h, { agent: "codex", name: "canva", url: "https://a.b/mcp" }, f.run).ok).toBe(false);
+    expect(addMcp(h, { agent: "claude", name: "drawdy", url: "https://a.b/mcp", scope: "user" }, f.run).ok).toBe(false);
+    expect(addMcp(h, { agent: "claude", name: "new1", url: "https://a.b/mcp", scope: "local" }, f.run).ok).toBe(false);
+    expect(removeMcp(h, { agent: "claude", name: "pj", scope: "project", folder: proj }, f.run).ok).toBe(false);
+    expect(f.calls).toEqual([]);
+  });
+  test("catalog: https URLs and valid names", () => {
+    for (const c of MCP_CATALOG) { expect(c.url.startsWith("https://")).toBe(true); expect(/^[a-z0-9.-]+$/.test(c.name)).toBe(true); }
+  });
+});
