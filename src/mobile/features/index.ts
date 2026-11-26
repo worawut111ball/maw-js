@@ -21,6 +21,7 @@ import { mount as docs } from "./docs";
 import { mount as vault } from "./vault";
 import { mount as leases } from "./leases";
 import { mount as switchAgent } from "./switch-agent";
+import { mount as threads } from "./threads";
 import { mount as continuity, type ContinuityFeatureOptions } from "./continuity";
 
 export interface FeatureIO { permissions?: Partial<PermissionsDeps>; modes?: Partial<ModesDeps> }
@@ -66,5 +67,5 @@ export function mountFeatures(app: any, options: { herdr?: HerdrRuntime; test?: 
   ports(app, writeGuard);
   prs(app, undefined, writeGuard);
   retro(app, undefined, writeGuard);
-  for (const m of [activity, context, travel, mind, vault, leases, switchAgent]) m(app);
+  for (const m of [activity, context, travel, mind, vault, leases, switchAgent, threads]) m(app);
 }

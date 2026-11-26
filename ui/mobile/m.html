@@ -1056,6 +1056,7 @@ function paletteCmds() {
     ...mawExt.pages.map(pg => ({ t: pg.title, s: "หน้า", run: () => { history.pushState({ v: "pg" }, ""); renderPage(pg.key); } })),
     ...(document.querySelector("[data-newroom]") ? [{ t: "ห้องใหม่", s: "เปิดห้องใหม่ในโปรเจคนี้", run: () => document.querySelector("[data-newroom]").click() }] : []),
     { t: "เปิดโปรเจค", s: "repo ในเครื่อง · โฟลเดอร์", run: () => openProjectSheet() },
+    ...(state.project && mawExt.openThreads ? [{ t: `# เธรด · ${state.project}`, s: "คำสั่ง · deploy · รหัส · ไฟล์ · บันทึกงาน", run: () => mawExt.openThreads(state.project) }] : []),
     ...(mawExt.openSettings ? [{ t: "MCP · Plugin · Hooks", s: inRoom ? "เปิด/ปิด MCP ของโปรเจคนี้" : "ดูการตั้งค่า · เปิด/ปิด MCP ของ Codex", run: () => mawExt.openSettings() }] : []),
     ...(inRoom ? ["/compact", "/clear", "/context", "/cost", "/model", "/mcp"].map(c => ({ t: c, s: "ใส่ในช่องพิมพ์ · กด Enter เพื่อส่ง", run: () => putInBox(c) })) : []),
     { t: uiClean() ? "หน้าตาเก่า" : "หน้าตาคลีน", s: "สลับหน้าตา", run: () => { uiClean() ? store.set("maw-ui", "classic") : store.del("maw-ui"); state.page ? renderPage(state.page) : state.project ? renderProject() : renderHome(); } },
@@ -1187,7 +1188,7 @@ function openDrawer(opts = {}) {
     const sum = [nW ? `<span class="s w">${nW} รอคุณ</span>` : "", nK ? `<span class="s k">${nK} กำลังทำ</span>` : "", `<span class="s">${rs.length} ห้อง</span>`].join("");
     return `<section class="drw-p ${isOpen(p) ? "open" : ""} ${b ? "busy" : ""} ${p === cur ? "cur" : ""}" data-pn="${esc(p.name)}">
       <button class="drw-ph" data-tog><span class="chev">›</span><span class="pn">${esc(p.name)}</span>${sum}</button>
-      <div class="drw-pr">${rs.map(row).join("")}</div></section>`;
+      <div class="drw-pr">${rs.map(row).join("")}${mawExt.threadsRow ? mawExt.threadsRow(p) : ""}</div></section>`;
   };
   const tabs = cur && cur.source !== "tmux" && cur.source !== "herdr" ? [["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => cur.source === "superset" || t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : [];
   const mb = mindBadge(), u = projUsed();
@@ -3374,6 +3375,7 @@ start();
 <script src="/m-ext/vault.js" defer></script>
 <script src="/m-ext/leases.js" defer></script>
 <script src="/m-ext/switch-agent.js" defer></script>
+<script src="/m-ext/threads.js" defer></script>
 
 </body>
 </html>
