@@ -1405,15 +1405,19 @@ export function claudeUsage(sid: string, dir = STATUS_DIR): Usage | null {
   } catch { return null; }
 }
 /** Account-wide Claude limits = the most recently written status file that has them. */
-export function claudeLimits(dir = STATUS_DIR): (Usage["limits"] & { at: number }) | null {
-  let best: any = null;
+export function claudeLimits(dir = STATUS_DIR, now = Date.now()): (Usage["limits"] & { at: number }) | null {
+  let best: any = null, newest = 0;
   try {
     for (const n of readdirSync(dir)) {
       if (!n.endsWith(".json")) continue;
       const u = claudeUsage(n.slice(0, -5), dir);
+      newest = Math.max(newest, u?.at ?? 0);
       if (u?.limits && (!best || (u.at ?? 0) > best.at)) best = { ...u.limits, at: u.at ?? 0 };
     }
   } catch { /* no dir yet */ }
+  // Claude through Mind writes no rate_limits → the last file that had them can be days old (seen: 13 พ.ย. shown on 26 พ.ย.).
+  // Only a recent reading counts: ≤ 6 h old and not older than an hour behind the newest status line.
+  if (best && (now - best.at > 6 * 3600_000 || newest - best.at > 3600_000)) return null;
   return best;
 }
 

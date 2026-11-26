@@ -37,3 +37,26 @@ describe("BATCH_PATH — what /batch may run", () => {
       expect(BATCH_PATH.test(p)).toBe(false);
   });
 });
+
+import { claudeLimits } from "../src/mobile/api";
+import { mkdtempSync as mkd, writeFileSync as wf, utimesSync } from "fs";
+import { tmpdir as tmpd } from "os";
+import { join as pj } from "path";
+describe("claudeLimits — stale readings are dropped", () => {
+  const dir = () => mkd(pj(tmpd(), "maw-status-"));
+  const put = (d: string, sid: string, limits: boolean, at: number) => {
+    const f = pj(d, sid + ".json");
+    wf(f, JSON.stringify({ context_window: {}, ...(limits ? { rate_limits: { five_hour: { used_percentage: 10, resets_at: 1 }, seven_day: { used_percentage: 49, resets_at: 2 } } } : {}) }));
+    utimesSync(f, at / 1000, at / 1000);
+  };
+  const now = Date.parse("2026-11-26T15:00:00Z");
+  test("fresh reading is shown", () => { const d = dir(); put(d, "aaaaaaaa", true, now - 600_000); expect(claudeLimits(d, now)?.d7?.pct).toBe(49); });
+  test("days-old reading while current sessions have none (through Mind) → null", () => {
+    const d = dir(); put(d, "aaaaaaaa", true, now - 13 * 86400_000); put(d, "bbbbbbbb", false, now - 60_000);
+    expect(claudeLimits(d, now)).toBeNull();
+  });
+  test("recent reading but newer sessions without limits for over an hour → null", () => {
+    const d = dir(); put(d, "aaaaaaaa", true, now - 3 * 3600_000); put(d, "bbbbbbbb", false, now - 60_000);
+    expect(claudeLimits(d, now)).toBeNull();
+  });
+});

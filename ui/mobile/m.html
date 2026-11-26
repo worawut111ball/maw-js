@@ -186,7 +186,8 @@
   .pls-x button.sk { background: #d977571f; color: #f0a17f; }
   .pls-k button { min-width: 46px; height: 42px; padding: 0 12px; border-radius: 11px; background: var(--card2); color: var(--text); font: 600 14px var(--mono); }
   .pls-k button.warn { color: #fca5a5; } .pls-k button.hit { background: var(--accent); color: #031022; }
-  .drw-ui { margin: 6px 14px 0; padding: 10px; border-radius: 11px; background: var(--card); color: var(--dim); font: 13px var(--font); }
+  .drw-mv { margin-left: auto; display: flex; gap: 4px; } .drw-mv button { width: 34px; height: 30px; border-radius: 9px; border: 0; background: var(--card); color: var(--text); font-size: 15px; }
+.drw-ui { margin: 6px 14px 0; padding: 10px; border-radius: 11px; background: var(--card); color: var(--dim); font: 13px var(--font); }
   .continuity-switch-trigger { border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; font-size: 12px; white-space: normal; line-height: 1.3; }
   .continuity-switch-trigger:disabled { opacity: .55; cursor: default; }
   .continuity-status { flex-basis: 100%; color: var(--dim); font-size: 12px; padding: 6px 0; }
@@ -1154,6 +1155,15 @@ function goRoom(name, ws, room) {
   state.follow = true; state.chat = null; state.queued = []; state.open = new Set();
   renderProject();
 }
+/** ลำดับโปรเจคในลิ้นชัก: ที่พี่จัดไว้ (localStorage maw-proj-order) · โปรเจคใหม่ต่อท้ายตามใช้ล่าสุด · ครั้งแรกตั้งจากใช้ล่าสุดแล้วจำไว้ */
+function drawerOrder(u = projUsed()) {
+  let saved = []; try { saved = JSON.parse(store.get("maw-proj-order") || "[]"); } catch { /* broken → rebuild */ }
+  const idx = n => { const i = saved.indexOf(n); return i < 0 ? 1e9 : i; };
+  const list = [...state.projects].sort((a, b) => idx(a.name) - idx(b.name) || (u[b.name] || 0) - (u[a.name] || 0) || a.name.localeCompare(b.name));
+  const names = list.map(p => p.name);
+  if (state.projects.length && names.some(n => !saved.includes(n))) store.set("maw-proj-order", JSON.stringify([...saved.filter(n => names.includes(n)), ...names.filter(n => !saved.includes(n))]));
+  return list;
+}
 const drwWide = () => matchMedia("(min-width: 1000px)").matches;
 /** เดสก์ท็อป: ลิ้นชักค้างไว้ซ้าย (ไม่ใช่ตอนแบบเก่า · จอแคบ · ยังไม่ login · ผู้ใช้ปิดไว้ด้วย ☰) — เรียกหลังวาดหน้าและทุก poll */
 function syncPinnedDrawer() {
@@ -1178,26 +1188,33 @@ function openDrawer(opts = {}) {
   // (เปิดไว้: โปรเจกต์ที่อยู่ · มีห้องรอคุณ/กำลังทำ · ที่เคยกดเปิดในรอบนี้)
   const busyOf = p => { const st = p.workspaces.flatMap(w => w.rooms.map(r => r.status)); return st.includes("waiting") ? 2 : st.includes("working") ? 1 : 0; };
   state.drwOpen ||= new Set();
-  const isOpen = p => state.drwOpen.has(p.name) ? !state.drwOpen.has("-" + p.name) : (p === cur || busyOf(p) > 0) && !state.drwOpen.has("-" + p.name);
+  // เปิด/พับ: ครั้งแรกที่เห็นโปรเจค เปิดถ้าเป็นโปรเจคที่อยู่หรือมีงาน แล้วจำไว้ — poll รอบหลังไม่เปิด/พับเองให้ตำแหน่งเลื่อน
+  const isOpen = p => {
+    if (!state.drwOpen.has(p.name) && !state.drwOpen.has("-" + p.name)) state.drwOpen.add((p === cur || busyOf(p) > 0) ? p.name : "-" + p.name);
+    return state.drwOpen.has(p.name);
+  };
   const row = ({ p, w, r }) => `<button class="drw-r ${p.name === state.project && w.id === state.ws && r.id === state.room ? "on" : ""}" data-go="${esc(p.name)}" data-gw="${esc(w.id)}" data-gr="${esc(r.id)}" data-q="${esc((r.title + " " + (r.agent || "")).toLowerCase())}">
       ${dot(r.status)}<span class="t">${esc(r.title)}</span>${p.workspaces.length > 1 ? `<span class="br">${esc(w.branch || w.name)}</span>` : ""}<span class="a">${esc(r.agent || "")}</span></button>`;
   const group = p => {
-    const rs = p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r }))).sort((a, b) => (rank[a.r.status] ?? 9) - (rank[b.r.status] ?? 9));
+    const rs = p.workspaces.flatMap(w => w.rooms.map(r => ({ p, w, r })));   // ลำดับคงที่ — ไม่สลับตามสถานะ (พี่ Ball 26 พ.ย. 69)
     if (!rs.length) return "";
     const b = busyOf(p), nW = rs.filter(x => x.r.status === "waiting").length, nK = rs.filter(x => x.r.status === "working").length;
     const sum = [nW ? `<span class="s w">${nW} รอคุณ</span>` : "", nK ? `<span class="s k">${nK} กำลังทำ</span>` : "", `<span class="s">${rs.length} ห้อง</span>`].join("");
+    if (state.drwEdit) return `<section class="drw-p ${b ? "busy" : ""}" data-pn="${esc(p.name)}">
+      <div class="drw-ph"><span class="pn">${esc(p.name)}</span><span class="drw-mv"><button data-mv="top" aria-label="ขึ้นบนสุด">⤒</button><button data-mv="up" aria-label="ขึ้น">↑</button><button data-mv="down" aria-label="ลง">↓</button></span></div></section>`;
     return `<section class="drw-p ${isOpen(p) ? "open" : ""} ${b ? "busy" : ""} ${p === cur ? "cur" : ""}" data-pn="${esc(p.name)}">
       <button class="drw-ph" data-tog><span class="chev">›</span><span class="pn">${esc(p.name)}</span>${sum}</button>
       <div class="drw-pr">${rs.map(row).join("")}${mawExt.threadsRow ? mawExt.threadsRow(p) : ""}</div></section>`;
   };
   const tabs = cur && cur.source !== "tmux" && cur.source !== "herdr" ? [["files", "ไฟล์"], ["git", "Git"], ...mawExt.tabs.filter(t => cur.source === "superset" || t.folder).map(t => [t.key, t.label.replace(/^\P{L}+/u, "")])] : [];
   const mb = mindBadge(), u = projUsed();
-  const ordered = state.projects.map((p, i) => ({ p, i, b: busyOf(p) })).sort((a, b) => b.b - a.b || (u[b.p.name] || 0) - (u[a.p.name] || 0) || a.i - b.i).map(x => x.p);
+  const ordered = drawerOrder(u);
   bg.innerHTML = `<div class="drw" role="dialog" aria-label="ห้องทั้งหมด">
     <label class="drw-s">${SVG.search}<input type="search" placeholder="ค้นห้อง / โปรเจกต์" autocomplete="off"></label>
     <div class="drw-top"><button data-home>🏠 หน้าแรก</button><button data-dmind>📬 Mind Mail${mb ? `<i class="cbd">${esc(mb)}</i>` : ""}</button></div>
     ${tabs.length ? `<div class="drw-tabs"><span>${esc(cur.name)}</span>${tabs.map(([k, l]) => `<button data-pv2="${esc(k)}">${esc(l)}</button>`).join("")}</div>` : ""}
     <div class="drw-l">${ordered.map(group).join("")}</div>
+    <button class="drw-ui" data-drwedit>${state.drwEdit ? "✓ เสร็จ — เก็บลำดับนี้" : "↕ จัดลำดับโปรเจค"}</button>
     <button class="drw-ui" data-classic>หน้าตาเก่า (แถบแท็บห้อง)</button></div>`;
   // แถบซ้ายถูกวาดใหม่ทุก poll — เนื้อหาเท่าเดิมไม่แตะ DOM · เปลี่ยนก็คงตำแหน่งเลื่อนไว้
   if (pinned && old && old._html === bg.innerHTML) return;
@@ -1209,6 +1226,13 @@ function openDrawer(opts = {}) {
   const close = () => { if (!pinned) bg.remove(); };
   bg.addEventListener("click", e => { if (e.target === bg) close(); });
   bg.querySelectorAll("[data-go]").forEach(x => x.onclick = () => { close(); goRoom(x.dataset.go, x.dataset.gw, x.dataset.gr); });
+  bg.querySelector("[data-drwedit]").onclick = () => { state.drwEdit = !state.drwEdit; reopen(); };
+  bg.querySelectorAll("[data-mv]").forEach(x => x.onclick = () => {
+    const n = x.closest(".drw-p").dataset.pn, list = drawerOrder(u).map(p => p.name), i = list.indexOf(n);
+    list.splice(i, 1); list.splice(x.dataset.mv === "top" ? 0 : x.dataset.mv === "up" ? Math.max(0, i - 1) : Math.min(list.length, i + 1), 0, n);
+    store.set("maw-proj-order", JSON.stringify(list)); reopen();
+  });
+  function reopen() { const l = bg.querySelector(".drw-l"), top = l.scrollTop; if (pinned) { bg._html = ""; openDrawer({ pinned: true }); } else { bg.remove(); openDrawer(); } const nl = document.querySelector(pinned ? ".drw-bg.pinned .drw-l" : ".drw-bg:not(.pinned) .drw-l"); if (nl) nl.scrollTop = top; }
   bg.querySelectorAll("[data-tog]").forEach(x => x.onclick = () => {
     const sec = x.closest(".drw-p"), n = sec.dataset.pn, open = !sec.classList.contains("open");
     sec.classList.toggle("open", open); state.drwOpen.delete(n); state.drwOpen.delete("-" + n); state.drwOpen.add(open ? n : "-" + n);
@@ -2665,7 +2689,9 @@ function sysHtml() {
       ${tile("RAM", m.ram ? `${m.ram.usedGB}/${m.ram.totalGB}G` : "—", m.ram?.pct)}
       ${tile("ดิสก์ว่าง", m.disk ? `${m.disk.freeGB} GB` : "—", m.disk?.pct)}</div>
     ${heatHtml(m)}
-    ${lim("✳ Claude", "claude", s.limits?.claude)}${s.limits?.codex && !s.limits.codex.h5 && !s.limits.codex.d7 && state.mindMe
+    ${!s.limits?.claude && state.mindMe
+      ? `<div class="lim"><span class="who2 claude">✳ Claude</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>`
+      : lim("✳ Claude", "claude", s.limits?.claude)}${s.limits?.codex && !s.limits.codex.h5 && !s.limits.codex.d7 && state.mindMe
       ? `<div class="lim"><span class="who2 codex">Codex</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>`
       : lim("Codex", "codex", s.limits?.codex)}${mindLimHtml()}
     ${travelHtml()}`;

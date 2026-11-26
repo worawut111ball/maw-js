@@ -28,7 +28,8 @@
   .th-acts button { padding: 5px 10px; border-radius: 9px; border: 0; background: var(--card2, #23232a); color: var(--text); font: 11.5px var(--font); }
   .th-acts .pri { background: var(--accent); color: #04101f; font-weight: 600; } .th-acts .armed { background: #ef4444; color: #fff; }
   .th-comp { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); display: grid; gap: 8px; }
-  body.drw-pinned .th-comp { left: 300px; }
+  body.drw-pinned #app > .th-comp { left: 300px; right: 0; padding-inline: 12px; }   /* m.html's pinned rule already centres it at ≤ 900px */
+  .th-addrow { display: flex; gap: 8px; } .th-addrow .th-in { flex: 1; min-width: 0; width: auto; }
   .th-kinds { display: flex; gap: 6px; flex-wrap: wrap; }
   .th-kinds button { padding: 5px 11px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--dim); font: 12px var(--font); }
   .th-kinds button.on { color: var(--text); border-color: #5a5a66; background: var(--card2, #23232a); }
@@ -136,7 +137,8 @@
           : `<input class="th-in" data-title placeholder="${k === "secret" ? "ชื่อรหัส เช่น DB dev (postgres)" : k === "cmd" ? "ชื่อคำสั่ง เช่น รัน backend dev" : "หัวข้อ"}" maxlength="120">`
             + (k === "cmd" ? `<textarea class="th-in mono" data-code placeholder="คำสั่ง" spellcheck="false" autocapitalize="off"></textarea>` : "")
             + (k === "secret" ? `<input class="th-in mono" data-secret type="password" placeholder="ค่า (เก็บใน Keychain ของ Mac)" autocomplete="off">` : "")
-            + `<div style="display:flex;gap:8px"><input class="th-in" data-body placeholder="คำอธิบาย (ไม่บังคับ)" maxlength="4000"><button class="th-go" data-add>เพิ่ม</button></div>`);
+            + `<div class="th-addrow"><input class="th-in" data-body placeholder="คำอธิบาย (ไม่บังคับ)" maxlength="4000"><button class="th-go" data-add>เพิ่ม</button></div>`
+            + `<div class="th-note">Enter ในช่องชื่อ/คำอธิบาย = เพิ่ม · ช่องคำสั่ง ⌘/Ctrl + Enter</div>`);
       comp.querySelectorAll("[data-k]").forEach(b => b.onclick = () => { S.kind = b.dataset.k; drawComp(); });
       const add = comp.querySelector("[data-add]");
       if (add) add.onclick = async () => {
@@ -146,6 +148,9 @@
           drawComp(); refresh(); toast(S.kind === "secret" ? "เก็บรหัสใน Keychain แล้ว" : "เพิ่มแล้ว"); }
         catch (e) { toast(e.message); add.disabled = false; }
       };
+      // keyboard: Enter in a one-line field adds · ⌘/Ctrl+Enter in the command box adds (plain Enter = new line)
+      comp.querySelectorAll("[data-title], [data-body], [data-secret]").forEach(el => el.onkeydown = e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); add?.click(); } });
+      const code = comp.querySelector("[data-code]"); if (code) code.onkeydown = e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add?.click(); } };
       const fi = comp.querySelector('input[type="file"]');
       if (fi) fi.onchange = async () => {
         for (const f of fi.files) {
