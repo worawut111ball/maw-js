@@ -93,10 +93,16 @@ const forget = (...prefixes: string[]) => { for (const k of [...cache.keys()]) i
 
 // ── normalizers (pure) ───────────────────────────────────────────
 
-export interface Me { email: string; agent: string; usedToday: number; dailyTokenLimit: number }
+export interface Me { email: string; agent: string; usedToday: number; dailyTokenLimit: number; upstreamLimits?: { claude: UpLimit | null; codex: UpLimit | null } }
+type UpWin = { pct: number; resetsAt: number | null } | null;
+type UpLimit = { h5: UpWin; d7: UpWin; at: number };
+// 5 h / 7 d of the gateway's upstream Claude/Codex accounts (Mind /api/me since 27 พ.ย. 69) — numbers only, nothing else passes
+const limWin = (w: any) => (w && Number.isFinite(Number(w.pct)) ? { pct: Math.round(Number(w.pct)), resetsAt: w.resetsAt != null && Number.isFinite(Number(w.resetsAt)) ? Number(w.resetsAt) : null } : null);
+const limOf = (x: any) => (x && (x.h5 || x.d7) ? { h5: limWin(x.h5), d7: limWin(x.d7), at: Number(x.at) || 0 } : null);
 export const normMe = (r: any): Me => ({
   email: String(r?.email ?? ""), agent: String(r?.agent ?? ""),
   usedToday: Number(r?.usedToday) || 0, dailyTokenLimit: Number(r?.dailyTokenLimit) || 0,
+  upstreamLimits: { claude: limOf(r?.upstreamLimits?.claude), codex: limOf(r?.upstreamLimits?.codex) },
 });
 
 export type MailOp = typeof OPS[number];

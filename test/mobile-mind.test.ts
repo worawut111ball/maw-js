@@ -40,7 +40,7 @@ beforeEach(() => resetCache());
 
 describe("normalize", () => {
   test("me keeps only the subset", () => {
-    expect(normMe(ME)).toEqual({ email: "ball@x.co", agent: "ball-agent", usedToday: 1200, dailyTokenLimit: 0 });
+    expect(normMe(ME)).toEqual({ email: "ball@x.co", agent: "ball-agent", usedToday: 1200, dailyTokenLimit: 0, upstreamLimits: { claude: null, codex: null } });
   });
   test("รอฉัน = pending + sent to me (held too); actions follow Mind's rules", () => {
     const e = "ball@x.co";
@@ -241,4 +241,12 @@ describe("watcher", () => {
     await expect(mailPass({ seen: new Set() }, f.d)).rejects.toBeInstanceOf(MindError);
     expect(f.pushes.length).toBe(0);
   });
+});
+
+import { normMe as normMeUp } from "../src/mobile/features/mind";
+test("normMe passes the gateway's upstream 5 h / 7 d limits — numbers only", () => {
+  const me = normMeUp({ email: "a", usedToday: 5, dailyTokenLimit: 10, upstreamLimits: {
+    claude: { at: 9, h5: { pct: 41.4, resetsAt: 1700 }, d7: { pct: "58", resetsAt: null }, extra: "x" }, codex: null } });
+  expect(me.upstreamLimits).toEqual({ claude: { h5: { pct: 41, resetsAt: 1700 }, d7: { pct: 58, resetsAt: null }, at: 9 }, codex: null });
+  expect(normMeUp({ email: "a" }).upstreamLimits).toEqual({ claude: null, codex: null });   // old gateway: no field
 });

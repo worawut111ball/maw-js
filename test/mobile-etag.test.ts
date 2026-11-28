@@ -55,8 +55,32 @@ describe("claudeLimits — stale readings are dropped", () => {
     const d = dir(); put(d, "aaaaaaaa", true, now - 13 * 86400_000); put(d, "bbbbbbbb", false, now - 60_000);
     expect(claudeLimits(d, now)).toBeNull();
   });
-  test("recent reading but newer sessions without limits for over an hour → null", () => {
+  test("one main-account room among newer Mind rooms keeps its limits (≤ 6 h)", () => {
     const d = dir(); put(d, "aaaaaaaa", true, now - 3 * 3600_000); put(d, "bbbbbbbb", false, now - 60_000);
-    expect(claudeLimits(d, now)).toBeNull();
+    expect(claudeLimits(d, now)?.d7?.pct).toBe(49);
+  });
+});
+
+import { codexLimits } from "../src/mobile/api";
+import { mkdirSync as mkdirS } from "fs";
+describe("codexLimits — main-account room found past Mind rooms · stale dropped", () => {
+  const now = Date.parse("2026-11-26T15:00:00Z");
+  const rollout = (root: string, name: string, real: boolean, at: number) => {
+    const day = pj(root, "2026", "11", "26"); mkdirS(day, { recursive: true });
+    const f = pj(day, name);
+    const rl = real ? { primary: { used_percent: 12, window_minutes: 300, resets_at: 1 }, secondary: { used_percent: 40, window_minutes: 10080, resets_at: 2 } } : { primary: null, secondary: null };
+    wf(f, JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: null, rate_limits: rl } }) + "\n");
+    utimesSync(f, at / 1000, at / 1000);
+  };
+  test("newer Mind rollouts (null limits) do not hide an older main-account one", () => {
+    const r = mkd(pj(tmpd(), "maw-codex-"));
+    for (let k = 0; k < 7; k++) rollout(r, `mind-${k}.jsonl`, false, now - k * 60_000);
+    rollout(r, "direct.jsonl", true, now - 2 * 3600_000);
+    const L = codexLimits(r, now); expect(L?.h5?.pct).toBe(12); expect(L?.d7?.pct).toBe(40);
+  });
+  test("only Mind rollouts → null · main-account older than 6 h → null", () => {
+    const r = mkd(pj(tmpd(), "maw-codex-"));
+    rollout(r, "mind.jsonl", false, now - 60_000); rollout(r, "old-direct.jsonl", true, now - 7 * 3600_000);
+    expect(codexLimits(r, now)).toBeNull();
   });
 });

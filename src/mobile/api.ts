@@ -1416,8 +1416,10 @@ export function claudeLimits(dir = STATUS_DIR, now = Date.now()): (Usage["limits
     }
   } catch { /* no dir yet */ }
   // Claude through Mind writes no rate_limits → the last file that had them can be days old (seen: 13 พ.ย. shown on 26 พ.ย.).
-  // Only a recent reading counts: ≤ 6 h old and not older than an hour behind the newest status line.
-  if (best && (now - best.at > 6 * 3600_000 || newest - best.at > 3600_000)) return null;
+  // Only a recent reading counts: ≤ 6 h old. (No "behind other rooms" rule: one room on the main account next to
+  // several Mind rooms must keep showing its limits.)
+  void newest;
+  if (best && now - best.at > LIMIT_FRESH_MS) return null;
   return best;
 }
 
@@ -1445,16 +1447,22 @@ export function codexUsage(file: string): Usage | null {
   return null;
 }
 /** Account-wide Codex limits from the newest rollout file. */
-export function codexLimits(root = join(homedir(), ".codex", "sessions")) {
+/** Account-wide Codex limits: the newest rollout (≤ 6 h old) that has real numbers — rooms through Mind write
+ *  rate_limits with primary/secondary null, so those are skipped instead of hiding a main-account room further down. */
+export function codexLimits(root = join(homedir(), ".codex", "sessions"), now = Date.now()) {
   const newest = (dir: string) => { try { return readdirSync(dir).filter(n => /^\d+$/.test(n)).sort().reverse(); } catch { return []; } };
+  const files: { f: string; t: number }[] = [];
+  let days = 0;
   for (const y of newest(root)) for (const m of newest(join(root, y))) for (const d of newest(join(root, y, m))) {
+    if (days++ >= 2) break;   // today + yesterday cover the 6 h window across midnight
     const day = join(root, y, m, d);
-    const files = readdirSync(day).filter(n => n.endsWith(".jsonl")).map(n => ({ f: join(day, n), t: statSync(join(day, n)).mtimeMs })).sort((a, b) => b.t - a.t);
-    for (const { f } of files.slice(0, 5)) { const u = codexUsage(f); if (u?.limits) return { ...u.limits, at: u.at ?? 0 }; }
-    return null;
+    try { for (const n of readdirSync(day)) if (n.endsWith(".jsonl")) { const f = join(day, n), t = statSync(f).mtimeMs; if (now - t <= LIMIT_FRESH_MS) files.push({ f, t }); } } catch { /* unreadable day */ }
   }
+  files.sort((a, b) => b.t - a.t);
+  for (const { f } of files.slice(0, 40)) { const u = codexUsage(f); if (u?.limits && (u.limits.h5 || u.limits.d7)) return { ...u.limits, at: u.at ?? 0 }; }
   return null;
 }
+const LIMIT_FRESH_MS = 6 * 3600_000;
 
 const sh = async (cmd: string[]) => { const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" }); const out = await new Response(p.stdout).text(); await p.exited; return out; };
 let macCache: { at: number; v: any } | null = null;

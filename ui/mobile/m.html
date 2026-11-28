@@ -2689,11 +2689,7 @@ function sysHtml() {
       ${tile("RAM", m.ram ? `${m.ram.usedGB}/${m.ram.totalGB}G` : "—", m.ram?.pct)}
       ${tile("ดิสก์ว่าง", m.disk ? `${m.disk.freeGB} GB` : "—", m.disk?.pct)}</div>
     ${heatHtml(m)}
-    ${!s.limits?.claude && state.mindMe
-      ? `<div class="lim"><span class="who2 claude">✳ Claude</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>`
-      : lim("✳ Claude", "claude", s.limits?.claude)}${s.limits?.codex && !s.limits.codex.h5 && !s.limits.codex.d7 && state.mindMe
-      ? `<div class="lim"><span class="who2 codex">Codex</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>`
-      : lim("Codex", "codex", s.limits?.codex)}${mindLimHtml()}
+    ${limRow("✳ Claude", "claude", s.limits?.claude, lim)}${limRow("Codex", "codex", s.limits?.codex?.h5 || s.limits?.codex?.d7 ? s.limits.codex : null, lim)}${mindLimHtml()}
     ${travelHtml()}`;
 }
 // 🧳 travel mode: Mac keeps running with the lid closed (features/travel.ts) — safety auto-off on low battery / heat / timer
@@ -2735,6 +2731,13 @@ document.addEventListener("click", async e => {
   catch (err) { toast(err.message); }
 }, true);
 // โควตา token ของ Mind (บัญชีที่ claude/codex ผ่าน Mind ใช้) — /mind/me · Mind รีเซ็ตเที่ยงคืนเวลาไทย · ขอไม่เกินทุก 1 นาที
+// แถวลิมิต: ของ CLI เอง (บัญชีหลัก) ก่อน · ไม่มี → ของบัญชีต้นทางที่เกตเวย์ Mind เห็น (/api/me upstreamLimits · บัญชีกลาง) · ไม่มีทั้งคู่ → บอกว่านับในโควตา Mind
+function limRow(name, cls, own, lim) {
+  if (own) return lim(name, cls, own);
+  const up = state.mindMe?.upstreamLimits?.[cls];
+  if (up) return lim(`${name} <small style="font-weight:400;color:var(--dim)">ผ่าน Mind</small>`, cls, up);
+  return state.mindMe ? `<div class="lim"><span class="who2 ${cls}">${name}</span><div class="cell" style="grid-column:span 2"><div class="t"><span>ใช้ผ่าน Mind · นับในโควตา Mind ↓</span></div></div></div>` : "";
+}
 function mindLimHtml() {
   const me = state.mindMe; if (!me) return "";
   const lim = me.dailyTokenLimit, used = me.usedToday, pct = lim ? Math.round(used * 100 / lim) : null;
@@ -3402,6 +3405,7 @@ start();
 <script src="/m-ext/leases.js" defer></script>
 <script src="/m-ext/switch-agent.js" defer></script>
 <script src="/m-ext/threads.js" defer></script>
+<script src="/m-ext/account.js" defer></script>
 
 </body>
 </html>
